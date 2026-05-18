@@ -1,19 +1,26 @@
-from datetime import date
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
 from predigt_uploader.cli import (
     Mp3ResultError,
+    LosslessCutStartError,
     Mp4TransferError,
     SummaryWriteError,
+    _choose_exported_mp4,
+    _find_new_mp4_exports,
     _ask_yes_no,
     _ask_mp4_path,
     _ask_required,
+    _losslesscut_command,
+    _newest_mp4_in_folder,
+    _open_losslesscut,
     _handle_existing_target_mp4,
     _print_local_workflow_success,
     _print_missing_ffmpeg_message,
     _print_mp4_action_preview,
+    _select_source_mp4,
     _select_recordings_base,
     _select_target_folder,
     _transfer_mp4_to_target,
@@ -84,6 +91,122 @@ def test_ask_mp4_path_rejects_empty_missing_folder_and_wrong_extension(monkeypat
     assert "Datei wurde nicht gefunden" in output
     assert "Das ist ein Ordner" in output
     assert "keine MP4-Datei" in output
+
+
+def test_newest_mp4_in_folder_returns_latest_mp4(tmp_path):
+    older = tmp_path / "alt.mp4"
+    newer = tmp_path / "neu.mp4"
+    note = tmp_path / "notiz.txt"
+    older.write_bytes(b"alt")
+    newer.write_bytes(b"neu")
+    note.write_text("x", encoding="utf-8")
+    old_time = datetime.now().timestamp() - 100
+    new_time = datetime.now().timestamp()
+    older.touch()
+    newer.touch()
+    import os
+
+    os.utime(older, (old_time, old_time))
+    os.utime(newer, (new_time, new_time))
+
+    assert _newest_mp4_in_folder(tmp_path) == newer
+
+
+def test_losslesscut_command_uses_path_or_app_alias(tmp_path):
+    config = _config(tmp_path)
+
+    assert _losslesscut_command(config) == "LosslessCut"
+    assert _losslesscut_command(AppConfig(tmp_path / "vmix", tmp_path / "out", tmp_path / "mp3", losslesscut_path="C:/Tools/LosslessCut.exe")) == "C:/Tools/LosslessCut.exe"
+
+
+def test_open_losslesscut_starts_external_program(monkeypatch, tmp_path):
+    raw = tmp_path / "roh.mp4"
+    raw.write_bytes(b"video")
+    calls = []
+
+    def fake_popen(args):
+        calls.append(args)
+
+    monkeypatch.setattr("subprocess.Popen", fake_popen)
+
+    _open_losslesscut(raw, _config(tmp_path))
+
+    assert calls == [["LosslessCut", str(raw)]]
+
+
+def test_open_losslesscut_reports_start_error(monkeypatch, tmp_path):
+    raw = tmp_path / "roh.mp4"
+    raw.write_bytes(b"video")
+
+    def fail_popen(_args):
+        raise FileNotFoundError("fehlt")
+
+    monkeypatch.setattr("subprocess.Popen", fail_popen)
+
+    with pytest.raises(LosslessCutStartError) as error:
+        _open_losslesscut(raw, _config(tmp_path))
+
+    assert "konnte nicht gestartet" in error.value.user_message
+    assert "LosslessCut" in error.value.admin_hint
+
+
+def test_find_new_mp4_exports_only_returns_files_since_start(tmp_path):
+    before = tmp_path / "vorher.mp4"
+    after = tmp_path / "nachher.mp4"
+    before.write_bytes(b"alt")
+    after.write_bytes(b"neu")
+    import os
+
+    start = datetime.now()
+    before_time = (start - timedelta(seconds=10)).timestamp()
+    after_time = (start + timedelta(seconds=10)).timestamp()
+    os.utime(before, (before_time, before_time))
+    os.utime(after, (after_time, after_time))
+
+    assert _find_new_mp4_exports((tmp_path,), start) == (after,)
+
+
+def test_choose_exported_mp4_requires_choice_when_multiple_candidates(monkeypatch, tmp_path):
+    first = tmp_path / "chor.mp4"
+    second = tmp_path / "predigt.mp4"
+    first.write_bytes(b"chor")
+    second.write_bytes(b"predigt")
+    _inputs(monkeypatch, ["2"])
+
+    assert _choose_exported_mp4((first, second)) == second
+
+
+def test_select_source_mp4_can_keep_existing_cut_file(monkeypatch, tmp_path):
+    source = tmp_path / "schnitt.mp4"
+    source.write_bytes(b"video")
+    _inputs(monkeypatch, ["", str(source)])
+    log = WorkflowLog.start(config_path=None, base_dir=tmp_path)
+
+    assert _select_source_mp4(_config(tmp_path), log) == source
+
+
+def test_select_source_mp4_opens_losslesscut_and_uses_export(monkeypatch, tmp_path, capsys):
+    raw = tmp_path / "vmix" / "roh.mp4"
+    raw.parent.mkdir()
+    raw.write_bytes(b"raw")
+    exported = tmp_path / "vmix" / "export-predigt.mp4"
+    exported.write_bytes(b"export")
+    log = WorkflowLog.start(config_path=None, base_dir=tmp_path)
+    config = _config(tmp_path)
+    calls = []
+
+    monkeypatch.setattr("predigt_uploader.cli._newest_mp4_in_folder", lambda _folder: raw)
+    monkeypatch.setattr("predigt_uploader.cli._open_losslesscut", lambda source, _config: calls.append(source))
+    monkeypatch.setattr("predigt_uploader.cli._find_new_mp4_exports", lambda _folders, _since: (exported,))
+    _inputs(monkeypatch, ["nein", "", "", ""])
+
+    selected = _select_source_mp4(config, log)
+
+    assert selected == exported
+    assert calls == [raw]
+    output = capsys.readouterr().out
+    assert "Bitte jetzt in LosslessCut schneiden" in output
+    assert "Chorlieder" in output
 
 
 @pytest.mark.parametrize("answer", ["j", "ja", "J", "JA", "y", "yes", "YES"])
@@ -393,6 +516,7 @@ def test_run_wizard_stops_before_mp3_conversion_when_ffmpeg_is_missing(monkeypat
         [
             "",
             "",
+            "",
             str(source),
             "2026-05-24",
             "Heiligkeit",
@@ -480,6 +604,7 @@ def test_run_wizard_reports_conversion_failure_without_traceback(monkeypatch, tm
         [
             "",
             "",
+            "",
             str(source),
             "2026-05-24",
             "Heiligkeit",
@@ -539,6 +664,7 @@ def test_run_wizard_reports_empty_mp3_after_conversion(monkeypatch, tmp_path, ca
     _inputs(
         monkeypatch,
         [
+            "",
             "",
             "",
             str(source),
@@ -644,6 +770,7 @@ def test_run_wizard_success_writes_summary_and_prints_final_state(monkeypatch, t
         [
             "",
             "",
+            "",
             str(source),
             "2026-05-24",
             "Heiligkeit",
@@ -717,6 +844,7 @@ def test_run_wizard_reports_summary_write_error(monkeypatch, tmp_path, capsys):
     _inputs(
         monkeypatch,
         [
+            "",
             "",
             "",
             str(source),

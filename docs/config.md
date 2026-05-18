@@ -22,6 +22,15 @@ losslesscut_path = ""
 
 `ffmpeg_path = "ffmpeg"` bedeutet: FFmpeg wird über PATH gefunden.
 
+`losslesscut_path = ""` bedeutet: Der Wizard versucht LosslessCut über PATH oder den Windows-App-Alias `LosslessCut` zu starten. Wenn LosslessCut dort nicht gefunden wird, kann hier ein vollständiger Pfad eingetragen werden, zum Beispiel:
+
+```toml
+[paths]
+losslesscut_path = "C:\\Tools\\LosslessCut\\LosslessCut.exe"
+```
+
+`vmix_storage` ist der Quellordner fuer Rohaufnahmen. Der LosslessCut-Assistent kann daraus die neueste MP4 als Rohaufnahme vorschlagen.
+
 `recordings_base` ist der Ziel-Basisordner. Darunter legt der Wizard die Jahres- und Datumsordner an, zum Beispiel `2026\2026-05-24`.
 
 Wenn keine `config.toml` vorhanden ist, nutzt Version 1 automatisch den Desktop des aktuellen Windows-Benutzers:

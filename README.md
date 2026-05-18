@@ -17,6 +17,18 @@ Version 1 automatisiert **noch nicht WordPress** und lädt **noch nicht zu Vimeo
 7. gleichnamige MP3 per FFmpeg erzeugen
 8. `predigt-zusammenfassung.txt` für die manuelle Weiterarbeit anzeigen/speichern
 
+## Phase 1.5: LosslessCut-Schnitt-Assistent
+
+Phase 1.5 ergänzt vor dem lokalen Workflow einen einfachen Assistenten für den manuellen Schnitt:
+
+1. vMix-Rohaufnahme manuell angeben oder neueste MP4 aus `vmix_storage` vorschlagen lassen
+2. LosslessCut mit dieser Rohaufnahme öffnen
+3. Predigtbereich in LosslessCut manuell markieren und exportieren
+4. exportierte Predigt-MP4 automatisch suchen oder manuell angeben
+5. danach den bestehenden lokalen Workflow aus Version 1 weiterführen
+
+LosslessCut bleibt ein externes Programm. Der PredigtUploader ist kein eigener Video-Editor und steuert den Schnitt nicht automatisch.
+
 ## Zielgruppe
 
 Das Programm soll von Menschen bedient werden können, die nicht technisch sind. Fehlermeldungen müssen daher immer zwei Ebenen haben:
@@ -34,6 +46,7 @@ Voraussetzungen:
 - VS Code
 - Codex-Erweiterung oder Codex CLI
 - optional: FFmpeg im PATH oder später in der App-Konfiguration
+- optional: LosslessCut im PATH/App-Alias oder in `config.toml`
 
 PowerShell:
 

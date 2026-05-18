@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import shutil
+import subprocess
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
@@ -33,6 +34,13 @@ class Mp3ResultError(RuntimeError):
 class SummaryWriteError(RuntimeError):
     def __init__(self, admin_hint: str) -> None:
         super().__init__(admin_hint)
+        self.admin_hint = admin_hint
+
+
+class LosslessCutStartError(RuntimeError):
+    def __init__(self, user_message: str, admin_hint: str) -> None:
+        super().__init__(admin_hint)
+        self.user_message = user_message
         self.admin_hint = admin_hint
 
 
@@ -183,16 +191,172 @@ def _ask_mp4_path() -> Path:
     while True:
         raw = _ask_required("Pfad zur geschnittenen MP4-Datei")
         source = _normalize_user_path(raw)
-        if not source.exists():
-            print("Diese Datei wurde nicht gefunden. Bitte den vollständigen Pfad zur MP4 einfügen.")
+        if _is_valid_mp4_file(source):
+            return source
+
+
+def _is_valid_mp4_file(path: Path) -> bool:
+    if not path.exists():
+        print("Diese Datei wurde nicht gefunden. Bitte den vollständigen Pfad zur MP4 einfügen.")
+        return False
+    if not path.is_file():
+        print("Das ist ein Ordner, keine Datei. Bitte eine MP4-Datei auswählen.")
+        return False
+    if path.suffix.casefold() != ".mp4":
+        print("Diese Datei ist keine MP4-Datei. Bitte eine Datei mit der Endung .mp4 auswählen.")
+        return False
+    return True
+
+
+def _ask_mp4_path_with_prompt(prompt: str) -> Path:
+    while True:
+        raw = _ask_required(prompt)
+        source = _normalize_user_path(raw)
+        if _is_valid_mp4_file(source):
+            return source
+
+
+def _newest_mp4_in_folder(folder: Path) -> Path | None:
+    if not folder.exists() or not folder.is_dir():
+        return None
+    candidates = [path for path in folder.glob("*.mp4") if path.is_file()]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda path: path.stat().st_mtime)
+
+
+def _ask_raw_recording(config: AppConfig) -> Path:
+    print()
+    print("Rohaufnahme auswählen")
+    print(f"Konfigurierter Quellordner: {config.vmix_storage}")
+    suggestion = _newest_mp4_in_folder(config.vmix_storage)
+    if suggestion is not None:
+        print(f"Neueste MP4 im Quellordner: {suggestion}")
+        if _ask_yes_no("Diese Rohaufnahme in LosslessCut öffnen?", True):
+            return suggestion
+    else:
+        print("Im konfigurierten Quellordner wurde keine MP4 gefunden.")
+
+    return _ask_mp4_path_with_prompt("Pfad zur vMix-Rohaufnahme")
+
+
+def _losslesscut_command(config: AppConfig) -> str:
+    configured = config.losslesscut_path.strip()
+    return configured or "LosslessCut"
+
+
+def _open_losslesscut(raw_recording: Path, config: AppConfig) -> None:
+    command = _losslesscut_command(config)
+    try:
+        subprocess.Popen([command, str(raw_recording)])
+    except FileNotFoundError as exc:
+        raise LosslessCutStartError(
+            "LosslessCut konnte nicht gestartet werden.",
+            f"Programm nicht gefunden: {command!r}. Details: {exc}",
+        ) from exc
+    except OSError as exc:
+        raise LosslessCutStartError(
+            "LosslessCut konnte nicht gestartet werden.",
+            f"Start von LosslessCut fehlgeschlagen mit {command!r} und Datei {raw_recording}. Details: {exc}",
+        ) from exc
+
+
+def _print_losslesscut_instructions() -> None:
+    print()
+    print("Bitte jetzt in LosslessCut schneiden")
+    print("-----------------------------------")
+    print("- Markiere nur den Predigtbereich.")
+    print("- Exportiere nur die Predigt als MP4.")
+    print("- Chorlieder, Beiträge oder Ansagen nicht als Predigtdatei verwenden.")
+    print("- Komm danach zu diesem Wizard zurück.")
+
+
+def _export_search_folders(config: AppConfig, raw_recording: Path) -> tuple[Path, ...]:
+    folders = [
+        raw_recording.parent,
+        config.vmix_storage,
+        Path.home() / "Downloads",
+        Path.home() / "Desktop",
+        config.recordings_base,
+    ]
+    unique: list[Path] = []
+    for folder in folders:
+        if folder not in unique:
+            unique.append(folder)
+    return tuple(unique)
+
+
+def _find_new_mp4_exports(folders: tuple[Path, ...], since: datetime) -> tuple[Path, ...]:
+    since_timestamp = since.timestamp()
+    found: list[Path] = []
+    for folder in folders:
+        if not folder.exists() or not folder.is_dir():
             continue
-        if not source.is_file():
-            print("Das ist ein Ordner, keine Datei. Bitte die geschnittene MP4-Datei auswählen.")
-            continue
-        if source.suffix.casefold() != ".mp4":
-            print("Diese Datei ist keine MP4-Datei. Bitte eine Datei mit der Endung .mp4 auswählen.")
-            continue
-        return source
+        for path in folder.glob("*.mp4"):
+            if path.is_file() and path.stat().st_mtime >= since_timestamp and path not in found:
+                found.append(path)
+    return tuple(sorted(found, key=lambda path: path.stat().st_mtime, reverse=True))
+
+
+def _choose_exported_mp4(candidates: tuple[Path, ...]) -> Path:
+    if len(candidates) == 1:
+        candidate = candidates[0]
+        print(f"Gefundene neue MP4: {candidate}")
+        if _ask_yes_no("Diese exportierte Predigtdatei verwenden?", True):
+            return candidate
+
+    if len(candidates) > 1:
+        print("Es wurden mehrere neue MP4-Dateien gefunden.")
+        print("Bitte wähle bewusst die Datei aus, die nur die Predigt enthält:")
+        for index, candidate in enumerate(candidates, start=1):
+            print(f"  {index}. {candidate}")
+        while True:
+            raw_choice = _ask_required("Nummer der richtigen Predigtdatei")
+            try:
+                choice = int(raw_choice)
+            except ValueError:
+                print("Bitte eine Nummer aus der Liste eingeben.")
+                continue
+            if 1 <= choice <= len(candidates):
+                return candidates[choice - 1]
+            print(f"Bitte eine Nummer zwischen 1 und {len(candidates)} eingeben.")
+
+    print("Es wurde keine passende neue MP4 automatisch ausgewählt.")
+    return _ask_mp4_path_with_prompt("Pfad zur exportierten Predigt-MP4")
+
+
+def _select_exported_mp4(config: AppConfig, raw_recording: Path, assistant_start: datetime) -> Path:
+    print()
+    print("Exportierte Predigt-MP4 übernehmen")
+    print("Wenn der Export in LosslessCut fertig ist, sucht der Wizard nach neuen MP4-Dateien.")
+    _ask("Drücke Enter, sobald der Export fertig ist")
+    folders = _export_search_folders(config, raw_recording)
+    candidates = _find_new_mp4_exports(folders, assistant_start)
+    return _choose_exported_mp4(candidates)
+
+
+def _select_source_mp4(config: AppConfig, log: WorkflowLog) -> Path:
+    if _ask_yes_no("Hast du bereits eine fertig geschnittene MP4-Datei?", True):
+        return _ask_mp4_path()
+
+    assistant_start = datetime.now()
+    raw_recording = _ask_raw_recording(config)
+    log.event(f"Rohaufnahme fuer LosslessCut ausgewaehlt: {raw_recording}")
+    try:
+        _open_losslesscut(raw_recording, config)
+        log.event("LosslessCut wurde gestartet.")
+    except LosslessCutStartError as exc:
+        log.error("LosslessCut konnte nicht gestartet werden.", admin_hint=exc.admin_hint)
+        print()
+        print(exc.user_message)
+        print("Bitte öffne LosslessCut manuell und lade dort die Rohaufnahme.")
+        print(f"Rohaufnahme: {raw_recording}")
+        print(f"Admin-Hinweis: {exc.admin_hint}")
+
+    _print_losslesscut_instructions()
+    exported_mp4 = _select_exported_mp4(config, raw_recording, assistant_start)
+    log.event(f"Exportierte MP4 ausgewaehlt: {exported_mp4}")
+    return exported_mp4
 
 
 def _ask_optional_folder_note() -> str:
@@ -549,7 +713,7 @@ def run_wizard(args: argparse.Namespace) -> int:
     config = _select_recordings_base(config)
     log.event(f"Ziel-Basisordner vorbereitet: {config.recordings_base}")
 
-    source = _ask_mp4_path()
+    source = _select_source_mp4(config, log)
     log.event(f"Quell-MP4 ausgewaehlt: {source}")
 
     sermon_date = _ask_date()

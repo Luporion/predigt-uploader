@@ -4,6 +4,8 @@ Diese Anleitung beschreibt die erste lokale Testversion von Phase 1. Sie richtet
 
 Version 1 arbeitet nur lokal. Sie lädt nichts zu Vimeo hoch und legt nichts in WordPress an.
 
+Hinweis: Wenn vor dem lokalen Workflow noch eine vMix-Rohaufnahme in LosslessCut geschnitten werden soll, siehe `docs/manual-test-v1-5.md`.
+
 ## Voraussetzungen
 
 - Windows 10 oder Windows 11

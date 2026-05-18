@@ -8,6 +8,7 @@ PredigtUploader soll den lokalen Predigt-Workflow einer Gemeinde unter Windows v
 
 Das Projekt ist ein lokaler CLI-Prototyp in Phase 1. Die Grundstruktur, Fachregeln für Dateinamen und Ordner sowie automatische Tests sind vorhanden. Der Terminal-Wizard wurde nutzerfreundlicher gemacht, prüft Eingaben robuster, behandelt Config-Fehler verständlich, sichert die lokale MP4-Übernahme besser ab, prüft die MP3-Erzeugung genauer, schreibt eine einfache Logdatei und meldet den lokalen Workflow-Endzustand klar. Die abschließende Gegenprüfung sieht keine blockierenden offenen Punkte für Phase 1 mehr.
 Für die erste lokale Testversion gibt es eine manuelle Testanleitung und ein PowerShell-Startskript für den Wizard. Der Ziel-Basisordner wird ohne eigene Config aus dem aktuellen Windows-Benutzer abgeleitet und kann im Wizard für den aktuellen Lauf direkt per Pfadeingabe überschrieben werden.
+Phase 1.5 ergänzt einen einfachen LosslessCut-Schnitt-Assistenten: Rohaufnahme wählen, LosslessCut extern öffnen, Predigt manuell schneiden/exportieren und die exportierte MP4 danach in den bestehenden lokalen Workflow übernehmen.
 
 ## Was Version 1 bereits kann
 
@@ -36,6 +37,7 @@ Für die erste lokale Testversion gibt es eine manuelle Testanleitung und ein Po
 - Schreibfehler beim Erstellen der Zusammenfassung nutzerfreundlich melden.
 - Pro Wizard-Lauf eine einfache Logdatei unter `logs/` schreiben.
 - Über `scripts/run-wizard.ps1` lokal gestartet werden, wenn `.venv` eingerichtet ist.
+- Optional eine Rohaufnahme aus `vmix_storage` vorschlagen, in LosslessCut öffnen und nach dem manuellen Export die neue Predigt-MP4 übernehmen.
 
 ## Bewusst noch nicht enthalten
 
@@ -44,11 +46,11 @@ Für die erste lokale Testversion gibt es eine manuelle Testanleitung und ein Po
 - Login-, Token- oder API-Key-Verwaltung.
 - Automatische Predigt-Erkennung per KI.
 - Komfortable Windows-GUI oder Datei-Auswahldialog.
-- LosslessCut-Automatisierung.
+- Vollständige LosslessCut-Automatisierung oder eigener Video-Editor.
 
 ## Nächster geplanter Schritt
 
-Phase 1 lokal mit einer kleinen MP4 nach `docs/manual-test-v1.md` testen. Danach den Übergang zu Phase 2 planen.
+Phase 1.5 lokal mit einer kleinen Rohaufnahme nach `docs/manual-test-v1-5.md` testen. Danach den Übergang zu Phase 2 planen.
 
 ## Sicherheits-Hinweis
 

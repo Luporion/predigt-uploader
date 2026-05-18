@@ -21,6 +21,19 @@
 
 - [x] Logdatei schreiben
 
+## Phase 1.5: Lokaler LosslessCut-Schnitt-Assistent
+
+- [x] vMix-/Quellordner per Config nutzen
+- [x] LosslessCut-Pfad per Config oder PATH/App-Alias nutzen
+- [x] neueste Rohaufnahme aus Quellordner vorschlagen
+- [x] Rohaufnahme alternativ per Pfad abfragen
+- [x] LosslessCut mit Rohaufnahme starten
+- [x] Nutzerhinweise fuer manuellen Predigtschnitt anzeigen
+- [x] neue exportierte MP4-Dateien seit Startzeit suchen
+- [x] bei mehreren Exporten bewusste Auswahl erzwingen
+- [x] bei fehlendem Export manuellen Pfad erlauben
+- [x] danach bestehenden lokalen Workflow weiterverwenden
+
 ## Phase 2: Windows-Nutzerfreundlichkeit
 
 - [ ] Logdateien in geeignetem Ordner speichern

@@ -7,6 +7,7 @@ PredigtUploader soll den lokalen Predigt-Workflow einer Gemeinde unter Windows v
 ## Aktueller Entwicklungsstand
 
 Das Projekt ist ein lokaler CLI-Prototyp in Phase 1. Die Grundstruktur, Fachregeln für Dateinamen und Ordner sowie automatische Tests sind vorhanden. Der Terminal-Wizard wurde nutzerfreundlicher gemacht, prüft Eingaben robuster, behandelt Config-Fehler verständlich, sichert die lokale MP4-Übernahme besser ab, prüft die MP3-Erzeugung genauer, schreibt eine einfache Logdatei und meldet den lokalen Workflow-Endzustand klar. Die abschließende Gegenprüfung sieht keine blockierenden offenen Punkte für Phase 1 mehr.
+Für die erste lokale Testversion gibt es eine manuelle Testanleitung und ein PowerShell-Startskript für den Wizard.
 
 ## Was Version 1 bereits kann
 
@@ -33,6 +34,7 @@ Das Projekt ist ein lokaler CLI-Prototyp in Phase 1. Die Grundstruktur, Fachrege
 - Keine zusätzliche `predigt-info.json` schreiben.
 - Schreibfehler beim Erstellen der Zusammenfassung nutzerfreundlich melden.
 - Pro Wizard-Lauf eine einfache Logdatei unter `logs/` schreiben.
+- Über `scripts/run-wizard.ps1` lokal gestartet werden, wenn `.venv` eingerichtet ist.
 
 ## Bewusst noch nicht enthalten
 
@@ -45,7 +47,7 @@ Das Projekt ist ein lokaler CLI-Prototyp in Phase 1. Die Grundstruktur, Fachrege
 
 ## Nächster geplanter Schritt
 
-Den Übergang zu Phase 2 planen. Dabei sollten zuerst Umfang, Windows-Ablageorte für Logs/Fehlerpakete und die weiterhin bewusst manuellen Vimeo-/WordPress-Schritte festgelegt werden.
+Phase 1 lokal mit einer kleinen MP4 nach `docs/manual-test-v1.md` testen. Danach den Übergang zu Phase 2 planen.
 
 ## Sicherheits-Hinweis
 

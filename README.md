@@ -29,6 +29,8 @@ Phase 1.5 ergänzt vor dem lokalen Workflow einen einfachen Assistenten für den
 
 LosslessCut bleibt ein externes Programm. Der PredigtUploader ist kein eigener Video-Editor und steuert den Schnitt nicht automatisch.
 
+Im Terminal nutzt der Wizard nach Möglichkeit `questionary` für Pfeiltasten-Auswahlen. Wenn das Terminal dies nicht unterstützt, bleibt die robuste Texteingabe mit `ja`/`nein` oder Nummern erhalten. Der Textmodus kann mit `PREDIGT_UPLOADER_TEXT_UI=1` erzwungen werden.
+
 ## Zielgruppe
 
 Das Programm soll von Menschen bedient werden können, die nicht technisch sind. Fehlermeldungen müssen daher immer zwei Ebenen haben:
@@ -47,6 +49,7 @@ Voraussetzungen:
 - Codex-Erweiterung oder Codex CLI
 - optional: FFmpeg im PATH oder später in der App-Konfiguration
 - optional: LosslessCut im PATH/App-Alias oder in `config.toml`
+- Python-Abhängigkeiten aus `pyproject.toml`, darunter `questionary`
 
 PowerShell:
 

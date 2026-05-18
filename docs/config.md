@@ -29,6 +29,23 @@ losslesscut_path = ""
 losslesscut_path = "C:\\Tools\\LosslessCut\\LosslessCut.exe"
 ```
 
+Wenn LosslessCut beim Wizard-Start nicht gefunden wird, kann der Pfad zur `LosslessCut.exe` auch direkt im Wizard eingegeben werden. Das gilt nur für diesen Lauf. Soll der Pfad dauerhaft gelten, `losslesscut_path` in `config.toml` setzen.
+
+Bei einer portablen ZIP-Version liegt die Datei meist im entpackten Ordner, zum Beispiel:
+
+```text
+D:\Programme\LosslessCut\LosslessCut.exe
+```
+
+In `config.toml` muss der Pfad mit doppelten Backslashes geschrieben werden:
+
+```toml
+[paths]
+losslesscut_path = "D:\\Programme\\LosslessCut\\LosslessCut.exe"
+```
+
+Bei einer einmaligen Eingabe im Wizard sind auch Anführungszeichen erlaubt, zum Beispiel `"D:\Programme\LosslessCut\LosslessCut.exe"`.
+
 `vmix_storage` ist der Quellordner fuer Rohaufnahmen. Der LosslessCut-Assistent kann daraus die neueste MP4 als Rohaufnahme vorschlagen.
 
 `recordings_base` ist der Ziel-Basisordner. Darunter legt der Wizard die Jahres- und Datumsordner an, zum Beispiel `2026\2026-05-24`.
@@ -44,6 +61,16 @@ Beim Start zeigt der Wizard diesen Ziel-Basisordner an. Enter verwendet den Vors
 Die Zusammenfassung `predigt-zusammenfassung.txt` wird in Version 1 immer geschrieben. Es gibt dafür keine Config-Option.
 
 Version 1 wertet nur die Optionen aus `config.example.toml` aus. Weitere Einstellungen sollten erst dokumentiert werden, wenn der Wizard sie tatsaechlich nutzt.
+
+## Terminal-Auswahl
+
+Der Wizard nutzt nach Möglichkeit `questionary` für Pfeiltasten-Auswahlen. Wenn das Terminal nicht geeignet ist oder `questionary` nicht verfügbar ist, nutzt der Wizard automatisch die Texteingabe.
+
+Textmodus erzwingen:
+
+```powershell
+$env:PREDIGT_UPLOADER_TEXT_UI = "1"
+```
 
 ## Sicherheit
 

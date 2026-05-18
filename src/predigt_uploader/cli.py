@@ -15,6 +15,7 @@ from .models import AppConfig, ProcessingPlan, SermonInfo
 from .mp3 import Mp3ConversionError, convert_mp4_to_mp3, ffmpeg_available
 from .report import build_summary_text, write_summary_file
 from .run_log import WorkflowLog
+from .ui import MenuOption, UserAbortError, ask_yes_no, choose_from_options
 
 
 class Mp4TransferError(RuntimeError):
@@ -59,17 +60,7 @@ def _ask_required(prompt: str) -> str:
 
 
 def _ask_yes_no(prompt: str, default: bool = False) -> bool:
-    default_text = "ja" if default else "nein"
-    default_label = "Ja" if default else "Nein"
-    help_text = f"Antwort: j/ja/y/yes = Ja, n/nein/no = Nein, Enter = {default_label}"
-    while True:
-        print(help_text)
-        value = _ask(prompt, default_text).casefold()
-        if value in {"j", "ja", "y", "yes"}:
-            return True
-        if value in {"n", "nein", "no"}:
-            return False
-        print("Bitte j, ja, y oder yes für Ja eingeben - oder n, nein oder no für Nein.")
+    return ask_yes_no(prompt, default)
 
 
 def _path_has_windows_invalid_chars(path: Path) -> bool:
@@ -245,6 +236,10 @@ def _losslesscut_command(config: AppConfig) -> str:
     return configured or "LosslessCut"
 
 
+def _losslesscut_source_label(config: AppConfig) -> str:
+    return "config.toml" if config.losslesscut_path.strip() else "PATH/App-Alias"
+
+
 def _open_losslesscut(raw_recording: Path, config: AppConfig) -> None:
     command = _losslesscut_command(config)
     try:
@@ -259,6 +254,60 @@ def _open_losslesscut(raw_recording: Path, config: AppConfig) -> None:
             "LosslessCut konnte nicht gestartet werden.",
             f"Start von LosslessCut fehlgeschlagen mit {command!r} und Datei {raw_recording}. Details: {exc}",
         ) from exc
+
+
+def _is_plausible_losslesscut_exe(path: Path) -> bool:
+    name = path.name.casefold()
+    return path.suffix.casefold() == ".exe" or "losslesscut" in name
+
+
+def _ask_losslesscut_exe_path() -> Path:
+    while True:
+        raw = _ask_required("Pfad zur LosslessCut.exe")
+        path = _normalize_user_path(raw)
+        if not path.exists():
+            print("Diese Datei wurde nicht gefunden. Bitte den vollständigen Pfad zur LosslessCut.exe eingeben.")
+            continue
+        if not path.is_file():
+            print("Das ist ein Ordner, keine Programmdatei. Bitte die Datei LosslessCut.exe auswählen.")
+            continue
+        if not _is_plausible_losslesscut_exe(path):
+            print("Diese Datei sieht nicht nach LosslessCut aus. Bitte eine .exe-Datei oder LosslessCut.exe auswählen.")
+            continue
+        return path
+
+
+def _try_start_losslesscut(raw_recording: Path, config: AppConfig, log: WorkflowLog) -> None:
+    log.event(f"LosslessCut-Startversuch ueber {_losslesscut_source_label(config)}: {_losslesscut_command(config)!r}")
+    try:
+        _open_losslesscut(raw_recording, config)
+        log.event("LosslessCut wurde gestartet.")
+        return
+    except LosslessCutStartError as exc:
+        log.error("LosslessCut konnte automatisch nicht gestartet werden.", admin_hint=exc.admin_hint)
+        print()
+        print("LosslessCut wurde nicht gefunden oder konnte nicht gestartet werden.")
+        print("Du kannst jetzt den Pfad zur LosslessCut.exe eingeben oder den Schnitt manuell durchführen.")
+        print(f"Admin-Hinweis: {exc.admin_hint}")
+
+    if _ask_yes_no("Pfad zur LosslessCut.exe jetzt eingeben?", True):
+        manual_path = _ask_losslesscut_exe_path()
+        log.event(f"Manueller LosslessCut-Pfad eingegeben: {manual_path}")
+        manual_config = replace(config, losslesscut_path=str(manual_path))
+        try:
+            _open_losslesscut(raw_recording, manual_config)
+            log.event("LosslessCut wurde mit manuellem Pfad gestartet.")
+            return
+        except LosslessCutStartError as exc:
+            log.error("LosslessCut konnte auch mit manuellem Pfad nicht gestartet werden.", admin_hint=exc.admin_hint)
+            print()
+            print("LosslessCut konnte auch mit diesem Pfad nicht gestartet werden.")
+            print("Bitte öffne LosslessCut manuell und lade dort die Rohaufnahme.")
+            print(f"Admin-Hinweis: {exc.admin_hint}")
+    else:
+        log.event("Nutzer ueberspringt manuellen LosslessCut-Pfad.")
+
+    print(f"Rohaufnahme: {raw_recording}")
 
 
 def _print_losslesscut_instructions() -> None:
@@ -307,19 +356,11 @@ def _choose_exported_mp4(candidates: tuple[Path, ...]) -> Path:
 
     if len(candidates) > 1:
         print("Es wurden mehrere neue MP4-Dateien gefunden.")
-        print("Bitte wähle bewusst die Datei aus, die nur die Predigt enthält:")
-        for index, candidate in enumerate(candidates, start=1):
-            print(f"  {index}. {candidate}")
-        while True:
-            raw_choice = _ask_required("Nummer der richtigen Predigtdatei")
-            try:
-                choice = int(raw_choice)
-            except ValueError:
-                print("Bitte eine Nummer aus der Liste eingeben.")
-                continue
-            if 1 <= choice <= len(candidates):
-                return candidates[choice - 1]
-            print(f"Bitte eine Nummer zwischen 1 und {len(candidates)} eingeben.")
+        print("Bitte wähle bewusst die Datei aus, die nur die Predigt enthält.")
+        return choose_from_options(
+            "Richtige Predigtdatei auswählen",
+            [MenuOption(str(candidate), candidate) for candidate in candidates],
+        )
 
     print("Es wurde keine passende neue MP4 automatisch ausgewählt.")
     return _ask_mp4_path_with_prompt("Pfad zur exportierten Predigt-MP4")
@@ -342,16 +383,7 @@ def _select_source_mp4(config: AppConfig, log: WorkflowLog) -> Path:
     assistant_start = datetime.now()
     raw_recording = _ask_raw_recording(config)
     log.event(f"Rohaufnahme fuer LosslessCut ausgewaehlt: {raw_recording}")
-    try:
-        _open_losslesscut(raw_recording, config)
-        log.event("LosslessCut wurde gestartet.")
-    except LosslessCutStartError as exc:
-        log.error("LosslessCut konnte nicht gestartet werden.", admin_hint=exc.admin_hint)
-        print()
-        print(exc.user_message)
-        print("Bitte öffne LosslessCut manuell und lade dort die Rohaufnahme.")
-        print(f"Rohaufnahme: {raw_recording}")
-        print(f"Admin-Hinweis: {exc.admin_hint}")
+    _try_start_losslesscut(raw_recording, config, log)
 
     _print_losslesscut_instructions()
     exported_mp4 = _select_exported_mp4(config, raw_recording, assistant_start)
@@ -847,8 +879,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
-    args = parser.parse_args(argv)
-    if args.command == "wizard":
-        return run_wizard(args)
-    parser.print_help()
-    return 1
+    try:
+        args = parser.parse_args(argv)
+        if args.command == "wizard":
+            return run_wizard(args)
+        parser.print_help()
+        return 1
+    except (KeyboardInterrupt, UserAbortError):
+        print()
+        print("Abgebrochen.")
+        return 130

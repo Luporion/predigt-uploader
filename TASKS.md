@@ -28,9 +28,12 @@
 - [x] neueste Rohaufnahme aus Quellordner vorschlagen
 - [x] Rohaufnahme alternativ per Pfad abfragen
 - [x] LosslessCut mit Rohaufnahme starten
+- [x] bei fehlendem LosslessCut-Pfad manuelle EXE-Eingabe erlauben
 - [x] Nutzerhinweise fuer manuellen Predigtschnitt anzeigen
 - [x] neue exportierte MP4-Dateien seit Startzeit suchen
 - [x] bei mehreren Exporten bewusste Auswahl erzwingen
+- [x] Terminal-Auswahl mit questionary und Text-Fallback einfuehren
+- [x] Textmodus per PREDIGT_UPLOADER_TEXT_UI=1 erzwingen
 - [x] bei fehlendem Export manuellen Pfad erlauben
 - [x] danach bestehenden lokalen Workflow weiterverwenden
 

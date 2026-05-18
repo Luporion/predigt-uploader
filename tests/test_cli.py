@@ -14,8 +14,10 @@ from predigt_uploader.cli import (
     _ask_mp4_path,
     _ask_required,
     _losslesscut_command,
+    _ask_losslesscut_exe_path,
     _newest_mp4_in_folder,
     _open_losslesscut,
+    _try_start_losslesscut,
     _handle_existing_target_mp4,
     _print_local_workflow_success,
     _print_missing_ffmpeg_message,
@@ -119,6 +121,23 @@ def test_losslesscut_command_uses_path_or_app_alias(tmp_path):
     assert _losslesscut_command(AppConfig(tmp_path / "vmix", tmp_path / "out", tmp_path / "mp3", losslesscut_path="C:/Tools/LosslessCut.exe")) == "C:/Tools/LosslessCut.exe"
 
 
+def test_ask_losslesscut_exe_path_validates_file(monkeypatch, tmp_path, capsys):
+    folder = tmp_path / "LosslessCut"
+    folder.mkdir()
+    wrong = tmp_path / "notiz.txt"
+    wrong.write_text("x", encoding="utf-8")
+    exe = tmp_path / "LosslessCut.exe"
+    exe.write_bytes(b"exe")
+    _inputs(monkeypatch, [str(tmp_path / "fehlt.exe"), str(folder), str(wrong), f'"{exe}"'])
+
+    assert _ask_losslesscut_exe_path() == exe
+
+    output = capsys.readouterr().out
+    assert "nicht gefunden" in output
+    assert "Das ist ein Ordner" in output
+    assert "sieht nicht nach LosslessCut" in output
+
+
 def test_open_losslesscut_starts_external_program(monkeypatch, tmp_path):
     raw = tmp_path / "roh.mp4"
     raw.write_bytes(b"video")
@@ -207,6 +226,32 @@ def test_select_source_mp4_opens_losslesscut_and_uses_export(monkeypatch, tmp_pa
     output = capsys.readouterr().out
     assert "Bitte jetzt in LosslessCut schneiden" in output
     assert "Chorlieder" in output
+
+
+def test_try_start_losslesscut_accepts_manual_path_after_auto_failure(monkeypatch, tmp_path, capsys):
+    raw = tmp_path / "roh.mp4"
+    raw.write_bytes(b"raw")
+    manual_exe = tmp_path / "LosslessCut.exe"
+    manual_exe.write_bytes(b"exe")
+    log = WorkflowLog.start(config_path=None, base_dir=tmp_path)
+    calls = []
+
+    def fake_open(source: Path, config: AppConfig) -> None:
+        calls.append(config.losslesscut_path or "auto")
+        if not config.losslesscut_path:
+            raise LosslessCutStartError("LosslessCut konnte nicht gestartet werden.", "nicht gefunden")
+
+    monkeypatch.setattr("predigt_uploader.cli._open_losslesscut", fake_open)
+    _inputs(monkeypatch, ["", str(manual_exe)])
+
+    _try_start_losslesscut(raw, _config(tmp_path), log)
+
+    assert calls == ["auto", str(manual_exe)]
+    output = capsys.readouterr().out
+    assert "Pfad zur LosslessCut.exe" in output
+    log_text = log.path.read_text(encoding="utf-8")
+    assert "Manueller LosslessCut-Pfad" in log_text
+    assert "manuellem Pfad gestartet" in log_text
 
 
 @pytest.mark.parametrize("answer", ["j", "ja", "J", "JA", "y", "yes", "YES"])

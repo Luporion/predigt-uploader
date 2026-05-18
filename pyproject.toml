@@ -9,7 +9,9 @@ description = "Internes Windows-Tool zur Vereinfachung des Predigt-Workflows"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "Gemeindetechnik" }]
-dependencies = []
+dependencies = [
+  "questionary>=2.0",
+]
 
 [project.optional-dependencies]
 dev = [

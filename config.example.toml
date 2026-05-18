@@ -1,0 +1,20 @@
+# Beispielkonfiguration für PredigtUploader
+# Kopiere diese Datei später nach config.toml oder nach %APPDATA%\PredigtUploader\config.toml
+
+[paths]
+vmix_storage = "V:\\vMixStorage"
+recordings_base = "C:\\Users\\micro\\Desktop\\Aufnahmen"
+mp3_base = "V:\\Predigten\\Predigten"
+ffmpeg_path = "ffmpeg"
+losslesscut_path = ""
+
+[naming]
+predigt_template = "Predigt ({title}_{bible_reference})_{speaker}{extension}"
+bibelstunde_template = "Bibelstunde ({bible_reference})_{speaker}{extension}"
+folder_date_format = "%Y-%m-%d"
+folder_suffix_separator = " - "
+
+[workflow]
+default_sermon_type = "Predigt"
+copy_instead_of_move = true
+write_summary_file = true

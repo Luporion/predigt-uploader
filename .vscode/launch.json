@@ -1,0 +1,14 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "PredigtUploader Wizard",
+      "type": "python",
+      "request": "launch",
+      "module": "predigt_uploader",
+      "args": ["wizard"],
+      "console": "integratedTerminal",
+      "justMyCode": true
+    }
+  ]
+}

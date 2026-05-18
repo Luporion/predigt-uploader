@@ -7,7 +7,7 @@ PredigtUploader soll den lokalen Predigt-Workflow einer Gemeinde unter Windows v
 ## Aktueller Entwicklungsstand
 
 Das Projekt ist ein lokaler CLI-Prototyp in Phase 1. Die Grundstruktur, Fachregeln für Dateinamen und Ordner sowie automatische Tests sind vorhanden. Der Terminal-Wizard wurde nutzerfreundlicher gemacht, prüft Eingaben robuster, behandelt Config-Fehler verständlich, sichert die lokale MP4-Übernahme besser ab, prüft die MP3-Erzeugung genauer, schreibt eine einfache Logdatei und meldet den lokalen Workflow-Endzustand klar. Die abschließende Gegenprüfung sieht keine blockierenden offenen Punkte für Phase 1 mehr.
-Für die erste lokale Testversion gibt es eine manuelle Testanleitung und ein PowerShell-Startskript für den Wizard. Der Ziel-Basisordner wird ohne eigene Config aus dem aktuellen Windows-Benutzer abgeleitet und kann im Wizard für den aktuellen Lauf überschrieben werden.
+Für die erste lokale Testversion gibt es eine manuelle Testanleitung und ein PowerShell-Startskript für den Wizard. Der Ziel-Basisordner wird ohne eigene Config aus dem aktuellen Windows-Benutzer abgeleitet und kann im Wizard für den aktuellen Lauf direkt per Pfadeingabe überschrieben werden.
 
 ## Was Version 1 bereits kann
 

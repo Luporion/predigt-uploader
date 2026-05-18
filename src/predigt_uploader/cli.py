@@ -83,10 +83,24 @@ def _normalize_folder_path(raw_path: str) -> Path:
     return path
 
 
-def _prepare_recordings_base(path: Path) -> None:
+def _prepare_recordings_base(path: Path) -> bool:
     try:
-        ensure_folder(path)
+        if path.exists() and not path.is_dir():
+            raise Mp4TransferError(
+                "Der Ziel-Basisordner ist kein Ordner, sondern eine Datei.",
+                f"Ziel-Basisordner ist Datei statt Ordner: {path}",
+            )
+
+        if not path.exists():
+            print("Dieser Ordner existiert noch nicht:")
+            print(path)
+            if not _ask_yes_no("Ordner erstellen?", True):
+                print("Okay, dann bitte einen anderen Ziel-Basisordner angeben.")
+                return False
+            ensure_folder(path)
+
         _check_target_folder_writable(path)
+        return True
     except PermissionError as exc:
         raise Mp4TransferError(
             "Der Ziel-Basisordner konnte wegen fehlender Berechtigungen nicht verwendet werden.",
@@ -110,28 +124,36 @@ def _ask_recordings_base_path() -> Path:
             print("Dieser Pfad ist nicht gültig. Bitte einen vollständigen Ordnerpfad ohne Sonderzeichen wie < > : \" | ? * eingeben.")
 
 
+def _ask_initial_recordings_base_path(suggested_path: Path) -> Path:
+    while True:
+        raw = _ask("Drücke Enter, um diesen Ordner zu verwenden, oder gib einen anderen Ordner ein")
+        if not raw:
+            return suggested_path
+        try:
+            return _normalize_folder_path(raw)
+        except ValueError:
+            print("Dieser Pfad ist nicht gültig. Bitte einen vollständigen Ordnerpfad ohne Sonderzeichen wie < > : \" | ? * eingeben.")
+
+
 def _select_recordings_base(config: AppConfig) -> AppConfig:
     print()
     print("Ziel-Basisordner")
     print("In diesem Ordner legt der Wizard später Jahres- und Datumsordner an.")
     print(f"Vorschlag: {config.recordings_base}")
 
-    while True:
-        if _ask_yes_no("Diesen Ziel-Basisordner verwenden?", True):
-            current_path = config.recordings_base
-        else:
-            current_path = _ask_recordings_base_path()
+    current_path = _ask_initial_recordings_base_path(config.recordings_base)
 
-        while True:
-            try:
-                _prepare_recordings_base(current_path)
+    while True:
+        try:
+            if _prepare_recordings_base(current_path):
                 print(f"Ziel-Basisordner ist bereit: {current_path}")
                 return replace(config, recordings_base=current_path)
-            except Mp4TransferError as exc:
-                print(exc.user_message)
-                print("Bitte einen anderen Ziel-Basisordner wählen, auf den du Schreibzugriff hast.")
-                print(f"Admin-Hinweis: {exc.admin_hint}")
-                current_path = _ask_recordings_base_path()
+            current_path = _ask_recordings_base_path()
+        except Mp4TransferError as exc:
+            print(exc.user_message)
+            print("Bitte einen anderen Ziel-Basisordner wählen, auf den du Schreibzugriff hast.")
+            print(f"Admin-Hinweis: {exc.admin_hint}")
+            current_path = _ask_recordings_base_path()
 
 
 def _ask_choice(prompt: str, choices: dict[str, str], default: str | None = None) -> str:

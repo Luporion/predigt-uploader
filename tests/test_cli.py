@@ -120,7 +120,7 @@ def test_ask_yes_no_repeats_after_unclear_input(monkeypatch, capsys):
 
 def test_select_recordings_base_can_use_suggested_folder(monkeypatch, tmp_path, capsys):
     config = _config(tmp_path)
-    _inputs(monkeypatch, [""])
+    _inputs(monkeypatch, ["", ""])
 
     selected = _select_recordings_base(config)
 
@@ -128,12 +128,13 @@ def test_select_recordings_base_can_use_suggested_folder(monkeypatch, tmp_path, 
     assert selected.recordings_base.exists()
     output = capsys.readouterr().out
     assert "Ziel-Basisordner" in output
+    assert "Drücke Enter" in output
     assert str(config.recordings_base) in output
 
 
 def test_select_recordings_base_can_use_alternative_folder(monkeypatch, tmp_path):
     alternative = tmp_path / "AndereAufnahmen"
-    _inputs(monkeypatch, ["no", str(alternative)])
+    _inputs(monkeypatch, [str(alternative), ""])
 
     selected = _select_recordings_base(_config(tmp_path))
 
@@ -143,7 +144,7 @@ def test_select_recordings_base_can_use_alternative_folder(monkeypatch, tmp_path
 
 def test_select_recordings_base_rejects_invalid_path_before_accepting_alternative(monkeypatch, tmp_path, capsys):
     alternative = tmp_path / "AndereAufnahmen"
-    _inputs(monkeypatch, ["no", "ungueltig:name", str(alternative)])
+    _inputs(monkeypatch, ["ungueltig:name", str(alternative), ""])
 
     selected = _select_recordings_base(_config(tmp_path))
 
@@ -156,16 +157,17 @@ def test_select_recordings_base_retries_after_unwritable_folder(monkeypatch, tmp
     config = _config(tmp_path)
     alternative = tmp_path / "AndereAufnahmen"
 
-    def fail_once(path: Path) -> None:
+    def fail_once(path: Path) -> bool:
         if path == config.recordings_base:
             raise Mp4TransferError(
                 "Der Ziel-Basisordner konnte nicht erstellt oder beschrieben werden.",
                 "Schreibtest fehlgeschlagen",
             )
         path.mkdir(parents=True, exist_ok=True)
+        return True
 
     monkeypatch.setattr("predigt_uploader.cli._prepare_recordings_base", fail_once)
-    _inputs(monkeypatch, ["ja", str(alternative)])
+    _inputs(monkeypatch, ["", str(alternative)])
 
     selected = _select_recordings_base(config)
 
@@ -173,6 +175,21 @@ def test_select_recordings_base_retries_after_unwritable_folder(monkeypatch, tmp
     output = capsys.readouterr().out
     assert "anderen Ziel-Basisordner" in output
     assert "Admin-Hinweis" in output
+
+
+def test_select_recordings_base_can_decline_creation_and_choose_other_folder(monkeypatch, tmp_path, capsys):
+    config = _config(tmp_path)
+    alternative = tmp_path / "AndereAufnahmen"
+    _inputs(monkeypatch, ["", "nein", str(alternative), ""])
+
+    selected = _select_recordings_base(config)
+
+    assert selected.recordings_base == alternative
+    assert not config.recordings_base.exists()
+    assert alternative.exists()
+    output = capsys.readouterr().out
+    assert "Dieser Ordner existiert noch nicht" in output
+    assert "Ordner erstellen?" in output
 
 
 def test_select_target_folder_asks_before_using_existing_folder(monkeypatch, tmp_path, capsys):
@@ -374,7 +391,8 @@ def test_run_wizard_stops_before_mp3_conversion_when_ffmpeg_is_missing(monkeypat
     _inputs(
         monkeypatch,
         [
-            "j",
+            "",
+            "",
             str(source),
             "2026-05-24",
             "Heiligkeit",
@@ -460,7 +478,8 @@ def test_run_wizard_reports_conversion_failure_without_traceback(monkeypatch, tm
     _inputs(
         monkeypatch,
         [
-            "j",
+            "",
+            "",
             str(source),
             "2026-05-24",
             "Heiligkeit",
@@ -520,7 +539,8 @@ def test_run_wizard_reports_empty_mp3_after_conversion(monkeypatch, tmp_path, ca
     _inputs(
         monkeypatch,
         [
-            "j",
+            "",
+            "",
             str(source),
             "2026-05-24",
             "Heiligkeit",
@@ -622,7 +642,8 @@ def test_run_wizard_success_writes_summary_and_prints_final_state(monkeypatch, t
     _inputs(
         monkeypatch,
         [
-            "j",
+            "",
+            "",
             str(source),
             "2026-05-24",
             "Heiligkeit",
@@ -696,7 +717,8 @@ def test_run_wizard_reports_summary_write_error(monkeypatch, tmp_path, capsys):
     _inputs(
         monkeypatch,
         [
-            "j",
+            "",
+            "",
             str(source),
             "2026-05-24",
             "Heiligkeit",

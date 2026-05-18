@@ -30,7 +30,7 @@ Wenn keine `config.toml` vorhanden ist, nutzt Version 1 automatisch den Desktop 
 %USERPROFILE%\Desktop\Aufnahmen
 ```
 
-Beim Start zeigt der Wizard diesen Ziel-Basisordner an. Der Nutzer kann ihn im Wizard fuer den aktuellen Lauf manuell ueberschreiben. Soll dauerhaft ein anderer Ordner vorgeschlagen werden, `recordings_base` in `config.toml` anpassen.
+Beim Start zeigt der Wizard diesen Ziel-Basisordner an. Enter verwendet den Vorschlag, ein eingegebener Pfad verwendet einen anderen Ordner fuer den aktuellen Lauf. Wenn dieser Ordner noch nicht existiert, fragt der Wizard, ob er erstellt werden soll. Soll dauerhaft ein anderer Ordner vorgeschlagen werden, `recordings_base` in `config.toml` anpassen.
 
 Die Zusammenfassung `predigt-zusammenfassung.txt` wird in Version 1 immer geschrieben. Es gibt dafür keine Config-Option.
 

@@ -71,7 +71,9 @@ Beispiel:
 recordings_base = "D:\\Predigt-Test\\Aufnahmen"
 ```
 
-Der Wizard zeigt den vorgeschlagenen Ziel-Basisordner beim Start an. Für einen einzelnen Testlauf kann dort ein anderer Ordner eingegeben werden, ohne die `config.toml` zu ändern.
+Der Wizard zeigt den vorgeschlagenen Ziel-Basisordner beim Start an. Drücke Enter, um diesen Ordner zu verwenden, oder gib direkt einen anderen Ordner ein. Für einen einzelnen Testlauf kann so ein anderer Ordner genutzt werden, ohne die `config.toml` zu ändern.
+
+Wenn der eingegebene Ordner noch nicht existiert, fragt der Wizard, ob er erstellt werden soll.
 
 ## Wizard starten
 
@@ -90,7 +92,7 @@ python -m predigt_uploader wizard
 ## Test mit kleiner MP4 durchführen
 
 1. Wizard starten.
-2. Vorgeschlagenen Ziel-Basisordner prüfen oder einen anderen Ordner für den Testlauf eingeben.
+2. Vorgeschlagenen Ziel-Basisordner prüfen: Enter verwendet den Vorschlag, ein eingegebener Pfad verwendet einen anderen Ordner.
 3. Pfad zur kleinen MP4-Testdatei einfügen.
 4. Datum eingeben oder den Vorschlag bestätigen.
 5. Titel, Hauptbibelstelle und Redner eingeben.

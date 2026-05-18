@@ -2,7 +2,7 @@
 
 Die Standardkonfiguration liegt als Beispiel in `config.example.toml`.
 
-Später mögliche Suchreihenfolge:
+Suchreihenfolge:
 
 1. Pfad aus CLI-Argument `--config`
 2. `config.toml` im Projekt-/Programmordner
@@ -23,6 +23,8 @@ losslesscut_path = ""
 `ffmpeg_path = "ffmpeg"` bedeutet: FFmpeg wird über PATH gefunden.
 
 Die Zusammenfassung `predigt-zusammenfassung.txt` wird in Version 1 immer geschrieben. Es gibt dafür keine Config-Option.
+
+Version 1 wertet nur die Optionen aus `config.example.toml` aus. Weitere Einstellungen sollten erst dokumentiert werden, wenn der Wizard sie tatsaechlich nutzt.
 
 ## Sicherheit
 

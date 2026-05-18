@@ -11,9 +11,7 @@ losslesscut_path = ""
 [naming]
 predigt_template = "Predigt ({title}_{bible_reference})_{speaker}{extension}"
 bibelstunde_template = "Bibelstunde ({bible_reference})_{speaker}{extension}"
-folder_date_format = "%Y-%m-%d"
 folder_suffix_separator = " - "
 
 [workflow]
-default_sermon_type = "Predigt"
 copy_instead_of_move = true

@@ -17,7 +17,7 @@ Version 1 ersetzt nicht LosslessCut und automatisiert nicht WordPress/Vimeo. Sie
 6. Tool erstellt/verwendet Ordner.
 7. Tool benennt MP4 korrekt.
 8. Tool erzeugt MP3 automatisch per FFmpeg.
-9. Tool zeigt Zusammenfassung für Vimeo/WordPress.
+9. Tool zeigt den lokalen Erfolgsabschluss und schreibt `predigt-zusammenfassung.txt`.
 
 ## Nicht-Ziele in Version 1
 

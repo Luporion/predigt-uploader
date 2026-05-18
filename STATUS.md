@@ -13,6 +13,8 @@ Die Terminal-Bedienung nutzt nach Möglichkeit `questionary` für Pfeiltasten-Au
 Bei Dateipfad-Abfragen kann auch ein Ordner eingegeben werden; der Wizard zeigt dann passende Dateien im Ordner zur Auswahl an.
 Die Datumsauswahl ist nun geführter: Der Wizard kann ein Aufnahmedatum aus typischen vMix-Dateinamen erkennen, alternativ das Dateidatum, das heutige Datum oder eine manuelle Eingabe verwenden.
 Wenn eine finale MP4 im Zielordner bereits existiert, bietet der Wizard eine bewusste Auswahl an. Überschreiben ist nicht Standard und erfordert eine zweite Bestätigung.
+Für die Vorbereitung eines Zielrechners gibt es jetzt `scripts/setup-local.ps1`, `scripts/check-system.ps1` und die Installationsanleitung `docs/install-v1-5.md`.
+Für Gemeindemitarbeiter gibt es zusätzlich anklickbare `.cmd`-Startdateien im Projektstamm für Einrichtung, Systemcheck und Wizard-Start.
 
 ## Was Version 1 bereits kann
 
@@ -41,6 +43,8 @@ Wenn eine finale MP4 im Zielordner bereits existiert, bietet der Wizard eine bew
 - Schreibfehler beim Erstellen der Zusammenfassung nutzerfreundlich melden.
 - Pro Wizard-Lauf eine einfache Logdatei unter `logs/` schreiben.
 - Über `scripts/run-wizard.ps1` lokal gestartet werden, wenn `.venv` eingerichtet ist.
+- Über `scripts/setup-local.ps1` lokal eingerichtet und über `scripts/check-system.ps1` vor dem ersten Lauf geprüft werden.
+- Über anklickbare `.cmd`-Dateien im Projektstamm ohne direkte PowerShell-Eingabe eingerichtet, geprüft und gestartet werden.
 - Optional eine Rohaufnahme aus `vmix_storage` vorschlagen, in LosslessCut öffnen und nach dem manuellen Export die neue Predigt-MP4 übernehmen.
 - Bei fehlendem LosslessCut-Start einen manuellen Pfad zur `LosslessCut.exe` abfragen und erneut versuchen.
 - Ja/Nein- und Mehrfachauswahlen im Terminal über `questionary` nutzerfreundlicher anzeigen, mit Texteingabe-Fallback.
@@ -59,7 +63,7 @@ Wenn eine finale MP4 im Zielordner bereits existiert, bietet der Wizard eine bew
 
 ## Nächster geplanter Schritt
 
-Phase 1.5 lokal mit einer kleinen Rohaufnahme nach `docs/manual-test-v1-5.md` testen. Danach den Übergang zu Phase 2 planen.
+Phase 1.5 auf einem Zielrechner nach `docs/install-v1-5.md` einrichten und mit einer kleinen Rohaufnahme nach `docs/manual-test-v1-5.md` testen. Danach den Übergang zu Phase 2 planen.
 
 ## Sicherheits-Hinweis
 

@@ -28,3 +28,76 @@ def test_run_wizard_script_checks_venv_and_starts_cli_wizard() -> None:
     assert "Die virtuelle Python-Umgebung .venv wurde nicht gefunden." in content
     assert "Python wurde auf diesem Rechner nicht gefunden." in content
     assert "-m predigt_uploader wizard" in content
+
+
+def test_local_setup_script_prepares_venv_and_installs_package() -> None:
+    script = PROJECT_ROOT / "scripts" / "setup-local.ps1"
+
+    content = script.read_text(encoding="utf-8")
+
+    assert "Python 3.11 oder neuer wurde nicht gefunden." in content
+    assert "-m venv" in content
+    assert ".venv" in content
+    assert "-m pip install -e" in content
+    assert "Einrichtung abgeschlossen." in content
+
+
+def test_system_check_script_checks_wizard_ffmpeg_and_losslesscut() -> None:
+    script = PROJECT_ROOT / "scripts" / "check-system.ps1"
+
+    content = script.read_text(encoding="utf-8")
+
+    assert "PredigtUploader Systemprüfung" in content
+    assert "-m predigt_uploader --help" in content
+    assert "ffmpeg_available" in content
+    assert "losslesscut_path" in content
+    assert "FFmpeg wurde nicht gefunden" in content
+
+
+def test_install_v1_5_guide_documents_target_machine_setup() -> None:
+    guide = PROJECT_ROOT / "docs" / "install-v1-5.md"
+
+    content = guide.read_text(encoding="utf-8")
+
+    assert "Installation auf" in content or "Installation: lokale Version 1.5" in content
+    assert "setup-local.ps1" in content
+    assert "check-system.ps1" in content
+    assert "FFmpeg" in content
+    assert "LosslessCut" in content
+    assert "config.toml" in content
+    assert "losslesscut_path" in content
+    assert "run-wizard.ps1" in content
+    assert "Vimeo" in content
+    assert "WordPress" in content
+
+
+def test_clickable_cmd_launchers_exist_and_call_expected_scripts() -> None:
+    launchers = {
+        "PredigtUploader starten.cmd": "scripts\\run-wizard.ps1",
+        "PredigtUploader einrichten.cmd": "scripts\\setup-local.ps1",
+        "PredigtUploader Systemcheck.cmd": "scripts\\check-system.ps1",
+    }
+
+    for filename, expected_script in launchers.items():
+        launcher = PROJECT_ROOT / filename
+        content = launcher.read_text(encoding="utf-8")
+
+        assert launcher.exists()
+        assert 'cd /d "%~dp0"' in content
+        assert "powershell.exe -NoProfile -ExecutionPolicy Bypass -File" in content
+        assert expected_script in content
+        assert "pause >nul" in content
+        assert "Druecke eine Taste" in content
+
+
+def test_install_v1_5_guide_documents_clickable_cmd_files() -> None:
+    guide = PROJECT_ROOT / "docs" / "install-v1-5.md"
+
+    content = guide.read_text(encoding="utf-8")
+
+    assert "PredigtUploader einrichten.cmd" in content
+    assert "PredigtUploader Systemcheck.cmd" in content
+    assert "PredigtUploader starten.cmd" in content
+    assert "Doppelklick" in content
+    assert "Desktop" in content
+    assert "Verknüpfung" in content

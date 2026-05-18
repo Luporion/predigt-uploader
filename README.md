@@ -64,12 +64,35 @@ python -m predigt_uploader --help
 python -m predigt_uploader wizard
 ```
 
+## Lokale Nutzung
+
+Für einen Zielrechner ist die lokale Phase 1.5 in [docs/install-v1-5.md](docs/install-v1-5.md) beschrieben.
+
+Kurzablauf in PowerShell:
+
+```powershell
+.\scripts\setup-local.ps1
+.\scripts\check-system.ps1
+.\scripts\run-wizard.ps1
+```
+
+`setup-local.ps1` richtet `.venv` und die Python-Abhängigkeiten ein. `check-system.ps1` prüft Python, Wizard-Start, FFmpeg und optional den konfigurierten LosslessCut-Pfad. Der Wizard arbeitet weiterhin nur lokal und lädt nichts zu Vimeo oder WordPress hoch.
+
+Für Gemeindemitarbeiter gibt es im Projektordner zusätzlich anklickbare Windows-Startdateien:
+
+- `PredigtUploader einrichten.cmd`
+- `PredigtUploader Systemcheck.cmd`
+- `PredigtUploader starten.cmd`
+
+Diese Dateien können per Doppelklick genutzt werden und lassen das Fenster nach Ende oder Fehler offen.
+
 ## Wichtige Dateien
 
 - `SPEC.md` – fachliche Spezifikation
 - `AGENTS.md` – dauerhafte Anweisungen für Codex/KI-Agenten
 - `TASKS.md` – geplanter Entwicklungsablauf
 - `config.example.toml` – Beispielkonfiguration
+- `docs/install-v1-5.md` – Installation und erster Test auf einem Zielrechner
 - `docs/dev-log/` – kurze Berichte nach KI-Aufgaben
 - `src/predigt_uploader/` – Programmcode
 - `tests/` – automatische Tests

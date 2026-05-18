@@ -18,7 +18,7 @@ class ConfigLoadError(RuntimeError):
 def default_config() -> AppConfig:
     return AppConfig(
         vmix_storage=Path(r"V:\vMixStorage"),
-        recordings_base=Path(r"C:\Users\micro\Desktop\Aufnahmen"),
+        recordings_base=Path.home() / "Desktop" / "Aufnahmen",
         mp3_base=Path(r"V:\Predigten\Predigten"),
     )
 

@@ -51,14 +51,87 @@ def _ask_required(prompt: str) -> str:
 
 
 def _ask_yes_no(prompt: str, default: bool = False) -> bool:
-    default_text = "j" if default else "n"
+    default_text = "ja" if default else "nein"
+    default_label = "Ja" if default else "Nein"
+    help_text = f"Antwort: j/ja/y/yes = Ja, n/nein/no = Nein, Enter = {default_label}"
     while True:
+        print(help_text)
         value = _ask(prompt, default_text).casefold()
-        if value in {"j", "ja"}:
+        if value in {"j", "ja", "y", "yes"}:
             return True
-        if value in {"n", "nein"}:
+        if value in {"n", "nein", "no"}:
             return False
-        print("Bitte mit j für Ja oder n für Nein antworten.")
+        print("Bitte j, ja, y oder yes für Ja eingeben - oder n, nein oder no für Nein.")
+
+
+def _path_has_windows_invalid_chars(path: Path) -> bool:
+    invalid_chars = set('<>"|?*')
+    parts_to_check = [part for part in path.parts if part not in {path.drive, path.root, path.anchor}]
+    for part in parts_to_check:
+        if ":" in part or any(char in invalid_chars for char in part):
+            return True
+    return False
+
+
+def _normalize_folder_path(raw_path: str) -> Path:
+    cleaned = raw_path.strip().strip('"')
+    if not cleaned:
+        raise ValueError("leer")
+    path = Path(cleaned).expanduser()
+    if _path_has_windows_invalid_chars(path):
+        raise ValueError("ungueltige Windows-Zeichen")
+    return path
+
+
+def _prepare_recordings_base(path: Path) -> None:
+    try:
+        ensure_folder(path)
+        _check_target_folder_writable(path)
+    except PermissionError as exc:
+        raise Mp4TransferError(
+            "Der Ziel-Basisordner konnte wegen fehlender Berechtigungen nicht verwendet werden.",
+            f"Keine Berechtigung fuer Ziel-Basisordner: {path}. Details: {exc}",
+        ) from exc
+    except Mp4TransferError:
+        raise
+    except OSError as exc:
+        raise Mp4TransferError(
+            "Der Ziel-Basisordner konnte nicht erstellt oder beschrieben werden.",
+            f"Ziel-Basisordner konnte nicht vorbereitet werden: {path}. Details: {exc}",
+        ) from exc
+
+
+def _ask_recordings_base_path() -> Path:
+    while True:
+        raw = _ask_required("Anderer Ziel-Basisordner")
+        try:
+            return _normalize_folder_path(raw)
+        except ValueError:
+            print("Dieser Pfad ist nicht gültig. Bitte einen vollständigen Ordnerpfad ohne Sonderzeichen wie < > : \" | ? * eingeben.")
+
+
+def _select_recordings_base(config: AppConfig) -> AppConfig:
+    print()
+    print("Ziel-Basisordner")
+    print("In diesem Ordner legt der Wizard später Jahres- und Datumsordner an.")
+    print(f"Vorschlag: {config.recordings_base}")
+
+    while True:
+        if _ask_yes_no("Diesen Ziel-Basisordner verwenden?", True):
+            current_path = config.recordings_base
+        else:
+            current_path = _ask_recordings_base_path()
+
+        while True:
+            try:
+                _prepare_recordings_base(current_path)
+                print(f"Ziel-Basisordner ist bereit: {current_path}")
+                return replace(config, recordings_base=current_path)
+            except Mp4TransferError as exc:
+                print(exc.user_message)
+                print("Bitte einen anderen Ziel-Basisordner wählen, auf den du Schreibzugriff hast.")
+                print(f"Admin-Hinweis: {exc.admin_hint}")
+                current_path = _ask_recordings_base_path()
 
 
 def _ask_choice(prompt: str, choices: dict[str, str], default: str | None = None) -> str:
@@ -450,6 +523,9 @@ def run_wizard(args: argparse.Namespace) -> int:
     print("============================================")
     print("Dieses Programm bereitet die Dateien nur lokal vor. Es lädt nichts zu Vimeo oder WordPress hoch.")
     print()
+
+    config = _select_recordings_base(config)
+    log.event(f"Ziel-Basisordner vorbereitet: {config.recordings_base}")
 
     source = _ask_mp4_path()
     log.event(f"Quell-MP4 ausgewaehlt: {source}")

@@ -43,13 +43,13 @@ Bibelstunde (Hauptbibelstelle)_Redner Vorname Nachname.mp4
 Standardordner lokal:
 
 ```text
-C:\Users\micro\Desktop\Aufnahmen\YYYY\YYYY-MM-DD
+%USERPROFILE%\Desktop\Aufnahmen\YYYY\YYYY-MM-DD
 ```
 
 Optional mit Besonderheit:
 
 ```text
-C:\Users\micro\Desktop\Aufnahmen\YYYY\YYYY-MM-DD - Besonderheit
+%USERPROFILE%\Desktop\Aufnahmen\YYYY\YYYY-MM-DD - Besonderheit
 ```
 
 Beispiele:

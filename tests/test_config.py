@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from predigt_uploader.config import ConfigLoadError, load_config
+from predigt_uploader.config import ConfigLoadError, default_config, load_config
 
 
 def test_load_config_from_explicit_path(tmp_path: Path):
@@ -25,6 +25,15 @@ copy_instead_of_move = false
     assert str(config.recordings_base) == "D:\\Aufnahmen"
     assert config.ffmpeg_path == "C:\\tools\\ffmpeg.exe"
     assert config.copy_instead_of_move is False
+
+
+def test_default_recordings_base_uses_current_user_desktop(monkeypatch, tmp_path: Path):
+    home = tmp_path / "User"
+    monkeypatch.setattr(Path, "home", lambda: home)
+
+    config = default_config()
+
+    assert config.recordings_base == home / "Desktop" / "Aufnahmen"
 
 
 def test_load_config_ignores_removed_write_summary_file_option(tmp_path: Path):

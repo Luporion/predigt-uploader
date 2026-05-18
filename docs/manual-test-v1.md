@@ -44,6 +44,12 @@ Wenn FFmpeg fehlt, bereitet der Wizard die MP4 trotzdem im Zielordner vor und er
 
 Ohne eigene Config nutzt der Wizard eingebaute Standardwerte.
 
+Der Ziel-Basisordner wird dann aus dem aktuellen Windows-Benutzer abgeleitet:
+
+```text
+%USERPROFILE%\Desktop\Aufnahmen
+```
+
 Optional kann `config.example.toml` kopiert werden:
 
 ```powershell
@@ -57,6 +63,15 @@ Wichtige Werte:
 - `recordings_base`: Basisordner für Zielordner
 - `ffmpeg_path`: Pfad zu FFmpeg oder `ffmpeg`, wenn FFmpeg im PATH liegt
 - `copy_instead_of_move`: `true` bedeutet, die MP4 wird standardmäßig kopiert
+
+Beispiel:
+
+```toml
+[paths]
+recordings_base = "D:\\Predigt-Test\\Aufnahmen"
+```
+
+Der Wizard zeigt den vorgeschlagenen Ziel-Basisordner beim Start an. Für einen einzelnen Testlauf kann dort ein anderer Ordner eingegeben werden, ohne die `config.toml` zu ändern.
 
 ## Wizard starten
 
@@ -75,13 +90,14 @@ python -m predigt_uploader wizard
 ## Test mit kleiner MP4 durchführen
 
 1. Wizard starten.
-2. Datum eingeben oder den Vorschlag bestätigen.
-3. Titel, Hauptbibelstelle und Redner eingeben.
-4. Pfad zur kleinen MP4-Testdatei einfügen.
-5. Entscheiden, ob eine Besonderheit im Ordnernamen stehen soll.
-6. Zielordner und finalen Dateinamen prüfen.
-7. Dateiaktion ausdrücklich bestätigen.
-8. Warten, bis die MP3-Erzeugung abgeschlossen ist oder der Wizard eine verständliche Fehlermeldung zeigt.
+2. Vorgeschlagenen Ziel-Basisordner prüfen oder einen anderen Ordner für den Testlauf eingeben.
+3. Pfad zur kleinen MP4-Testdatei einfügen.
+4. Datum eingeben oder den Vorschlag bestätigen.
+5. Titel, Hauptbibelstelle und Redner eingeben.
+6. Entscheiden, ob eine Besonderheit im Ordnernamen stehen soll.
+7. Zielordner und finalen Dateinamen prüfen.
+8. Dateiaktion ausdrücklich bestätigen.
+9. Warten, bis die MP3-Erzeugung abgeschlossen ist oder der Wizard eine verständliche Fehlermeldung zeigt.
 
 ## Erwartete Ergebnisse im Zielordner
 
@@ -103,7 +119,7 @@ Die Logdatei ist für Admin-Fehlersuche gedacht. Sie soll keine Zugangsdaten, To
 
 - Nutzerhinweis im Wizard lesen und den vorgeschlagenen Schritt ausführen.
 - Prüfen, ob die MP4-Datei noch existiert und nicht in einem anderen Programm geöffnet ist.
-- Prüfen, ob der Zielordner beschreibbar ist.
+- Prüfen, ob der Ziel-Basisordner und der Zielordner beschreibbar sind.
 - Bei MP3-Problemen prüfen, ob `ffmpeg -version` funktioniert.
 - Admin-Hinweis und passende Logdatei unter `logs/` prüfen.
 

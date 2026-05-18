@@ -3,7 +3,7 @@
 
 [paths]
 vmix_storage = "V:\\vMixStorage"
-recordings_base = "C:\\Users\\micro\\Desktop\\Aufnahmen"
+recordings_base = "C:\\Users\\DEIN-NAME\\Desktop\\Aufnahmen"
 mp3_base = "V:\\Predigten\\Predigten"
 ffmpeg_path = "ffmpeg"
 losslesscut_path = ""

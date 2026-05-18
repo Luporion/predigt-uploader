@@ -29,6 +29,12 @@ class Mp3ResultError(RuntimeError):
         self.admin_hint = admin_hint
 
 
+class SummaryWriteError(RuntimeError):
+    def __init__(self, admin_hint: str) -> None:
+        super().__init__(admin_hint)
+        self.admin_hint = admin_hint
+
+
 def _ask(prompt: str, default: str | None = None) -> str:
     suffix = f" [{default}]" if default else ""
     value = input(f"{prompt}{suffix}: ").strip()
@@ -333,24 +339,38 @@ def _print_mp3_manual_steps(plan: ProcessingPlan) -> None:
     print(f"- Lege die MP3 in diesen Ordner: {plan.target_mp3.parent}")
 
 
-def _validate_created_mp3(target_mp3: Path) -> None:
-    if not target_mp3.exists():
+def _validate_non_empty_file(path: Path, label: str) -> None:
+    if not path.exists():
         raise Mp3ResultError(
-            "Die MP3 wurde nach der Konvertierung nicht gefunden.",
-            f"Erwartete MP3-Datei fehlt: {target_mp3}",
+            f"Die {label} wurde nicht gefunden.",
+            f"Erwartete Datei fehlt: {path}",
         )
     try:
-        size = target_mp3.stat().st_size
+        size = path.stat().st_size
     except OSError as exc:
         raise Mp3ResultError(
-            "Die MP3 konnte nach der Konvertierung nicht geprüft werden.",
-            f"Dateigröße konnte nicht gelesen werden: {target_mp3}. Details: {exc}",
+            f"Die {label} konnte nicht geprüft werden.",
+            f"Dateigröße konnte nicht gelesen werden: {path}. Details: {exc}",
         ) from exc
     if size <= 0:
         raise Mp3ResultError(
-            "Die MP3 wurde erstellt, ist aber leer.",
-            f"MP3-Datei hat 0 Bytes: {target_mp3}",
+            f"Die {label} ist leer.",
+            f"Datei hat 0 Bytes: {path}",
         )
+
+
+def _validate_created_mp3(target_mp3: Path) -> None:
+    try:
+        _validate_non_empty_file(target_mp3, "MP3")
+    except Mp3ResultError as exc:
+        user_message = exc.user_message
+        if "nicht gefunden" in user_message:
+            user_message = "Die MP3 wurde nach der Konvertierung nicht gefunden."
+        elif "leer" in user_message:
+            user_message = "Die MP3 wurde erstellt, ist aber leer."
+        elif "konnte nicht geprüft" in user_message:
+            user_message = "Die MP3 konnte nach der Konvertierung nicht geprüft werden."
+        raise Mp3ResultError(user_message, exc.admin_hint) from exc
 
 
 def _print_mp3_creation_error(plan: ProcessingPlan, user_message: str, admin_hint: str) -> None:
@@ -361,6 +381,49 @@ def _print_mp3_creation_error(plan: ProcessingPlan, user_message: str, admin_hin
     _print_mp3_manual_steps(plan)
     print()
     print(f"Admin-Hinweis: {admin_hint}")
+
+
+def _write_summary_files_safely(plan: ProcessingPlan) -> Path:
+    try:
+        write_summary_files(plan)
+    except PermissionError as exc:
+        raise SummaryWriteError(
+            f"Keine Berechtigung beim Schreiben der Zusammenfassung in {plan.target_mp4.parent}. Details: {exc}"
+        ) from exc
+    except OSError as exc:
+        raise SummaryWriteError(
+            f"Zusammenfassung konnte nicht in {plan.target_mp4.parent} geschrieben werden. Details: {exc}"
+        ) from exc
+    return plan.target_mp4.parent / "predigt-zusammenfassung.txt"
+
+
+def _print_summary_write_error(plan: ProcessingPlan, exc: SummaryWriteError) -> None:
+    print()
+    print("Die Mediendateien wurden vorbereitet, aber die Zusammenfassung konnte nicht geschrieben werden.")
+    print(f"Zielordner: {plan.target_mp4.parent}")
+    print("Bitte prüfe, ob der Ordner geöffnet, schreibgeschützt oder nicht erreichbar ist.")
+    print(f"Admin-Hinweis: {exc.admin_hint}")
+
+
+def _validate_local_workflow_result(plan: ProcessingPlan) -> None:
+    try:
+        _validate_non_empty_file(plan.target_mp4, "MP4")
+        _validate_non_empty_file(plan.target_mp3, "MP3")
+    except Mp3ResultError as exc:
+        raise Mp3ResultError(
+            "Der lokale Workflow konnte nicht erfolgreich abgeschlossen werden.",
+            exc.admin_hint,
+        ) from exc
+
+
+def _print_local_workflow_success(plan: ProcessingPlan, summary_path: Path | None) -> None:
+    print()
+    print("Lokaler Workflow erfolgreich abgeschlossen.")
+    print(f"Zielordner: {plan.target_mp4.parent}")
+    print(f"Finale MP4: {plan.target_mp4}")
+    print(f"Finale MP3: {plan.target_mp3}")
+    if summary_path is not None:
+        print(f"Zusammenfassung: {summary_path}")
 
 
 def run_wizard(args: argparse.Namespace) -> int:
@@ -442,11 +505,23 @@ def run_wizard(args: argparse.Namespace) -> int:
         )
         return 3
 
-    if config.write_summary_file:
-        write_summary_files(plan)
-        print("Die Zusammenfassung wurde geschrieben: predigt-zusammenfassung.txt und predigt-info.json")
+    try:
+        summary_path = _write_summary_files_safely(plan)
+        print("Die Zusammenfassung wurde geschrieben: predigt-zusammenfassung.txt")
+    except SummaryWriteError as exc:
+        _print_summary_write_error(plan, exc)
+        return 4
 
-    print("Fertig.")
+    try:
+        _validate_local_workflow_result(plan)
+    except Mp3ResultError as exc:
+        print()
+        print(exc.user_message)
+        print("Bitte prüfe die Dateien im Zielordner, bevor du weitermachst.")
+        print(f"Admin-Hinweis: {exc.admin_hint}")
+        return 5
+
+    _print_local_workflow_success(plan, summary_path)
     return 0
 
 

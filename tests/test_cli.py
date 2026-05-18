@@ -6,18 +6,22 @@ import pytest
 from predigt_uploader.cli import (
     Mp3ResultError,
     Mp4TransferError,
+    SummaryWriteError,
     _ask_mp4_path,
     _ask_required,
     _handle_existing_target_mp4,
+    _print_local_workflow_success,
     _print_missing_ffmpeg_message,
     _print_mp4_action_preview,
     _select_target_folder,
     _transfer_mp4_to_target,
     _validate_created_mp3,
+    _validate_local_workflow_result,
     run_wizard,
 )
 from predigt_uploader.mp3 import Mp3ConversionError
 from predigt_uploader.models import AppConfig, ProcessingPlan, SermonInfo
+from predigt_uploader.report import build_summary_text
 
 
 def _config(tmp_path: Path) -> AppConfig:
@@ -440,3 +444,169 @@ def test_run_wizard_reports_empty_mp3_after_conversion(monkeypatch, tmp_path, ca
     assert "Die MP3 wurde erstellt, ist aber leer" in output
     assert "0 Bytes" in output
     assert "Traceback" not in output
+
+
+def test_build_summary_text_contains_required_fields_and_filenames(tmp_path):
+    plan = _plan(tmp_path)
+
+    text = build_summary_text(plan)
+
+    assert "Datum: 24.05.2026" in text
+    assert "Typ: Predigt" in text
+    assert "Titel: Heiligkeit" in text
+    assert "Hauptbibelstelle: Jesaja 6,1-3" in text
+    assert "Redner: Eduard Wiebe" in text
+    assert "Besonderheit Ordner: -" in text
+    assert f"MP4-Dateiname: {plan.target_mp4.name}" in text
+    assert f"MP3-Dateiname: {plan.target_mp3.name}" in text
+    assert "WordPress-Hinweise" in text
+
+
+def test_validate_local_workflow_result_requires_non_empty_mp4_and_mp3(tmp_path):
+    plan = _plan(tmp_path)
+    plan.target_mp4.parent.mkdir(parents=True)
+    plan.target_mp4.write_bytes(b"video")
+    plan.target_mp3.write_bytes(b"audio")
+
+    _validate_local_workflow_result(plan)
+
+
+def test_validate_local_workflow_result_reports_empty_mp4(tmp_path):
+    plan = _plan(tmp_path)
+    plan.target_mp4.parent.mkdir(parents=True)
+    plan.target_mp4.write_bytes(b"")
+    plan.target_mp3.write_bytes(b"audio")
+
+    with pytest.raises(Mp3ResultError) as error:
+        _validate_local_workflow_result(plan)
+
+    assert "lokale Workflow" in error.value.user_message
+    assert "0 Bytes" in error.value.admin_hint
+
+
+def test_print_local_workflow_success_shows_final_paths(tmp_path, capsys):
+    plan = _plan(tmp_path)
+    summary_path = plan.target_mp4.parent / "predigt-zusammenfassung.txt"
+
+    _print_local_workflow_success(plan, summary_path)
+
+    output = capsys.readouterr().out
+    assert "Lokaler Workflow erfolgreich abgeschlossen" in output
+    assert str(plan.target_mp4.parent) in output
+    assert str(plan.target_mp4) in output
+    assert str(plan.target_mp3) in output
+    assert str(summary_path) in output
+
+
+def test_run_wizard_success_writes_summary_and_prints_final_state(monkeypatch, tmp_path, capsys):
+    source = tmp_path / "quelle.mp4"
+    source.write_bytes(b"video")
+    config_path = tmp_path / "config.toml"
+    recordings_base = tmp_path / "Aufnahmen"
+
+    def toml_path(path: Path) -> str:
+        return str(path).replace("\\", "/")
+
+    config_path.write_text(
+        "\n".join(
+            [
+                "[paths]",
+                f'vmix_storage = "{toml_path(tmp_path / "vmix")}"',
+                f'recordings_base = "{toml_path(recordings_base)}"',
+                f'mp3_base = "{toml_path(tmp_path / "Predigten")}"',
+                'ffmpeg_path = "ffmpeg-test"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    _inputs(
+        monkeypatch,
+        [
+            str(source),
+            "2026-05-24",
+            "Heiligkeit",
+            "Jesaja 6,1-3",
+            "Eduard Wiebe",
+            "n",
+            "j",
+        ],
+    )
+    monkeypatch.setattr("predigt_uploader.cli.ffmpeg_available", lambda _config: True)
+
+    def create_mp3(_source_mp4: Path, target_mp3: Path, _config) -> None:
+        target_mp3.write_bytes(b"audio")
+
+    monkeypatch.setattr("predigt_uploader.cli.convert_mp4_to_mp3", create_mp3)
+
+    result = run_wizard(type("Args", (), {"config": str(config_path)})())
+
+    target_folder = recordings_base / "2026" / "2026-05-24"
+    target_mp4 = target_folder / "Predigt (Heiligkeit_Jesaja 6,1-3)_Eduard Wiebe.mp4"
+    target_mp3 = target_folder / "Predigt (Heiligkeit_Jesaja 6,1-3)_Eduard Wiebe.mp3"
+    summary_path = target_folder / "predigt-zusammenfassung.txt"
+    assert result == 0
+    assert target_mp4.stat().st_size > 0
+    assert target_mp3.stat().st_size > 0
+    assert summary_path.exists()
+    summary = summary_path.read_text(encoding="utf-8")
+    assert "MP4-Dateiname: Predigt (Heiligkeit_Jesaja 6,1-3)_Eduard Wiebe.mp4" in summary
+    assert "MP3-Dateiname: Predigt (Heiligkeit_Jesaja 6,1-3)_Eduard Wiebe.mp3" in summary
+    output = capsys.readouterr().out
+    assert "Lokaler Workflow erfolgreich abgeschlossen" in output
+    assert str(target_folder) in output
+    assert str(target_mp4) in output
+    assert str(target_mp3) in output
+
+
+def test_run_wizard_reports_summary_write_error(monkeypatch, tmp_path, capsys):
+    source = tmp_path / "quelle.mp4"
+    source.write_bytes(b"video")
+    config_path = tmp_path / "config.toml"
+    recordings_base = tmp_path / "Aufnahmen"
+
+    def toml_path(path: Path) -> str:
+        return str(path).replace("\\", "/")
+
+    config_path.write_text(
+        "\n".join(
+            [
+                "[paths]",
+                f'vmix_storage = "{toml_path(tmp_path / "vmix")}"',
+                f'recordings_base = "{toml_path(recordings_base)}"',
+                f'mp3_base = "{toml_path(tmp_path / "Predigten")}"',
+                'ffmpeg_path = "ffmpeg-test"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    _inputs(
+        monkeypatch,
+        [
+            str(source),
+            "2026-05-24",
+            "Heiligkeit",
+            "Jesaja 6,1-3",
+            "Eduard Wiebe",
+            "n",
+            "j",
+        ],
+    )
+    monkeypatch.setattr("predigt_uploader.cli.ffmpeg_available", lambda _config: True)
+
+    def create_mp3(_source_mp4: Path, target_mp3: Path, _config) -> None:
+        target_mp3.write_bytes(b"audio")
+
+    def fail_summary(_plan: ProcessingPlan) -> Path:
+        raise SummaryWriteError("Schreibfehler Test")
+
+    monkeypatch.setattr("predigt_uploader.cli.convert_mp4_to_mp3", create_mp3)
+    monkeypatch.setattr("predigt_uploader.cli._write_summary_files_safely", fail_summary)
+
+    result = run_wizard(type("Args", (), {"config": str(config_path)})())
+
+    assert result == 4
+    output = capsys.readouterr().out
+    assert "Zusammenfassung konnte nicht geschrieben werden" in output
+    assert "Admin-Hinweis" in output
+    assert "Schreibfehler Test" in output
+    assert "Lokaler Workflow erfolgreich abgeschlossen" not in output

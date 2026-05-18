@@ -6,7 +6,7 @@ PredigtUploader soll den lokalen Predigt-Workflow einer Gemeinde unter Windows v
 
 ## Aktueller Entwicklungsstand
 
-Das Projekt ist ein lokaler CLI-Prototyp in Phase 1. Die Grundstruktur, Fachregeln für Dateinamen und Ordner sowie automatische Tests sind vorhanden. Der Terminal-Wizard wurde nutzerfreundlicher gemacht, prüft Eingaben robuster, sichert die lokale MP4-Übernahme besser ab und prüft die MP3-Erzeugung genauer.
+Das Projekt ist ein lokaler CLI-Prototyp in Phase 1. Die Grundstruktur, Fachregeln für Dateinamen und Ordner sowie automatische Tests sind vorhanden. Der Terminal-Wizard wurde nutzerfreundlicher gemacht, prüft Eingaben robuster, sichert die lokale MP4-Übernahme besser ab, prüft die MP3-Erzeugung genauer und meldet den lokalen Workflow-Endzustand klar.
 
 ## Was Version 1 bereits kann
 
@@ -26,7 +26,10 @@ Das Projekt ist ein lokaler CLI-Prototyp in Phase 1. Die Grundstruktur, Fachrege
 - MP3-Erzeugung über externes FFmpeg anstoßen, wenn FFmpeg verfügbar ist.
 - Nach der MP3-Erzeugung prüfen, ob die MP3 existiert und größer als 0 Bytes ist.
 - Bei Fehlern in der MP3-Erzeugung verständlich erklären, wo die vorbereitete MP4 liegt und wie man manuell weitermacht.
-- Zusammenfassungsdateien im Zielordner schreiben.
+- MP4 und MP3 vor der Erfolgsmeldung nochmal auf Existenz und Dateigröße prüfen.
+- Den erfolgreichen lokalen Abschluss mit Zielordner, finaler MP4 und finaler MP3 anzeigen.
+- Eine kurze `predigt-zusammenfassung.txt` im Zielordner schreiben.
+- Schreibfehler beim Erstellen der Zusammenfassung nutzerfreundlich melden.
 
 ## Bewusst noch nicht enthalten
 
@@ -39,7 +42,7 @@ Das Projekt ist ein lokaler CLI-Prototyp in Phase 1. Die Grundstruktur, Fachrege
 
 ## Nächster geplanter Schritt
 
-Zusammenfassung als Textdatei im Zielordner weiter prüfen und den lokalen Workflow-Endzustand abrunden.
+Phase-1-Aufgabenstand prüfen und die noch offenen CLI-Prototyp-Punkte gezielt abschließen.
 
 ## Sicherheits-Hinweis
 

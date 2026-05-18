@@ -22,6 +22,8 @@ losslesscut_path = ""
 
 `ffmpeg_path = "ffmpeg"` bedeutet: FFmpeg wird über PATH gefunden.
 
+Die Zusammenfassung `predigt-zusammenfassung.txt` wird in Version 1 immer geschrieben. Es gibt dafür keine Config-Option.
+
 ## Sicherheit
 
 Keine Tokens/Passwörter in `config.example.toml`.

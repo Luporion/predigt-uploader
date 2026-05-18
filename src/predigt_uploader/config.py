@@ -75,5 +75,4 @@ def load_config(explicit_path: Path | None = None) -> AppConfig:
         bibelstunde_template=str(_get_nested(loaded, "naming", "bibelstunde_template", base.bibelstunde_template)),
         folder_suffix_separator=str(_get_nested(loaded, "naming", "folder_suffix_separator", base.folder_suffix_separator)),
         copy_instead_of_move=bool(_get_nested(loaded, "workflow", "copy_instead_of_move", base.copy_instead_of_move)),
-        write_summary_file=bool(_get_nested(loaded, "workflow", "write_summary_file", base.write_summary_file)),
     )

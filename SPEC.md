@@ -108,8 +108,10 @@ Windows-ungültige Zeichen müssen automatisch ersetzt werden:
 - MP4 kopieren/verschieben und korrekt umbenennen
 - MP3 aus MP4 per FFmpeg erzeugen
 - prüfen, dass MP4 und MP3 existieren
-- Zusammenfassung anzeigen
+- `predigt-zusammenfassung.txt` für die manuelle Weiterarbeit schreiben und anzeigen
 - Logdatei schreiben
+
+Version 1 schreibt keine zusätzliche `predigt-info.json`. Strukturierte Übergabedaten können in einer späteren Phase bewusst neu entschieden werden.
 
 ## Version 1: Noch nicht enthalten
 

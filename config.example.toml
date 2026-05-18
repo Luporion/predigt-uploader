@@ -17,4 +17,3 @@ folder_suffix_separator = " - "
 [workflow]
 default_sermon_type = "Predigt"
 copy_instead_of_move = true
-write_summary_file = true

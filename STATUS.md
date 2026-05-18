@@ -30,6 +30,7 @@ Das Projekt ist ein lokaler CLI-Prototyp in Phase 1. Die Grundstruktur, Fachrege
 - MP4 und MP3 vor der Erfolgsmeldung nochmal auf Existenz und Dateigröße prüfen.
 - Den erfolgreichen lokalen Abschluss mit Zielordner, finaler MP4 und finaler MP3 anzeigen.
 - Eine kurze `predigt-zusammenfassung.txt` im Zielordner schreiben.
+- Keine zusätzliche `predigt-info.json` schreiben.
 - Schreibfehler beim Erstellen der Zusammenfassung nutzerfreundlich melden.
 - Pro Wizard-Lauf eine einfache Logdatei unter `logs/` schreiben.
 
@@ -44,7 +45,7 @@ Das Projekt ist ein lokaler CLI-Prototyp in Phase 1. Die Grundstruktur, Fachrege
 
 ## Nächster geplanter Schritt
 
-Phase 1 abschließend prüfen und entscheiden, ob `predigt-info.json` und `write_summary_file` weiter benötigt werden.
+Phase 1 abschließend gegen `SPEC.md` prüfen und danach den Übergang zu Phase 2 planen.
 
 ## Sicherheits-Hinweis
 

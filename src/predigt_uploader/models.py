@@ -26,7 +26,6 @@ class AppConfig:
     bibelstunde_template: str = "Bibelstunde ({bible_reference})_{speaker}{extension}"
     folder_suffix_separator: str = " - "
     copy_instead_of_move: bool = True
-    write_summary_file: bool = True
 
 
 @dataclass(frozen=True)

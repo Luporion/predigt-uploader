@@ -15,7 +15,7 @@ Version 1 automatisiert **noch nicht WordPress** und lädt **noch nicht zu Vimeo
 5. optional Besonderheit im Ordnernamen ergänzen
 6. MP4 in den Zielordner verschieben/umbenennen
 7. gleichnamige MP3 per FFmpeg erzeugen
-8. Zusammenfassung für Vimeo/WordPress anzeigen
+8. `predigt-zusammenfassung.txt` für die manuelle Weiterarbeit anzeigen/speichern
 
 ## Zielgruppe
 

@@ -12,7 +12,7 @@ from .filename import build_media_filename, sanitize_filename_part
 from .folders import ensure_folder, resolve_folder
 from .models import AppConfig, ProcessingPlan, SermonInfo
 from .mp3 import Mp3ConversionError, convert_mp4_to_mp3, ffmpeg_available
-from .report import build_summary_text, write_summary_files
+from .report import build_summary_text, write_summary_file
 from .run_log import WorkflowLog
 
 
@@ -384,9 +384,9 @@ def _print_mp3_creation_error(plan: ProcessingPlan, user_message: str, admin_hin
     print(f"Admin-Hinweis: {admin_hint}")
 
 
-def _write_summary_files_safely(plan: ProcessingPlan) -> Path:
+def _write_summary_file_safely(plan: ProcessingPlan) -> Path:
     try:
-        write_summary_files(plan)
+        write_summary_file(plan)
     except PermissionError as exc:
         raise SummaryWriteError(
             f"Keine Berechtigung beim Schreiben der Zusammenfassung in {plan.target_mp4.parent}. Details: {exc}"
@@ -548,7 +548,7 @@ def run_wizard(args: argparse.Namespace) -> int:
         return 3
 
     try:
-        summary_path = _write_summary_files_safely(plan)
+        summary_path = _write_summary_file_safely(plan)
         print("Die Zusammenfassung wurde geschrieben: predigt-zusammenfassung.txt")
         log.event(f"Zusammenfassung geschrieben: {summary_path}")
     except SummaryWriteError as exc:

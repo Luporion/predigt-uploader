@@ -27,6 +27,21 @@ copy_instead_of_move = false
     assert config.copy_instead_of_move is False
 
 
+def test_load_config_ignores_removed_write_summary_file_option(tmp_path: Path):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        '''
+[workflow]
+write_summary_file = false
+''',
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path)
+
+    assert not hasattr(config, "write_summary_file")
+
+
 def test_load_config_raises_for_missing_explicit_path(tmp_path: Path):
     missing_path = tmp_path / "fehlt.toml"
 

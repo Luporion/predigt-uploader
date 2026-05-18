@@ -550,10 +550,12 @@ def test_run_wizard_success_writes_summary_and_prints_final_state(monkeypatch, t
     target_mp4 = target_folder / "Predigt (Heiligkeit_Jesaja 6,1-3)_Eduard Wiebe.mp4"
     target_mp3 = target_folder / "Predigt (Heiligkeit_Jesaja 6,1-3)_Eduard Wiebe.mp3"
     summary_path = target_folder / "predigt-zusammenfassung.txt"
+    info_json_path = target_folder / "predigt-info.json"
     assert result == 0
     assert target_mp4.stat().st_size > 0
     assert target_mp3.stat().st_size > 0
     assert summary_path.exists()
+    assert not info_json_path.exists()
     summary = summary_path.read_text(encoding="utf-8")
     assert "MP4-Dateiname: Predigt (Heiligkeit_Jesaja 6,1-3)_Eduard Wiebe.mp4" in summary
     assert "MP3-Dateiname: Predigt (Heiligkeit_Jesaja 6,1-3)_Eduard Wiebe.mp3" in summary
@@ -617,7 +619,7 @@ def test_run_wizard_reports_summary_write_error(monkeypatch, tmp_path, capsys):
         raise SummaryWriteError("Schreibfehler Test")
 
     monkeypatch.setattr("predigt_uploader.cli.convert_mp4_to_mp3", create_mp3)
-    monkeypatch.setattr("predigt_uploader.cli._write_summary_files_safely", fail_summary)
+    monkeypatch.setattr("predigt_uploader.cli._write_summary_file_safely", fail_summary)
 
     result = run_wizard(type("Args", (), {"config": str(config_path)})())
 

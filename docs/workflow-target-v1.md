@@ -34,5 +34,6 @@ Im Zielordner liegen:
 Predigt (Titel_Bibelstelle)_Redner.mp4
 Predigt (Titel_Bibelstelle)_Redner.mp3
 predigt-zusammenfassung.txt
-predigt-info.json
 ```
+
+Version 1 schreibt bewusst keine zusätzliche `predigt-info.json`. Die Textzusammenfassung ist das vorgesehene lokale Übergabedokument.

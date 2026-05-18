@@ -28,3 +28,6 @@ build/
 .DS_Store
 Thumbs.db
 .vscode/*.local.json
+
+# Python packaging artifacts
+*.egg-info/

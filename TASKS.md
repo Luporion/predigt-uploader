@@ -19,9 +19,7 @@
 - [x] MP3-Erzeugung implementieren und testen
 - [x] Zusammenfassung als Textdatei im Zielordner speichern
 
-Offene Klärung aus `SPEC.md`:
-
-- [ ] Logdatei schreiben
+- [x] Logdatei schreiben
 
 ## Phase 2: Windows-Nutzerfreundlichkeit
 

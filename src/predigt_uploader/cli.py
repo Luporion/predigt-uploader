@@ -13,6 +13,7 @@ from .folders import ensure_folder, resolve_folder
 from .models import AppConfig, ProcessingPlan, SermonInfo
 from .mp3 import Mp3ConversionError, convert_mp4_to_mp3, ffmpeg_available
 from .report import build_summary_text, write_summary_files
+from .run_log import WorkflowLog
 
 
 class Mp4TransferError(RuntimeError):
@@ -434,11 +435,16 @@ def _print_config_load_error(exc: ConfigLoadError) -> None:
 
 
 def run_wizard(args: argparse.Namespace) -> int:
+    log = WorkflowLog.start(config_path=args.config)
+    log.event("Wizard gestartet.")
     try:
         config = load_config(Path(args.config) if args.config else None)
     except ConfigLoadError as exc:
+        log.error("Konfiguration konnte nicht geladen werden.", admin_hint=exc.admin_hint)
+        log.finish("Abbruch wegen Config-Fehler.")
         _print_config_load_error(exc)
         return 6
+    log.event("Konfiguration geladen.")
 
     print("PredigtUploader – lokaler Version-1-Prototyp")
     print("============================================")
@@ -446,6 +452,7 @@ def run_wizard(args: argparse.Namespace) -> int:
     print()
 
     source = _ask_mp4_path()
+    log.event(f"Quell-MP4 ausgewaehlt: {source}")
 
     sermon_date = _ask_date()
     title = _ask_required("Predigttitel")
@@ -463,19 +470,28 @@ def run_wizard(args: argparse.Namespace) -> int:
 
     selected = _select_target_folder(config, info)
     if selected is None:
+        log.finish("Abbruch bei Zielordner-Auswahl.")
         print("Abgebrochen.")
         return 1
     target_folder, info = selected
+    log.event(f"Zielordner ausgewaehlt: {target_folder}")
 
     target_mp4 = target_folder / build_media_filename(info, config, ".mp4")
     target_mp3 = target_folder / build_media_filename(info, config, ".mp3")
     plan = ProcessingPlan(source_mp4=source, target_mp4=target_mp4, target_mp3=target_mp3, info=info)
+    log.plan(plan)
 
     existing_choice = _handle_existing_target_mp4(plan)
     if existing_choice is None:
+        log.finish("Abbruch wegen vorhandener Zieldatei.")
         print("Abgebrochen.")
         return 1
     plan, keep_existing_mp4 = existing_choice
+    if keep_existing_mp4:
+        log.event("Vorhandene MP4 wird behalten.")
+    else:
+        log.event("MP4-Uebernahme wird vorbereitet.")
+    log.plan(plan)
 
     print()
     print(build_summary_text(plan))
@@ -484,24 +500,37 @@ def run_wizard(args: argparse.Namespace) -> int:
         print("Hinweis: Die vorhandene MP4 wird behalten. Es wird nichts kopiert oder verschoben.")
     print()
     if not _ask_yes_no("MP4-Datei jetzt so übernehmen?", False):
+        log.finish("Abbruch vor MP4-Uebernahme.")
         print("Abgebrochen.")
         return 1
 
     try:
         _transfer_mp4_to_target(plan, config, keep_existing=keep_existing_mp4)
     except Mp4TransferError as exc:
+        log.error("MP4 konnte nicht uebernommen werden.", admin_hint=exc.admin_hint)
+        log.finish("Abbruch bei MP4-Uebernahme.")
         _print_mp4_transfer_error(exc)
         return 2
+    log.event("MP4-Uebernahme abgeschlossen.")
 
     if not ffmpeg_available(config):
+        log.error(
+            "FFmpeg ist nicht verfuegbar.",
+            admin_hint=f"ffmpeg_path: {config.ffmpeg_path!r}",
+        )
+        log.finish("Abbruch vor MP3-Erzeugung.")
         _print_missing_ffmpeg_message(plan, config)
         return 3
+    log.event("FFmpeg ist verfuegbar.")
 
     try:
         convert_mp4_to_mp3(plan.target_mp4, plan.target_mp3, config)
         _validate_created_mp3(plan.target_mp3)
         print(f"Die MP3 wurde erstellt: {plan.target_mp3}")
+        log.event("MP3-Erzeugung abgeschlossen und geprueft.")
     except Mp3ConversionError as exc:
+        log.error("MP3 konnte nicht erstellt werden.", admin_hint=str(exc))
+        log.finish("Abbruch bei MP3-Erzeugung.")
         _print_mp3_creation_error(
             plan,
             "Die MP3 konnte nicht erstellt werden.",
@@ -509,6 +538,8 @@ def run_wizard(args: argparse.Namespace) -> int:
         )
         return 3
     except Mp3ResultError as exc:
+        log.error("MP3-Ergebnis ist ungueltig.", admin_hint=exc.admin_hint)
+        log.finish("Abbruch bei MP3-Pruefung.")
         _print_mp3_creation_error(
             plan,
             exc.user_message,
@@ -519,20 +550,29 @@ def run_wizard(args: argparse.Namespace) -> int:
     try:
         summary_path = _write_summary_files_safely(plan)
         print("Die Zusammenfassung wurde geschrieben: predigt-zusammenfassung.txt")
+        log.event(f"Zusammenfassung geschrieben: {summary_path}")
     except SummaryWriteError as exc:
+        log.error("Zusammenfassung konnte nicht geschrieben werden.", admin_hint=exc.admin_hint)
+        log.finish("Abbruch beim Schreiben der Zusammenfassung.")
         _print_summary_write_error(plan, exc)
         return 4
 
     try:
         _validate_local_workflow_result(plan)
     except Mp3ResultError as exc:
+        log.error("Lokaler Workflow-Endzustand ist ungueltig.", admin_hint=exc.admin_hint)
+        log.finish("Abbruch bei Workflow-Endpruefung.")
         print()
         print(exc.user_message)
         print("Bitte prüfe die Dateien im Zielordner, bevor du weitermachst.")
         print(f"Admin-Hinweis: {exc.admin_hint}")
         return 5
+    log.event("Lokaler Workflow-Endzustand geprueft.")
 
     _print_local_workflow_success(plan, summary_path)
+    if log.enabled:
+        print(f"Logdatei: {log.path}")
+    log.finish("Workflow erfolgreich abgeschlossen.")
     return 0
 
 

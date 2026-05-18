@@ -6,7 +6,7 @@ PredigtUploader soll den lokalen Predigt-Workflow einer Gemeinde unter Windows v
 
 ## Aktueller Entwicklungsstand
 
-Das Projekt ist ein lokaler CLI-Prototyp in Phase 1. Die Grundstruktur, Fachregeln für Dateinamen und Ordner sowie automatische Tests sind vorhanden. Der Terminal-Wizard wurde nutzerfreundlicher gemacht, prüft Eingaben robuster, behandelt Config-Fehler verständlich, sichert die lokale MP4-Übernahme besser ab, prüft die MP3-Erzeugung genauer und meldet den lokalen Workflow-Endzustand klar.
+Das Projekt ist ein lokaler CLI-Prototyp in Phase 1. Die Grundstruktur, Fachregeln für Dateinamen und Ordner sowie automatische Tests sind vorhanden. Der Terminal-Wizard wurde nutzerfreundlicher gemacht, prüft Eingaben robuster, behandelt Config-Fehler verständlich, sichert die lokale MP4-Übernahme besser ab, prüft die MP3-Erzeugung genauer, schreibt eine einfache Logdatei und meldet den lokalen Workflow-Endzustand klar.
 
 ## Was Version 1 bereits kann
 
@@ -31,6 +31,7 @@ Das Projekt ist ein lokaler CLI-Prototyp in Phase 1. Die Grundstruktur, Fachrege
 - Den erfolgreichen lokalen Abschluss mit Zielordner, finaler MP4 und finaler MP3 anzeigen.
 - Eine kurze `predigt-zusammenfassung.txt` im Zielordner schreiben.
 - Schreibfehler beim Erstellen der Zusammenfassung nutzerfreundlich melden.
+- Pro Wizard-Lauf eine einfache Logdatei unter `logs/` schreiben.
 
 ## Bewusst noch nicht enthalten
 
@@ -43,7 +44,7 @@ Das Projekt ist ein lokaler CLI-Prototyp in Phase 1. Die Grundstruktur, Fachrege
 
 ## Nächster geplanter Schritt
 
-Klären und umsetzen, wie die in `SPEC.md` geforderte Logdatei für Version 1 geschrieben werden soll.
+Phase 1 abschließend prüfen und entscheiden, ob `predigt-info.json` und `write_summary_file` weiter benötigt werden.
 
 ## Sicherheits-Hinweis
 

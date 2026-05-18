@@ -22,6 +22,12 @@ from predigt_uploader.cli import (
 from predigt_uploader.mp3 import Mp3ConversionError
 from predigt_uploader.models import AppConfig, ProcessingPlan, SermonInfo
 from predigt_uploader.report import build_summary_text
+from predigt_uploader.run_log import WorkflowLog
+
+
+@pytest.fixture(autouse=True)
+def _isolate_working_directory(monkeypatch, tmp_path: Path):
+    monkeypatch.chdir(tmp_path)
 
 
 def _config(tmp_path: Path) -> AppConfig:
@@ -556,6 +562,17 @@ def test_run_wizard_success_writes_summary_and_prints_final_state(monkeypatch, t
     assert str(target_folder) in output
     assert str(target_mp4) in output
     assert str(target_mp3) in output
+    assert "Logdatei:" in output
+    log_files = list((tmp_path / "logs").glob("predigt-uploader-*.log"))
+    assert len(log_files) == 1
+    log_text = log_files[0].read_text(encoding="utf-8")
+    assert "Startzeit:" in log_text
+    assert f"Config: {config_path}" in log_text
+    assert f"Quell-MP4: {source}" in log_text
+    assert f"Zielordner: {target_folder}" in log_text
+    assert f"Finaler MP4-Dateiname: {target_mp4.name}" in log_text
+    assert f"Finaler MP3-Dateiname: {target_mp3.name}" in log_text
+    assert "Workflow erfolgreich abgeschlossen" in log_text
 
 
 def test_run_wizard_reports_summary_write_error(monkeypatch, tmp_path, capsys):
@@ -624,6 +641,11 @@ def test_run_wizard_reports_missing_config_without_traceback(tmp_path, capsys):
     assert "Admin-Hinweis" in output
     assert str(config_path) in output
     assert "Traceback" not in output
+    log_files = list((tmp_path / "logs").glob("predigt-uploader-*.log"))
+    assert len(log_files) == 1
+    log_text = log_files[0].read_text(encoding="utf-8")
+    assert f"Config: {config_path}" in log_text
+    assert "Konfiguration konnte nicht geladen werden" in log_text
 
 
 def test_run_wizard_reports_invalid_config_without_traceback(tmp_path, capsys):
@@ -638,3 +660,25 @@ def test_run_wizard_reports_invalid_config_without_traceback(tmp_path, capsys):
     assert "ungültig" in output
     assert "Admin-Hinweis" in output
     assert "Traceback" not in output
+
+
+def test_workflow_log_uses_standardconfig_label(tmp_path):
+    log = WorkflowLog.start(config_path=None, base_dir=tmp_path)
+    log.finish("Test abgeschlossen.")
+
+    text = log.path.read_text(encoding="utf-8")
+    assert "Config: Standardconfig" in text
+    assert "Test abgeschlossen" in text
+
+
+def test_workflow_log_disables_itself_when_writing_fails(monkeypatch, tmp_path):
+    log = WorkflowLog(tmp_path / "logs" / "test.log")
+
+    def fail_open(*_args, **_kwargs):
+        raise PermissionError("kein Zugriff")
+
+    monkeypatch.setattr(Path, "open", fail_open)
+
+    log.event("Das wird nicht geschrieben.")
+
+    assert log.enabled is False

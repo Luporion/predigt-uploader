@@ -11,7 +11,7 @@ from .config import load_config
 from .filename import build_media_filename, sanitize_filename_part
 from .folders import ensure_folder, resolve_folder
 from .models import AppConfig, ProcessingPlan, SermonInfo
-from .mp3 import Mp3ConversionError, convert_mp4_to_mp3
+from .mp3 import Mp3ConversionError, convert_mp4_to_mp3, ffmpeg_available
 from .report import build_summary_text, write_summary_files
 
 
@@ -301,6 +301,24 @@ def _print_mp4_transfer_error(exc: Mp4TransferError) -> None:
     print(f"Admin-Hinweis: {exc.admin_hint}")
 
 
+def _print_missing_ffmpeg_message(plan: ProcessingPlan, config: AppConfig) -> None:
+    print()
+    print("Die MP3 kann noch nicht erstellt werden.")
+    print("Es fehlt FFmpeg. Das ist ein Hilfsprogramm, mit dem aus der MP4 eine MP3-Tondatei erstellt wird.")
+    print(f"Die MP4 wurde trotzdem vorbereitet und liegt hier: {plan.target_mp4}")
+    print()
+    print("So kannst du manuell weitermachen:")
+    print("- Erstelle aus der vorbereiteten MP4 eine MP3 mit File Converter, Shutter Encoder oder einem ähnlichen Programm.")
+    print(f"- Speichere die MP3 mit diesem Namen: {plan.target_mp3.name}")
+    print(f"- Lege die MP3 in diesen Ordner: {plan.target_mp3.parent}")
+    print()
+    print(
+        "Admin-Hinweis: FFmpeg wurde nicht gefunden. "
+        f"Eingestellter ffmpeg_path: {config.ffmpeg_path!r}. "
+        "Erwartet wird eine ausführbare FFmpeg-Datei oder ein Eintrag im PATH."
+    )
+
+
 def run_wizard(args: argparse.Namespace) -> int:
     config = load_config(Path(args.config) if args.config else None)
 
@@ -356,6 +374,10 @@ def run_wizard(args: argparse.Namespace) -> int:
     except Mp4TransferError as exc:
         _print_mp4_transfer_error(exc)
         return 2
+
+    if not ffmpeg_available(config):
+        _print_missing_ffmpeg_message(plan, config)
+        return 3
 
     try:
         convert_mp4_to_mp3(plan.target_mp4, plan.target_mp3, config)

@@ -8,9 +8,11 @@ from predigt_uploader.cli import (
     _ask_mp4_path,
     _ask_required,
     _handle_existing_target_mp4,
+    _print_missing_ffmpeg_message,
     _print_mp4_action_preview,
     _select_target_folder,
     _transfer_mp4_to_target,
+    run_wizard,
 )
 from predigt_uploader.models import AppConfig, ProcessingPlan, SermonInfo
 
@@ -225,3 +227,77 @@ def test_transfer_mp4_reports_permission_error(monkeypatch, tmp_path):
 
     assert "fehlender Berechtigungen" in error.value.user_message
     assert "kein Zugriff" in error.value.admin_hint
+
+
+def test_print_missing_ffmpeg_message_explains_manual_next_steps(tmp_path, capsys):
+    plan = _plan(tmp_path)
+    config = _config(tmp_path)
+
+    _print_missing_ffmpeg_message(plan, config)
+
+    output = capsys.readouterr().out
+    assert "Die MP3 kann noch nicht erstellt werden" in output
+    assert "Es fehlt FFmpeg" in output
+    assert "Die MP4 wurde trotzdem vorbereitet" in output
+    assert str(plan.target_mp4) in output
+    assert "File Converter" in output
+    assert plan.target_mp3.name in output
+    assert "Admin-Hinweis" in output
+    assert config.ffmpeg_path in output
+
+
+def test_run_wizard_stops_before_mp3_conversion_when_ffmpeg_is_missing(monkeypatch, tmp_path, capsys):
+    source = tmp_path / "quelle.mp4"
+    source.write_bytes(b"video")
+    config_path = tmp_path / "config.toml"
+    recordings_base = tmp_path / "Aufnahmen"
+
+    def toml_path(path: Path) -> str:
+        return str(path).replace("\\", "/")
+
+    config_path.write_text(
+        "\n".join(
+            [
+                "[paths]",
+                f'vmix_storage = "{toml_path(tmp_path / "vmix")}"',
+                f'recordings_base = "{toml_path(recordings_base)}"',
+                f'mp3_base = "{toml_path(tmp_path / "Predigten")}"',
+                'ffmpeg_path = "ffmpeg-fehlt-fuer-test"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    _inputs(
+        monkeypatch,
+        [
+            str(source),
+            "2026-05-24",
+            "Heiligkeit",
+            "Jesaja 6,1-3",
+            "Eduard Wiebe",
+            "n",
+            "j",
+        ],
+    )
+    monkeypatch.setattr("predigt_uploader.cli.ffmpeg_available", lambda _config: False)
+
+    def fail_conversion(*_args, **_kwargs) -> None:
+        raise AssertionError("convert_mp4_to_mp3 darf ohne FFmpeg nicht aufgerufen werden")
+
+    monkeypatch.setattr("predigt_uploader.cli.convert_mp4_to_mp3", fail_conversion)
+
+    result = run_wizard(type("Args", (), {"config": str(config_path)})())
+
+    target_mp4 = (
+        recordings_base
+        / "2026"
+        / "2026-05-24"
+        / "Predigt (Heiligkeit_Jesaja 6,1-3)_Eduard Wiebe.mp4"
+    )
+    assert result == 3
+    assert source.exists()
+    assert target_mp4.exists()
+    output = capsys.readouterr().out
+    assert "Die MP4 wurde trotzdem vorbereitet" in output
+    assert "Admin-Hinweis" in output
+    assert "Traceback" not in output

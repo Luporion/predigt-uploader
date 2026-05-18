@@ -1,6 +1,8 @@
 from pathlib import Path
 
-from predigt_uploader.config import load_config
+import pytest
+
+from predigt_uploader.config import ConfigLoadError, load_config
 
 
 def test_load_config_from_explicit_path(tmp_path: Path):
@@ -23,3 +25,40 @@ copy_instead_of_move = false
     assert str(config.recordings_base) == "D:\\Aufnahmen"
     assert config.ffmpeg_path == "C:\\tools\\ffmpeg.exe"
     assert config.copy_instead_of_move is False
+
+
+def test_load_config_raises_for_missing_explicit_path(tmp_path: Path):
+    missing_path = tmp_path / "fehlt.toml"
+
+    with pytest.raises(ConfigLoadError) as error:
+        load_config(missing_path)
+
+    assert "nicht gefunden" in error.value.user_message
+    assert str(missing_path) in error.value.admin_hint
+
+
+def test_load_config_raises_for_invalid_toml(tmp_path: Path):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[paths\nrecordings_base = 'x'", encoding="utf-8")
+
+    with pytest.raises(ConfigLoadError) as error:
+        load_config(config_path)
+
+    assert "ungültig" in error.value.user_message
+    assert str(config_path) in error.value.admin_hint
+
+
+def test_load_config_raises_for_unreadable_file(monkeypatch, tmp_path: Path):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[paths]\n", encoding="utf-8")
+
+    def fail_open(*_args, **_kwargs):
+        raise PermissionError("kein Zugriff")
+
+    monkeypatch.setattr(Path, "open", fail_open)
+
+    with pytest.raises(ConfigLoadError) as error:
+        load_config(config_path)
+
+    assert "konnte nicht gelesen werden" in error.value.user_message
+    assert "kein Zugriff" in error.value.admin_hint

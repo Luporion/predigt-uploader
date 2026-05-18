@@ -6,11 +6,12 @@ PredigtUploader soll den lokalen Predigt-Workflow einer Gemeinde unter Windows v
 
 ## Aktueller Entwicklungsstand
 
-Das Projekt ist ein lokaler CLI-Prototyp in Phase 1. Die Grundstruktur, Fachregeln für Dateinamen und Ordner sowie automatische Tests sind vorhanden. Der Terminal-Wizard wurde nutzerfreundlicher gemacht, prüft Eingaben robuster, sichert die lokale MP4-Übernahme besser ab, prüft die MP3-Erzeugung genauer und meldet den lokalen Workflow-Endzustand klar.
+Das Projekt ist ein lokaler CLI-Prototyp in Phase 1. Die Grundstruktur, Fachregeln für Dateinamen und Ordner sowie automatische Tests sind vorhanden. Der Terminal-Wizard wurde nutzerfreundlicher gemacht, prüft Eingaben robuster, behandelt Config-Fehler verständlich, sichert die lokale MP4-Übernahme besser ab, prüft die MP3-Erzeugung genauer und meldet den lokalen Workflow-Endzustand klar.
 
 ## Was Version 1 bereits kann
 
 - Konfiguration mit Standardwerten und optionaler `config.toml` laden.
+- Angegebene Config-Dateien kontrolliert prüfen und verständliche Fehler bei fehlender, unlesbarer oder ungültiger Config anzeigen.
 - Predigtdaten im Terminal abfragen.
 - Leere Pflichtangaben erneut abfragen.
 - Pfad zu einer MP4-Datei prüfen.
@@ -42,7 +43,7 @@ Das Projekt ist ein lokaler CLI-Prototyp in Phase 1. Die Grundstruktur, Fachrege
 
 ## Nächster geplanter Schritt
 
-Config-Fehlerfälle nutzerfreundlich behandeln und klären, wie die in `SPEC.md` geforderte Logdatei für Version 1 geschrieben werden soll.
+Klären und umsetzen, wie die in `SPEC.md` geforderte Logdatei für Version 1 geschrieben werden soll.
 
 ## Sicherheits-Hinweis
 

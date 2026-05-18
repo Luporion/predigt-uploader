@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
-from .config import load_config
+from .config import ConfigLoadError, load_config
 from .filename import build_media_filename, sanitize_filename_part
 from .folders import ensure_folder, resolve_folder
 from .models import AppConfig, ProcessingPlan, SermonInfo
@@ -426,8 +426,19 @@ def _print_local_workflow_success(plan: ProcessingPlan, summary_path: Path | Non
         print(f"Zusammenfassung: {summary_path}")
 
 
+def _print_config_load_error(exc: ConfigLoadError) -> None:
+    print("Die Konfiguration konnte nicht geladen werden.")
+    print(exc.user_message)
+    print("Bitte prüfe den Pfad oder die Datei und starte den Wizard danach erneut.")
+    print(f"Admin-Hinweis: {exc.admin_hint}")
+
+
 def run_wizard(args: argparse.Namespace) -> int:
-    config = load_config(Path(args.config) if args.config else None)
+    try:
+        config = load_config(Path(args.config) if args.config else None)
+    except ConfigLoadError as exc:
+        _print_config_load_error(exc)
+        return 6
 
     print("PredigtUploader – lokaler Version-1-Prototyp")
     print("============================================")

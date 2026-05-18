@@ -8,6 +8,13 @@ from typing import Any
 from .models import AppConfig
 
 
+class ConfigLoadError(RuntimeError):
+    def __init__(self, user_message: str, admin_hint: str) -> None:
+        super().__init__(admin_hint)
+        self.user_message = user_message
+        self.admin_hint = admin_hint
+
+
 def default_config() -> AppConfig:
     return AppConfig(
         vmix_storage=Path(r"V:\vMixStorage"),
@@ -35,10 +42,27 @@ def load_config(explicit_path: Path | None = None) -> AppConfig:
     base = default_config()
     loaded: dict[str, Any] = {}
 
+    if explicit_path is not None and not explicit_path.exists():
+        raise ConfigLoadError(
+            "Die angegebene Konfigurationsdatei wurde nicht gefunden.",
+            f"Config-Datei existiert nicht: {explicit_path}",
+        )
+
     for path in candidate_config_paths(explicit_path):
         if path.exists():
-            with path.open("rb") as handle:
-                loaded = tomllib.load(handle)
+            try:
+                with path.open("rb") as handle:
+                    loaded = tomllib.load(handle)
+            except tomllib.TOMLDecodeError as exc:
+                raise ConfigLoadError(
+                    "Die Konfigurationsdatei ist ungültig.",
+                    f"Ungültiges TOML in {path}: {exc}",
+                ) from exc
+            except OSError as exc:
+                raise ConfigLoadError(
+                    "Die Konfigurationsdatei konnte nicht gelesen werden.",
+                    f"Config-Datei konnte nicht gelesen werden: {path}. Details: {exc}",
+                ) from exc
             break
 
     return AppConfig(

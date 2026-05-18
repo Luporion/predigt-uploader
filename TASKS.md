@@ -10,7 +10,7 @@
 
 ## Phase 1: Lokaler CLI-Prototyp
 
-- [ ] Config-Laden finalisieren
+- [x] Config-Laden finalisieren
 - [x] Wizard im Terminal nutzerfreundlicher machen
 - [x] Datei-Auswahl per Pfad robust validieren
 - [x] Ordnerlogik interaktiv fertigstellen

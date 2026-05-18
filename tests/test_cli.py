@@ -610,3 +610,31 @@ def test_run_wizard_reports_summary_write_error(monkeypatch, tmp_path, capsys):
     assert "Admin-Hinweis" in output
     assert "Schreibfehler Test" in output
     assert "Lokaler Workflow erfolgreich abgeschlossen" not in output
+
+
+def test_run_wizard_reports_missing_config_without_traceback(tmp_path, capsys):
+    config_path = tmp_path / "fehlt.toml"
+
+    result = run_wizard(type("Args", (), {"config": str(config_path)})())
+
+    assert result == 6
+    output = capsys.readouterr().out
+    assert "Konfiguration konnte nicht geladen werden" in output
+    assert "nicht gefunden" in output
+    assert "Admin-Hinweis" in output
+    assert str(config_path) in output
+    assert "Traceback" not in output
+
+
+def test_run_wizard_reports_invalid_config_without_traceback(tmp_path, capsys):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[paths\nrecordings_base = 'x'", encoding="utf-8")
+
+    result = run_wizard(type("Args", (), {"config": str(config_path)})())
+
+    assert result == 6
+    output = capsys.readouterr().out
+    assert "Konfiguration konnte nicht geladen werden" in output
+    assert "ungültig" in output
+    assert "Admin-Hinweis" in output
+    assert "Traceback" not in output

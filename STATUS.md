@@ -42,7 +42,7 @@ Das Projekt ist ein lokaler CLI-Prototyp in Phase 1. Die Grundstruktur, Fachrege
 
 ## Nächster geplanter Schritt
 
-Phase-1-Aufgabenstand prüfen und die noch offenen CLI-Prototyp-Punkte gezielt abschließen.
+Config-Fehlerfälle nutzerfreundlich behandeln und klären, wie die in `SPEC.md` geforderte Logdatei für Version 1 geschrieben werden soll.
 
 ## Sicherheits-Hinweis
 

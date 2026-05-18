@@ -11,13 +11,17 @@
 ## Phase 1: Lokaler CLI-Prototyp
 
 - [ ] Config-Laden finalisieren
-- [ ] Wizard im Terminal nutzerfreundlicher machen
-- [ ] Datei-Auswahl per Pfad robust validieren
-- [ ] Ordnerlogik interaktiv fertigstellen
-- [ ] MP4 kopieren/verschieben mit Sicherheitsabfrage
-- [ ] FFmpeg-Prüfung einbauen
-- [ ] MP3-Erzeugung implementieren und testen
-- [ ] Zusammenfassung als Textdatei im Zielordner speichern
+- [x] Wizard im Terminal nutzerfreundlicher machen
+- [x] Datei-Auswahl per Pfad robust validieren
+- [x] Ordnerlogik interaktiv fertigstellen
+- [x] MP4 kopieren/verschieben mit Sicherheitsabfrage
+- [x] FFmpeg-Prüfung einbauen
+- [x] MP3-Erzeugung implementieren und testen
+- [x] Zusammenfassung als Textdatei im Zielordner speichern
+
+Offene Klärung aus `SPEC.md`:
+
+- [ ] Logdatei schreiben
 
 ## Phase 2: Windows-Nutzerfreundlichkeit
 

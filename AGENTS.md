@@ -10,6 +10,7 @@ Entwickle ein Windows-Tool für den Predigt-Workflow einer Gemeinde. Die Zielgru
 - Ändere nicht unnötig viele Dateien auf einmal.
 - Füge für neue Logik Tests hinzu.
 - Nach jeder Aufgabe: `pytest` ausführen, falls möglich.
+- `STATUS.md` nach relevanten Änderungen am Projektstand kurz aktualisieren.
 - Keine API-Keys, Tokens, Passwörter oder privaten Pfade committen.
 - Keine echten Gemeinde-Zugangsdaten in Beispieldateien verwenden.
 - Standardbibliothek bevorzugen, externe Abhängigkeiten nur mit Begründung.

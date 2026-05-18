@@ -23,6 +23,16 @@ def test_choose_from_options_fallback_uses_number(monkeypatch):
     assert choose_from_options("Auswahl", options, input_func=lambda _prompt: "2") == "b"
 
 
+def test_choose_from_options_fallback_accepts_alias(monkeypatch):
+    monkeypatch.setenv("PREDIGT_UPLOADER_TEXT_UI", "1")
+    options = [
+        MenuOption("Behalten", "keep", ("b", "behalten")),
+        MenuOption("Überschreiben", "overwrite", ("o", "overwrite", "überschreiben")),
+    ]
+
+    assert choose_from_options("Auswahl", options, input_func=lambda _prompt: "überschreiben") == "overwrite"
+
+
 def test_ask_yes_no_uses_questionary_when_available(monkeypatch):
     monkeypatch.delenv("PREDIGT_UPLOADER_TEXT_UI", raising=False)
     monkeypatch.setattr("predigt_uploader.ui._questionary_select", lambda _prompt, _options, _default: True)

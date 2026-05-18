@@ -35,6 +35,8 @@
 - [x] Terminal-Auswahl mit questionary und Text-Fallback einfuehren
 - [x] Textmodus per PREDIGT_UPLOADER_TEXT_UI=1 erzwingen
 - [x] Dateipfad-Abfragen koennen passende Dateien aus einem angegebenen Ordner anbieten
+- [x] Datumsauswahl mit Aufnahmedatum, heutigem Datum und manueller Eingabe anbieten
+- [x] vorhandene Ziel-MP4 per Auswahl behandeln und Ueberschreiben doppelt bestaetigen
 - [x] bei fehlendem Export manuellen Pfad erlauben
 - [x] danach bestehenden lokalen Workflow weiterverwenden
 

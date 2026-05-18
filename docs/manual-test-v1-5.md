@@ -64,7 +64,18 @@ Keine Zugangsdaten, Tokens oder privaten Passwörter in die Config schreiben.
 9. Nach dem Export zum Wizard zurückkehren und Enter drücken.
 10. Wenn mehrere neue MP4-Dateien gefunden werden, bewusst die richtige Predigtdatei auswählen.
 11. Wenn keine Datei gefunden wird, den exportierten MP4-Pfad manuell eingeben.
-12. Danach läuft der bekannte lokale Workflow weiter: Metadaten, Zielordner, MP4 übernehmen, MP3 erzeugen, Zusammenfassung, Log.
+12. Danach läuft der bekannte lokale Workflow weiter: Datum, Metadaten, Zielordner, MP4 übernehmen, MP3 erzeugen, Zusammenfassung, Log.
+
+Bei der Datumsauswahl bietet der Wizard nach Möglichkeit das Aufnahmedatum aus typischen vMix-Dateinamen an, zum Beispiel aus `Gottesdienst - 10 Mai 2026 - 09-55-08.mp4`. Falls kein Datum im Dateinamen erkannt wird, kann das Dateidatum der MP4 angeboten werden. Alternativ können immer das heutige Datum oder ein anderes Datum per Hand gewählt werden.
+
+Wenn die finale MP4-Datei im Zielordner bereits existiert, überschreibt der Wizard sie nicht automatisch. Es gibt eine bewusste Auswahl:
+
+- vorhandene Datei behalten und ohne Kopieren/Verschieben weiterarbeiten
+- neuen Dateinamen verwenden
+- abbrechen
+- überschreiben
+
+Überschreiben ersetzt die vorhandene Datei und muss deshalb zusätzlich bestätigt werden.
 
 Bei Ja/Nein-Fragen und mehreren gefundenen MP4-Dateien nutzt der Wizard nach Möglichkeit eine stabile Pfeiltasten-Auswahl über `questionary`. Falls das Terminal dies nicht unterstützt, funktioniert weiterhin die Texteingabe mit `ja`/`nein` oder nummerierter Auswahl.
 

@@ -16,6 +16,7 @@ InputFunc = Callable[[str], str]
 class MenuOption[T]:
     label: str
     value: T
+    aliases: tuple[str, ...] = ()
 
 
 YES_VALUES = {"j", "ja", "y", "yes"}
@@ -115,10 +116,18 @@ def choose_from_options(
             value = input_func("Nummer auswählen: ").strip()
         except (KeyboardInterrupt, EOFError) as exc:
             raise UserAbortError("Abbruch durch Nutzer.") from exc
+        normalized_value = value.casefold()
+        for option in options:
+            if normalized_value in {alias.casefold() for alias in option.aliases}:
+                return option.value
         try:
             choice = int(value)
         except ValueError:
-            print("Bitte eine Nummer aus der Liste eingeben.")
+            alias_groups = ["/".join(option.aliases) for option in options if option.aliases]
+            if alias_groups:
+                print(f"Bitte eine Nummer oder eine dieser Eingaben verwenden: {', '.join(alias_groups)}.")
+            else:
+                print("Bitte eine Nummer aus der Liste eingeben.")
             continue
         if 1 <= choice <= len(options):
             return options[choice - 1].value

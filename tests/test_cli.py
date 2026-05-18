@@ -4,11 +4,16 @@ from pathlib import Path
 import pytest
 
 from predigt_uploader.cli import (
+    MP4_TRANSFER_COPY,
+    MP4_TRANSFER_KEEP,
+    MP4_TRANSFER_OVERWRITE,
     Mp3ResultError,
     LosslessCutStartError,
     Mp4TransferError,
     SummaryWriteError,
+    _ask_sermon_date,
     _choose_exported_mp4,
+    _detect_recording_date_from_filename,
     _find_new_mp4_exports,
     _ask_yes_no,
     _ask_mp4_path,
@@ -420,6 +425,37 @@ def test_print_mp4_action_preview_shows_source_target_name_and_copy_mode(tmp_pat
     assert "kopiert" in output
 
 
+def test_detect_recording_date_from_vmix_filename():
+    path = Path("Gottesdienst - 10 Mai 2026 - 09-55-08.mp4")
+
+    assert _detect_recording_date_from_filename(path) == date(2026, 5, 10)
+
+
+def test_ask_sermon_date_can_use_detected_recording_date(monkeypatch):
+    monkeypatch.setattr("predigt_uploader.cli.choose_from_options", lambda _prompt, _options: "recording")
+
+    selected = _ask_sermon_date(Path("Gottesdienst - 10 Mai 2026 - 09-55-08.mp4"))
+
+    assert selected == date(2026, 5, 10)
+
+
+def test_ask_sermon_date_can_use_today(monkeypatch):
+    monkeypatch.setattr("predigt_uploader.cli.choose_from_options", lambda _prompt, _options: "today")
+
+    selected = _ask_sermon_date(Path("Predigt.mp4"))
+
+    assert selected == datetime.now().date()
+
+
+def test_ask_sermon_date_can_use_manual_date(monkeypatch):
+    monkeypatch.setattr("predigt_uploader.cli.choose_from_options", lambda _prompt, _options: "manual")
+    _inputs(monkeypatch, ["2026-05-24"])
+
+    selected = _ask_sermon_date(Path("Predigt.mp4"))
+
+    assert selected == date(2026, 5, 24)
+
+
 def test_handle_existing_target_mp4_can_abort(monkeypatch, tmp_path):
     plan = _plan(tmp_path)
     plan.target_mp4.parent.mkdir(parents=True)
@@ -435,10 +471,10 @@ def test_handle_existing_target_mp4_can_keep_existing(monkeypatch, tmp_path):
     plan.target_mp4.write_bytes(b"vorhanden")
     _inputs(monkeypatch, ["b"])
 
-    selected_plan, keep_existing = _handle_existing_target_mp4(plan)
+    selected_plan, transfer_mode = _handle_existing_target_mp4(plan)
 
     assert selected_plan == plan
-    assert keep_existing is True
+    assert transfer_mode == MP4_TRANSFER_KEEP
 
 
 def test_handle_existing_target_mp4_can_use_new_name(monkeypatch, tmp_path):
@@ -447,11 +483,46 @@ def test_handle_existing_target_mp4_can_use_new_name(monkeypatch, tmp_path):
     plan.target_mp4.write_bytes(b"vorhanden")
     _inputs(monkeypatch, ["n", "Predigt anderer Name"])
 
-    selected_plan, keep_existing = _handle_existing_target_mp4(plan)
+    selected_plan, transfer_mode = _handle_existing_target_mp4(plan)
 
     assert selected_plan.target_mp4 == plan.target_mp4.with_name("Predigt anderer Name.mp4")
     assert selected_plan.target_mp3 == plan.target_mp4.with_name("Predigt anderer Name.mp3")
-    assert keep_existing is False
+    assert transfer_mode == MP4_TRANSFER_COPY
+
+
+def test_handle_existing_target_mp4_can_overwrite_after_second_confirmation(monkeypatch, tmp_path):
+    plan = _plan(tmp_path)
+    plan.target_mp4.parent.mkdir(parents=True)
+    plan.target_mp4.write_bytes(b"vorhanden")
+    _inputs(monkeypatch, ["o", "ja"])
+
+    selected_plan, transfer_mode = _handle_existing_target_mp4(plan)
+
+    assert selected_plan == plan
+    assert transfer_mode == MP4_TRANSFER_OVERWRITE
+
+
+def test_handle_existing_target_mp4_overwrite_can_be_cancelled(monkeypatch, tmp_path):
+    plan = _plan(tmp_path)
+    plan.target_mp4.parent.mkdir(parents=True)
+    plan.target_mp4.write_bytes(b"vorhanden")
+    _inputs(monkeypatch, ["o", "nein"])
+
+    assert _handle_existing_target_mp4(plan) is None
+    assert plan.target_mp4.read_bytes() == b"vorhanden"
+
+
+@pytest.mark.parametrize("answer", ["o", "overwrite", "überschreiben", "ueberschreiben"])
+def test_handle_existing_target_mp4_accepts_overwrite_text_fallback(monkeypatch, tmp_path, answer):
+    plan = _plan(tmp_path)
+    plan.target_mp4.parent.mkdir(parents=True)
+    plan.target_mp4.write_bytes(b"vorhanden")
+    _inputs(monkeypatch, [answer, "ja"])
+
+    selected_plan, transfer_mode = _handle_existing_target_mp4(plan)
+
+    assert selected_plan == plan
+    assert transfer_mode == MP4_TRANSFER_OVERWRITE
 
 
 def test_transfer_mp4_copies_by_default(tmp_path):
@@ -475,6 +546,17 @@ def test_transfer_mp4_does_not_overwrite_existing_target(tmp_path):
 
     assert "existiert bereits" in error.value.user_message
     assert plan.target_mp4.read_bytes() == b"alt"
+
+
+def test_transfer_mp4_can_overwrite_after_confirmation(tmp_path):
+    plan = _plan(tmp_path)
+    plan.source_mp4.write_bytes(b"neu")
+    plan.target_mp4.parent.mkdir(parents=True)
+    plan.target_mp4.write_bytes(b"alt")
+
+    _transfer_mp4_to_target(plan, _config(tmp_path), overwrite_existing=True)
+
+    assert plan.target_mp4.read_bytes() == b"neu"
 
 
 def test_transfer_mp4_reports_missing_source(tmp_path):
@@ -563,6 +645,7 @@ def test_run_wizard_stops_before_mp3_conversion_when_ffmpeg_is_missing(monkeypat
             "",
             "",
             str(source),
+            "3",
             "2026-05-24",
             "Heiligkeit",
             "Jesaja 6,1-3",
@@ -651,6 +734,7 @@ def test_run_wizard_reports_conversion_failure_without_traceback(monkeypatch, tm
             "",
             "",
             str(source),
+            "3",
             "2026-05-24",
             "Heiligkeit",
             "Jesaja 6,1-3",
@@ -713,6 +797,7 @@ def test_run_wizard_reports_empty_mp3_after_conversion(monkeypatch, tmp_path, ca
             "",
             "",
             str(source),
+            "3",
             "2026-05-24",
             "Heiligkeit",
             "Jesaja 6,1-3",
@@ -817,6 +902,7 @@ def test_run_wizard_success_writes_summary_and_prints_final_state(monkeypatch, t
             "",
             "",
             str(source),
+            "3",
             "2026-05-24",
             "Heiligkeit",
             "Jesaja 6,1-3",
@@ -893,6 +979,7 @@ def test_run_wizard_reports_summary_write_error(monkeypatch, tmp_path, capsys):
             "",
             "",
             str(source),
+            "3",
             "2026-05-24",
             "Heiligkeit",
             "Jesaja 6,1-3",

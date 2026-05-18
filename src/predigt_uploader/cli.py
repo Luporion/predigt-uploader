@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import re
 import shutil
 import subprocess
 from dataclasses import replace
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -43,6 +44,12 @@ class LosslessCutStartError(RuntimeError):
         super().__init__(admin_hint)
         self.user_message = user_message
         self.admin_hint = admin_hint
+
+
+MP4_TRANSFER_COPY = "copy"
+MP4_TRANSFER_KEEP = "keep"
+MP4_TRANSFER_OVERWRITE = "overwrite"
+Mp4TransferMode = str
 
 
 def _ask(prompt: str, default: str | None = None) -> str:
@@ -165,13 +172,108 @@ def _ask_choice(prompt: str, choices: dict[str, str], default: str | None = None
         print("Bitte eine der angezeigten Optionen eingeben.")
 
 
-def _ask_date() -> datetime.date:
+GERMAN_MONTHS = {
+    "januar": 1,
+    "jan": 1,
+    "februar": 2,
+    "feb": 2,
+    "märz": 3,
+    "maerz": 3,
+    "mrz": 3,
+    "april": 4,
+    "apr": 4,
+    "mai": 5,
+    "juni": 6,
+    "jun": 6,
+    "juli": 7,
+    "jul": 7,
+    "august": 8,
+    "aug": 8,
+    "september": 9,
+    "sep": 9,
+    "sept": 9,
+    "oktober": 10,
+    "okt": 10,
+    "november": 11,
+    "nov": 11,
+    "dezember": 12,
+    "dez": 12,
+}
+
+
+def _format_german_date(value: date) -> str:
+    return value.strftime("%d.%m.%Y")
+
+
+def _detect_recording_date_from_filename(path: Path) -> date | None:
+    name = path.stem
+    match = re.search(r"\b(\d{1,2})\s+([A-Za-zÄÖÜäöüß]+)\s+(\d{4})\b", name)
+    if match is None:
+        return None
+
+    day = int(match.group(1))
+    month_name = match.group(2).casefold().replace("ä", "ae")
+    year = int(match.group(3))
+    month = GERMAN_MONTHS.get(month_name)
+    if month is None:
+        return None
+
+    try:
+        return date(year, month, day)
+    except ValueError:
+        return None
+
+
+def _file_modified_date(path: Path) -> date | None:
+    try:
+        return datetime.fromtimestamp(path.stat().st_mtime).date()
+    except OSError:
+        return None
+
+
+def _ask_date() -> date:
     while True:
         raw = _ask("Datum der Predigt (YYYY-MM-DD)", datetime.now().strftime("%Y-%m-%d"))
         try:
             return datetime.strptime(raw, "%Y-%m-%d").date()
         except ValueError:
             print("Bitte Datum im Format YYYY-MM-DD eingeben, z. B. 2026-05-24.")
+
+
+def _ask_sermon_date(source_mp4: Path) -> date:
+    recording_date = _detect_recording_date_from_filename(source_mp4)
+    file_date = None if recording_date is not None else _file_modified_date(source_mp4)
+    today = datetime.now().date()
+
+    options: list[MenuOption[str]] = []
+    if recording_date is not None:
+        options.append(
+            MenuOption(
+                f"Aufnahmedatum aus Dateiname: {_format_german_date(recording_date)}",
+                "recording",
+            )
+        )
+    elif file_date is not None:
+        options.append(
+            MenuOption(
+                f"Dateidatum der MP4: {_format_german_date(file_date)}",
+                "filedate",
+            )
+        )
+    options.append(MenuOption(f"Heutiges Datum: {_format_german_date(today)}", "today"))
+    options.append(MenuOption("Anderes Datum manuell eingeben", "manual"))
+
+    print()
+    print("Datum der Predigt auswählen")
+    print("Wenn das vorgeschlagene Datum nicht stimmt, wähle bitte ein anderes Datum.")
+    selected = choose_from_options("Welches Datum soll verwendet werden?", options)
+    if selected == "recording" and recording_date is not None:
+        return recording_date
+    if selected == "filedate" and file_date is not None:
+        return file_date
+    if selected == "today":
+        return today
+    return _ask_date()
 
 
 def _normalize_user_path(raw_path: str) -> Path:
@@ -455,14 +557,19 @@ def _mp4_action_name(config: AppConfig) -> str:
     return "kopiert" if config.copy_instead_of_move else "verschoben"
 
 
-def _print_mp4_action_preview(plan: ProcessingPlan, config: AppConfig) -> None:
+def _print_mp4_action_preview(plan: ProcessingPlan, config: AppConfig, transfer_mode: Mp4TransferMode = MP4_TRANSFER_COPY) -> None:
     print()
     print("MP4-Datei übernehmen")
     print("--------------------")
     print(f"Quell-Datei: {plan.source_mp4}")
     print(f"Zielordner: {plan.target_mp4.parent}")
     print(f"Finaler MP4-Dateiname: {plan.target_mp4.name}")
-    print(f"Aktion: Die MP4 wird {_mp4_action_name(config)}.")
+    if transfer_mode == MP4_TRANSFER_KEEP:
+        print("Aktion: Die vorhandene MP4 bleibt erhalten. Es wird nichts kopiert oder verschoben.")
+    elif transfer_mode == MP4_TRANSFER_OVERWRITE:
+        print(f"Aktion: Die vorhandene MP4 wird ersetzt. Die neue MP4 wird {_mp4_action_name(config)}.")
+    else:
+        print(f"Aktion: Die MP4 wird {_mp4_action_name(config)}.")
 
 
 def _ask_new_mp4_target(current_target: Path) -> Path:
@@ -481,31 +588,48 @@ def _ask_new_mp4_target(current_target: Path) -> Path:
         return target
 
 
-def _handle_existing_target_mp4(plan: ProcessingPlan) -> tuple[ProcessingPlan, bool] | None:
+def _handle_existing_target_mp4(plan: ProcessingPlan) -> tuple[ProcessingPlan, Mp4TransferMode] | None:
     if not plan.target_mp4.exists():
-        return plan, False
+        return plan, MP4_TRANSFER_COPY
 
     print()
     print("Die Zieldatei existiert bereits.")
     print(f"Vorhandene Datei: {plan.target_mp4}")
     print("Sie wird nicht automatisch überschrieben.")
-    print("Optionen:")
-    print("  a = abbrechen")
-    print("  b = vorhandene Datei behalten und ohne Kopieren/Verschieben weiterarbeiten")
-    print("  n = neuen Dateinamen verwenden")
-    choice = _ask_choice(
+    print("Wichtig: Überschreiben ersetzt die vorhandene Datei.")
+    choice = choose_from_options(
         "Was soll passieren?",
-        {"a": "abbrechen", "b": "behalten", "n": "neu"},
-        "a",
+        [
+            MenuOption(
+                "Vorhandene Datei behalten und ohne Kopieren/Verschieben weiterarbeiten",
+                "keep",
+                ("b", "behalten"),
+            ),
+            MenuOption("Neuen Dateinamen verwenden", "new", ("n", "neu")),
+            MenuOption("Abbrechen", "abort", ("a", "abbrechen")),
+            MenuOption(
+                "Überschreiben: vorhandene Datei ersetzen",
+                "overwrite",
+                ("o", "overwrite", "überschreiben", "ueberschreiben", "ü"),
+            ),
+        ],
     )
-    if choice == "a":
+    if choice == "abort":
         return None
-    if choice == "b":
-        return plan, True
+    if choice == "keep":
+        return plan, MP4_TRANSFER_KEEP
+    if choice == "overwrite":
+        print()
+        print("Sicherheitsfrage: Die vorhandene MP4 wird wirklich ersetzt.")
+        print(f"Betroffene Datei: {plan.target_mp4}")
+        if not _ask_yes_no("Vorhandene MP4 wirklich überschreiben?", False):
+            print("Die vorhandene Datei bleibt unverändert.")
+            return None
+        return plan, MP4_TRANSFER_OVERWRITE
 
     target_mp4 = _ask_new_mp4_target(plan.target_mp4)
     target_mp3 = target_mp4.with_suffix(".mp3")
-    return replace(plan, target_mp4=target_mp4, target_mp3=target_mp3), False
+    return replace(plan, target_mp4=target_mp4, target_mp3=target_mp3), MP4_TRANSFER_COPY
 
 
 def _check_target_folder_writable(target_folder: Path) -> None:
@@ -530,7 +654,13 @@ def _check_target_folder_writable(target_folder: Path) -> None:
             pass
 
 
-def _transfer_mp4_to_target(plan: ProcessingPlan, config: AppConfig, *, keep_existing: bool = False) -> None:
+def _transfer_mp4_to_target(
+    plan: ProcessingPlan,
+    config: AppConfig,
+    *,
+    keep_existing: bool = False,
+    overwrite_existing: bool = False,
+) -> None:
     if keep_existing:
         if not plan.target_mp4.exists():
             raise Mp4TransferError(
@@ -566,7 +696,7 @@ def _transfer_mp4_to_target(plan: ProcessingPlan, config: AppConfig, *, keep_exi
 
     _check_target_folder_writable(plan.target_mp4.parent)
 
-    if plan.target_mp4.exists():
+    if plan.target_mp4.exists() and not overwrite_existing:
         raise Mp4TransferError(
             "Die Zieldatei existiert bereits.",
             f"Zieldatei existiert vor der Dateiübernahme: {plan.target_mp4}",
@@ -575,10 +705,18 @@ def _transfer_mp4_to_target(plan: ProcessingPlan, config: AppConfig, *, keep_exi
     try:
         if config.copy_instead_of_move:
             shutil.copy2(plan.source_mp4, plan.target_mp4)
-            print(f"Die MP4 wurde kopiert: {plan.target_mp4}")
+            if overwrite_existing:
+                print(f"Die vorhandene MP4 wurde überschrieben: {plan.target_mp4}")
+            else:
+                print(f"Die MP4 wurde kopiert: {plan.target_mp4}")
         else:
+            if overwrite_existing and plan.target_mp4.exists():
+                plan.target_mp4.unlink()
             shutil.move(str(plan.source_mp4), str(plan.target_mp4))
-            print(f"Die MP4 wurde verschoben: {plan.target_mp4}")
+            if overwrite_existing:
+                print(f"Die vorhandene MP4 wurde überschrieben: {plan.target_mp4}")
+            else:
+                print(f"Die MP4 wurde verschoben: {plan.target_mp4}")
     except PermissionError as exc:
         raise Mp4TransferError(
             "Die MP4 konnte wegen fehlender Berechtigungen nicht übernommen werden.",
@@ -745,7 +883,7 @@ def run_wizard(args: argparse.Namespace) -> int:
     source = _select_source_mp4(config, log)
     log.event(f"Quell-MP4 ausgewaehlt: {source}")
 
-    sermon_date = _ask_date()
+    sermon_date = _ask_sermon_date(source)
     title = _ask_required("Predigttitel")
     bible_reference = _ask_required("Hauptbibelstelle")
     speaker = _ask_required("Redner Vorname Nachname")
@@ -777,18 +915,22 @@ def run_wizard(args: argparse.Namespace) -> int:
         log.finish("Abbruch wegen vorhandener Zieldatei.")
         print("Abgebrochen.")
         return 1
-    plan, keep_existing_mp4 = existing_choice
-    if keep_existing_mp4:
+    plan, mp4_transfer_mode = existing_choice
+    if mp4_transfer_mode == MP4_TRANSFER_KEEP:
         log.event("Vorhandene MP4 wird behalten.")
+    elif mp4_transfer_mode == MP4_TRANSFER_OVERWRITE:
+        log.event("Vorhandene MP4 wird nach doppelter Bestaetigung ueberschrieben.")
     else:
         log.event("MP4-Uebernahme wird vorbereitet.")
     log.plan(plan)
 
     print()
     print(build_summary_text(plan))
-    _print_mp4_action_preview(plan, config)
-    if keep_existing_mp4:
+    _print_mp4_action_preview(plan, config, mp4_transfer_mode)
+    if mp4_transfer_mode == MP4_TRANSFER_KEEP:
         print("Hinweis: Die vorhandene MP4 wird behalten. Es wird nichts kopiert oder verschoben.")
+    elif mp4_transfer_mode == MP4_TRANSFER_OVERWRITE:
+        print("Hinweis: Die vorhandene MP4 wird beim nächsten Schritt ersetzt.")
     print()
     if not _ask_yes_no("MP4-Datei jetzt so übernehmen?", False):
         log.finish("Abbruch vor MP4-Uebernahme.")
@@ -796,7 +938,12 @@ def run_wizard(args: argparse.Namespace) -> int:
         return 1
 
     try:
-        _transfer_mp4_to_target(plan, config, keep_existing=keep_existing_mp4)
+        _transfer_mp4_to_target(
+            plan,
+            config,
+            keep_existing=mp4_transfer_mode == MP4_TRANSFER_KEEP,
+            overwrite_existing=mp4_transfer_mode == MP4_TRANSFER_OVERWRITE,
+        )
     except Mp4TransferError as exc:
         log.error("MP4 konnte nicht uebernommen werden.", admin_hint=exc.admin_hint)
         log.finish("Abbruch bei MP4-Uebernahme.")

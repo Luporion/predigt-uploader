@@ -1,4 +1,7 @@
 $ErrorActionPreference = "Stop"
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+[Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)
+$OutputEncoding = [Console]::OutputEncoding
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Resolve-Path (Join-Path $ScriptDir "..")
@@ -23,7 +26,7 @@ if (-not (Test-Path -LiteralPath $VenvDir -PathType Container)) {
 
     Write-UserError `
         "Die virtuelle Python-Umgebung .venv wurde nicht gefunden." `
-        "Bitte im Projektordner zuerst ausführen: py -3.11 -m venv .venv"
+        "Bitte im Projektordner zuerst ausfuehren: py -3.11 -m venv .venv"
 
     if (-not $HasPython) {
         Write-UserError `

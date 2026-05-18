@@ -85,6 +85,7 @@ Für Gemeindemitarbeiter gibt es im Projektordner zusätzlich anklickbare Window
 - `PredigtUploader starten.cmd`
 
 Diese Dateien können per Doppelklick genutzt werden und lassen das Fenster nach Ende oder Fehler offen.
+Die Starter setzen die Windows-Konsole auf UTF-8 und verwenden robuste deutsche Meldungen, damit die Ausgabe auf Zielrechnern lesbar bleibt.
 
 ## Wichtige Dateien
 

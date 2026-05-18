@@ -27,6 +27,7 @@ def test_run_wizard_script_checks_venv_and_starts_cli_wizard() -> None:
     assert "python.exe" in content
     assert "Die virtuelle Python-Umgebung .venv wurde nicht gefunden." in content
     assert "Python wurde auf diesem Rechner nicht gefunden." in content
+    assert "[Console]::OutputEncoding" in content
     assert "-m predigt_uploader wizard" in content
 
 
@@ -40,6 +41,8 @@ def test_local_setup_script_prepares_venv_and_installs_package() -> None:
     assert ".venv" in content
     assert "-m pip install -e" in content
     assert "Einrichtung abgeschlossen." in content
+    assert "Abhaengigkeiten" in content
+    assert "[Console]::OutputEncoding" in content
 
 
 def test_system_check_script_checks_wizard_ffmpeg_and_losslesscut() -> None:
@@ -47,11 +50,28 @@ def test_system_check_script_checks_wizard_ffmpeg_and_losslesscut() -> None:
 
     content = script.read_text(encoding="utf-8")
 
-    assert "PredigtUploader Systemprüfung" in content
+    assert "PredigtUploader Systempruefung" in content
     assert "-m predigt_uploader --help" in content
     assert "ffmpeg_available" in content
     assert "losslesscut_path" in content
     assert "FFmpeg wurde nicht gefunden" in content
+    assert "verfuegbar" in content
+    assert "[Console]::OutputEncoding" in content
+
+
+def test_windows_starter_scripts_avoid_umlauts_in_console_text() -> None:
+    script_paths = [
+        PROJECT_ROOT / "scripts" / "setup-local.ps1",
+        PROJECT_ROOT / "scripts" / "check-system.ps1",
+        PROJECT_ROOT / "scripts" / "run-wizard.ps1",
+        PROJECT_ROOT / "PredigtUploader starten.cmd",
+        PROJECT_ROOT / "PredigtUploader einrichten.cmd",
+        PROJECT_ROOT / "PredigtUploader Systemcheck.cmd",
+    ]
+
+    for path in script_paths:
+        content = path.read_text(encoding="utf-8")
+        assert not any(char in content for char in "äöüÄÖÜß")
 
 
 def test_install_v1_5_guide_documents_target_machine_setup() -> None:
@@ -83,6 +103,7 @@ def test_clickable_cmd_launchers_exist_and_call_expected_scripts() -> None:
         content = launcher.read_text(encoding="utf-8")
 
         assert launcher.exists()
+        assert "chcp 65001 >nul" in content
         assert 'cd /d "%~dp0"' in content
         assert "powershell.exe -NoProfile -ExecutionPolicy Bypass -File" in content
         assert expected_script in content

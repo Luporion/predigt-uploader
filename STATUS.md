@@ -15,6 +15,7 @@ Die Datumsauswahl ist nun geführter: Der Wizard kann ein Aufnahmedatum aus typi
 Wenn eine finale MP4 im Zielordner bereits existiert, bietet der Wizard eine bewusste Auswahl an. Überschreiben ist nicht Standard und erfordert eine zweite Bestätigung.
 Für die Vorbereitung eines Zielrechners gibt es jetzt `scripts/setup-local.ps1`, `scripts/check-system.ps1` und die Installationsanleitung `docs/install-v1-5.md`.
 Für Gemeindemitarbeiter gibt es zusätzlich anklickbare `.cmd`-Startdateien im Projektstamm für Einrichtung, Systemcheck und Wizard-Start.
+Die Windows-Starter und PowerShell-Skripte initialisieren UTF-8 und verwenden bei kritischen Konsolentexten ASCII-sichere deutsche Schreibweisen wie `verfuegbar`.
 
 ## Was Version 1 bereits kann
 

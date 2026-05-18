@@ -38,6 +38,7 @@ PredigtUploader einrichten.cmd
 ```
 
 Diese Startdatei öffnet PowerShell automatisch und führt `scripts/setup-local.ps1` aus. Am Ende bleibt das Fenster offen, damit die Meldung gelesen werden kann.
+Die Startdateien stellen die Konsole auf UTF-8 um. Die wichtigsten Meldungen sind außerdem so formuliert, dass sie auch auf älteren Windows-Konsolen lesbar bleiben.
 
 Alternativ in PowerShell:
 

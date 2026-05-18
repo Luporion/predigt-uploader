@@ -1,8 +1,18 @@
 from datetime import date
 from pathlib import Path
 
-from predigt_uploader.cli import _ask_mp4_path, _ask_required, _select_target_folder
-from predigt_uploader.models import AppConfig, SermonInfo
+import pytest
+
+from predigt_uploader.cli import (
+    Mp4TransferError,
+    _ask_mp4_path,
+    _ask_required,
+    _handle_existing_target_mp4,
+    _print_mp4_action_preview,
+    _select_target_folder,
+    _transfer_mp4_to_target,
+)
+from predigt_uploader.models import AppConfig, ProcessingPlan, SermonInfo
 
 
 def _config(tmp_path: Path) -> AppConfig:
@@ -95,3 +105,123 @@ def test_select_target_folder_shows_new_note_folder_name(tmp_path, capsys):
     assert selected == tmp_path / "Aufnahmen" / "2026" / "2026-06-07 - Pfingsten"
     assert selected_info == info
     assert "2026-06-07 - Pfingsten" in capsys.readouterr().out
+
+
+def _plan(tmp_path: Path) -> ProcessingPlan:
+    info = SermonInfo(date(2026, 5, 24), "Heiligkeit", "Jesaja 6,1-3", "Eduard Wiebe")
+    return ProcessingPlan(
+        source_mp4=tmp_path / "quelle.mp4",
+        target_mp4=tmp_path / "Aufnahmen" / "2026" / "2026-05-24" / "Predigt.mp4",
+        target_mp3=tmp_path / "Aufnahmen" / "2026" / "2026-05-24" / "Predigt.mp3",
+        info=info,
+    )
+
+
+def test_print_mp4_action_preview_shows_source_target_name_and_copy_mode(tmp_path, capsys):
+    plan = _plan(tmp_path)
+
+    _print_mp4_action_preview(plan, _config(tmp_path))
+
+    output = capsys.readouterr().out
+    assert str(plan.source_mp4) in output
+    assert str(plan.target_mp4.parent) in output
+    assert plan.target_mp4.name in output
+    assert "kopiert" in output
+
+
+def test_handle_existing_target_mp4_can_abort(monkeypatch, tmp_path):
+    plan = _plan(tmp_path)
+    plan.target_mp4.parent.mkdir(parents=True)
+    plan.target_mp4.write_bytes(b"vorhanden")
+    _inputs(monkeypatch, ["a"])
+
+    assert _handle_existing_target_mp4(plan) is None
+
+
+def test_handle_existing_target_mp4_can_keep_existing(monkeypatch, tmp_path):
+    plan = _plan(tmp_path)
+    plan.target_mp4.parent.mkdir(parents=True)
+    plan.target_mp4.write_bytes(b"vorhanden")
+    _inputs(monkeypatch, ["b"])
+
+    selected_plan, keep_existing = _handle_existing_target_mp4(plan)
+
+    assert selected_plan == plan
+    assert keep_existing is True
+
+
+def test_handle_existing_target_mp4_can_use_new_name(monkeypatch, tmp_path):
+    plan = _plan(tmp_path)
+    plan.target_mp4.parent.mkdir(parents=True)
+    plan.target_mp4.write_bytes(b"vorhanden")
+    _inputs(monkeypatch, ["n", "Predigt anderer Name"])
+
+    selected_plan, keep_existing = _handle_existing_target_mp4(plan)
+
+    assert selected_plan.target_mp4 == plan.target_mp4.with_name("Predigt anderer Name.mp4")
+    assert selected_plan.target_mp3 == plan.target_mp4.with_name("Predigt anderer Name.mp3")
+    assert keep_existing is False
+
+
+def test_transfer_mp4_copies_by_default(tmp_path):
+    plan = _plan(tmp_path)
+    plan.source_mp4.write_bytes(b"video")
+
+    _transfer_mp4_to_target(plan, _config(tmp_path))
+
+    assert plan.source_mp4.exists()
+    assert plan.target_mp4.read_bytes() == b"video"
+
+
+def test_transfer_mp4_does_not_overwrite_existing_target(tmp_path):
+    plan = _plan(tmp_path)
+    plan.source_mp4.write_bytes(b"neu")
+    plan.target_mp4.parent.mkdir(parents=True)
+    plan.target_mp4.write_bytes(b"alt")
+
+    with pytest.raises(Mp4TransferError) as error:
+        _transfer_mp4_to_target(plan, _config(tmp_path))
+
+    assert "existiert bereits" in error.value.user_message
+    assert plan.target_mp4.read_bytes() == b"alt"
+
+
+def test_transfer_mp4_reports_missing_source(tmp_path):
+    plan = _plan(tmp_path)
+
+    with pytest.raises(Mp4TransferError) as error:
+        _transfer_mp4_to_target(plan, _config(tmp_path))
+
+    assert "Quell-MP4" in error.value.user_message
+    assert str(plan.source_mp4) in error.value.admin_hint
+
+
+def test_transfer_mp4_reports_unwritable_target_folder(monkeypatch, tmp_path):
+    plan = _plan(tmp_path)
+    plan.source_mp4.write_bytes(b"video")
+
+    def fail_write_test(_target_folder: Path) -> None:
+        raise Mp4TransferError("Der Zielordner ist nicht beschreibbar.", "Schreibtest fehlgeschlagen")
+
+    monkeypatch.setattr("predigt_uploader.cli._check_target_folder_writable", fail_write_test)
+
+    with pytest.raises(Mp4TransferError) as error:
+        _transfer_mp4_to_target(plan, _config(tmp_path))
+
+    assert "nicht beschreibbar" in error.value.user_message
+
+
+def test_transfer_mp4_reports_permission_error(monkeypatch, tmp_path):
+    plan = _plan(tmp_path)
+    plan.source_mp4.write_bytes(b"video")
+
+    def fail_copy(_source: Path, _target: Path) -> None:
+        raise PermissionError("kein Zugriff")
+
+    monkeypatch.setattr("shutil.copy2", fail_copy)
+
+    with pytest.raises(Mp4TransferError) as error:
+        _transfer_mp4_to_target(plan, _config(tmp_path))
+
+    assert "fehlender Berechtigungen" in error.value.user_message
+    assert "kein Zugriff" in error.value.admin_hint

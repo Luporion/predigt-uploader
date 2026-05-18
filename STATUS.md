@@ -6,7 +6,7 @@ PredigtUploader soll den lokalen Predigt-Workflow einer Gemeinde unter Windows v
 
 ## Aktueller Entwicklungsstand
 
-Das Projekt ist ein lokaler CLI-Prototyp in Phase 1. Die Grundstruktur, Fachregeln für Dateinamen und Ordner sowie erste automatische Tests sind vorhanden. Der Terminal-Wizard wurde nutzerfreundlicher gemacht und prüft Eingaben robuster.
+Das Projekt ist ein lokaler CLI-Prototyp in Phase 1. Die Grundstruktur, Fachregeln für Dateinamen und Ordner sowie automatische Tests sind vorhanden. Der Terminal-Wizard wurde nutzerfreundlicher gemacht, prüft Eingaben robuster und sichert die lokale MP4-Übernahme besser ab.
 
 ## Was Version 1 bereits kann
 
@@ -18,7 +18,9 @@ Das Projekt ist ein lokaler CLI-Prototyp in Phase 1. Die Grundstruktur, Fachrege
 - Jahres- und Datumsordner ermitteln.
 - Vorhandene Zielordner anzeigen und bewusst bestätigen lassen.
 - Neue Ordnernamen mit optionaler Besonderheit verständlich anzeigen.
-- MP4 kopieren oder verschieben.
+- Vor der MP4-Übernahme Quelle, Zielordner, finalen Dateinamen und Kopier-/Verschiebe-Aktion anzeigen.
+- MP4 standardmäßig kopieren und vor der Dateiaktion ausdrücklich bestätigen lassen.
+- Bestehende MP4-Zieldateien erkennen, ohne sie still zu überschreiben.
 - MP3-Erzeugung über externes FFmpeg anstoßen.
 - Zusammenfassungsdateien im Zielordner schreiben.
 
@@ -33,7 +35,7 @@ Das Projekt ist ein lokaler CLI-Prototyp in Phase 1. Die Grundstruktur, Fachrege
 
 ## Nächster geplanter Schritt
 
-MP4 kopieren/verschieben mit einer ausdrücklichen Sicherheitsabfrage und noch besseren Fehlermeldungen absichern.
+FFmpeg-Prüfung vor der MP3-Erzeugung einbauen und die Fehlermeldungen für diesen Schritt weiter verbessern.
 
 ## Sicherheits-Hinweis
 

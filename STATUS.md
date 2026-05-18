@@ -6,7 +6,7 @@ PredigtUploader soll den lokalen Predigt-Workflow einer Gemeinde unter Windows v
 
 ## Aktueller Entwicklungsstand
 
-Das Projekt ist ein lokaler CLI-Prototyp in Phase 1. Die Grundstruktur, Fachregeln für Dateinamen und Ordner sowie automatische Tests sind vorhanden. Der Terminal-Wizard wurde nutzerfreundlicher gemacht, prüft Eingaben robuster, sichert die lokale MP4-Übernahme besser ab und prüft FFmpeg vor der MP3-Erzeugung.
+Das Projekt ist ein lokaler CLI-Prototyp in Phase 1. Die Grundstruktur, Fachregeln für Dateinamen und Ordner sowie automatische Tests sind vorhanden. Der Terminal-Wizard wurde nutzerfreundlicher gemacht, prüft Eingaben robuster, sichert die lokale MP4-Übernahme besser ab und prüft die MP3-Erzeugung genauer.
 
 ## Was Version 1 bereits kann
 
@@ -24,6 +24,8 @@ Das Projekt ist ein lokaler CLI-Prototyp in Phase 1. Die Grundstruktur, Fachrege
 - Vor der MP3-Erzeugung prüfen, ob FFmpeg verfügbar ist.
 - Bei fehlendem FFmpeg erklären, dass die MP4 trotzdem vorbereitet wurde und wie man manuell eine MP3 erstellt.
 - MP3-Erzeugung über externes FFmpeg anstoßen, wenn FFmpeg verfügbar ist.
+- Nach der MP3-Erzeugung prüfen, ob die MP3 existiert und größer als 0 Bytes ist.
+- Bei Fehlern in der MP3-Erzeugung verständlich erklären, wo die vorbereitete MP4 liegt und wie man manuell weitermacht.
 - Zusammenfassungsdateien im Zielordner schreiben.
 
 ## Bewusst noch nicht enthalten
@@ -37,7 +39,7 @@ Das Projekt ist ein lokaler CLI-Prototyp in Phase 1. Die Grundstruktur, Fachrege
 
 ## Nächster geplanter Schritt
 
-MP3-Erzeugung weiter absichern und prüfen, dass MP4 und MP3 nach dem Workflow vorhanden sind.
+Zusammenfassung als Textdatei im Zielordner weiter prüfen und den lokalen Workflow-Endzustand abrunden.
 
 ## Sicherheits-Hinweis
 

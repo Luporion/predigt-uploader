@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from predigt_uploader.cli import (
+    Mp3ResultError,
     Mp4TransferError,
     _ask_mp4_path,
     _ask_required,
@@ -12,8 +13,10 @@ from predigt_uploader.cli import (
     _print_mp4_action_preview,
     _select_target_folder,
     _transfer_mp4_to_target,
+    _validate_created_mp3,
     run_wizard,
 )
+from predigt_uploader.mp3 import Mp3ConversionError
 from predigt_uploader.models import AppConfig, ProcessingPlan, SermonInfo
 
 
@@ -300,4 +303,140 @@ def test_run_wizard_stops_before_mp3_conversion_when_ffmpeg_is_missing(monkeypat
     output = capsys.readouterr().out
     assert "Die MP4 wurde trotzdem vorbereitet" in output
     assert "Admin-Hinweis" in output
+    assert "Traceback" not in output
+
+
+def test_validate_created_mp3_accepts_non_empty_file(tmp_path):
+    mp3 = tmp_path / "predigt.mp3"
+    mp3.write_bytes(b"audio")
+
+    _validate_created_mp3(mp3)
+
+
+def test_validate_created_mp3_reports_missing_file(tmp_path):
+    mp3 = tmp_path / "fehlt.mp3"
+
+    with pytest.raises(Mp3ResultError) as error:
+        _validate_created_mp3(mp3)
+
+    assert "nicht gefunden" in error.value.user_message
+    assert str(mp3) in error.value.admin_hint
+
+
+def test_validate_created_mp3_reports_empty_file(tmp_path):
+    mp3 = tmp_path / "leer.mp3"
+    mp3.write_bytes(b"")
+
+    with pytest.raises(Mp3ResultError) as error:
+        _validate_created_mp3(mp3)
+
+    assert "leer" in error.value.user_message
+    assert "0 Bytes" in error.value.admin_hint
+
+
+def test_run_wizard_reports_conversion_failure_without_traceback(monkeypatch, tmp_path, capsys):
+    source = tmp_path / "quelle.mp4"
+    source.write_bytes(b"video")
+    config_path = tmp_path / "config.toml"
+    recordings_base = tmp_path / "Aufnahmen"
+
+    def toml_path(path: Path) -> str:
+        return str(path).replace("\\", "/")
+
+    config_path.write_text(
+        "\n".join(
+            [
+                "[paths]",
+                f'vmix_storage = "{toml_path(tmp_path / "vmix")}"',
+                f'recordings_base = "{toml_path(recordings_base)}"',
+                f'mp3_base = "{toml_path(tmp_path / "Predigten")}"',
+                'ffmpeg_path = "ffmpeg-test"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    _inputs(
+        monkeypatch,
+        [
+            str(source),
+            "2026-05-24",
+            "Heiligkeit",
+            "Jesaja 6,1-3",
+            "Eduard Wiebe",
+            "n",
+            "j",
+        ],
+    )
+    monkeypatch.setattr("predigt_uploader.cli.ffmpeg_available", lambda _config: True)
+
+    def fail_conversion(*_args, **_kwargs) -> None:
+        raise Mp3ConversionError("FFmpeg Exit-Code: 1. stderr: Datei ist gesperrt.")
+
+    monkeypatch.setattr("predigt_uploader.cli.convert_mp4_to_mp3", fail_conversion)
+
+    result = run_wizard(type("Args", (), {"config": str(config_path)})())
+
+    target_mp4 = (
+        recordings_base
+        / "2026"
+        / "2026-05-24"
+        / "Predigt (Heiligkeit_Jesaja 6,1-3)_Eduard Wiebe.mp4"
+    )
+    assert result == 3
+    assert target_mp4.exists()
+    output = capsys.readouterr().out
+    assert "Die MP3 konnte nicht erstellt werden" in output
+    assert str(target_mp4) in output
+    assert "File Converter" in output
+    assert "Admin-Hinweis" in output
+    assert "Exit-Code: 1" in output
+    assert "Traceback" not in output
+
+
+def test_run_wizard_reports_empty_mp3_after_conversion(monkeypatch, tmp_path, capsys):
+    source = tmp_path / "quelle.mp4"
+    source.write_bytes(b"video")
+    config_path = tmp_path / "config.toml"
+    recordings_base = tmp_path / "Aufnahmen"
+
+    def toml_path(path: Path) -> str:
+        return str(path).replace("\\", "/")
+
+    config_path.write_text(
+        "\n".join(
+            [
+                "[paths]",
+                f'vmix_storage = "{toml_path(tmp_path / "vmix")}"',
+                f'recordings_base = "{toml_path(recordings_base)}"',
+                f'mp3_base = "{toml_path(tmp_path / "Predigten")}"',
+                'ffmpeg_path = "ffmpeg-test"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    _inputs(
+        monkeypatch,
+        [
+            str(source),
+            "2026-05-24",
+            "Heiligkeit",
+            "Jesaja 6,1-3",
+            "Eduard Wiebe",
+            "n",
+            "j",
+        ],
+    )
+    monkeypatch.setattr("predigt_uploader.cli.ffmpeg_available", lambda _config: True)
+
+    def create_empty_mp3(_source_mp4: Path, target_mp3: Path, _config) -> None:
+        target_mp3.write_bytes(b"")
+
+    monkeypatch.setattr("predigt_uploader.cli.convert_mp4_to_mp3", create_empty_mp3)
+
+    result = run_wizard(type("Args", (), {"config": str(config_path)})())
+
+    assert result == 3
+    output = capsys.readouterr().out
+    assert "Die MP3 wurde erstellt, ist aber leer" in output
+    assert "0 Bytes" in output
     assert "Traceback" not in output

@@ -22,6 +22,13 @@ class Mp4TransferError(RuntimeError):
         self.admin_hint = admin_hint
 
 
+class Mp3ResultError(RuntimeError):
+    def __init__(self, user_message: str, admin_hint: str) -> None:
+        super().__init__(admin_hint)
+        self.user_message = user_message
+        self.admin_hint = admin_hint
+
+
 def _ask(prompt: str, default: str | None = None) -> str:
     suffix = f" [{default}]" if default else ""
     value = input(f"{prompt}{suffix}: ").strip()
@@ -319,6 +326,43 @@ def _print_missing_ffmpeg_message(plan: ProcessingPlan, config: AppConfig) -> No
     )
 
 
+def _print_mp3_manual_steps(plan: ProcessingPlan) -> None:
+    print("So kannst du manuell weitermachen:")
+    print("- Erstelle aus der vorbereiteten MP4 eine MP3 mit File Converter, Shutter Encoder oder einem ähnlichen Programm.")
+    print(f"- Speichere die MP3 mit diesem Namen: {plan.target_mp3.name}")
+    print(f"- Lege die MP3 in diesen Ordner: {plan.target_mp3.parent}")
+
+
+def _validate_created_mp3(target_mp3: Path) -> None:
+    if not target_mp3.exists():
+        raise Mp3ResultError(
+            "Die MP3 wurde nach der Konvertierung nicht gefunden.",
+            f"Erwartete MP3-Datei fehlt: {target_mp3}",
+        )
+    try:
+        size = target_mp3.stat().st_size
+    except OSError as exc:
+        raise Mp3ResultError(
+            "Die MP3 konnte nach der Konvertierung nicht geprüft werden.",
+            f"Dateigröße konnte nicht gelesen werden: {target_mp3}. Details: {exc}",
+        ) from exc
+    if size <= 0:
+        raise Mp3ResultError(
+            "Die MP3 wurde erstellt, ist aber leer.",
+            f"MP3-Datei hat 0 Bytes: {target_mp3}",
+        )
+
+
+def _print_mp3_creation_error(plan: ProcessingPlan, user_message: str, admin_hint: str) -> None:
+    print()
+    print(user_message)
+    print(f"Die vorbereitete MP4 liegt hier: {plan.target_mp4}")
+    print()
+    _print_mp3_manual_steps(plan)
+    print()
+    print(f"Admin-Hinweis: {admin_hint}")
+
+
 def run_wizard(args: argparse.Namespace) -> int:
     config = load_config(Path(args.config) if args.config else None)
 
@@ -381,12 +425,21 @@ def run_wizard(args: argparse.Namespace) -> int:
 
     try:
         convert_mp4_to_mp3(plan.target_mp4, plan.target_mp3, config)
+        _validate_created_mp3(plan.target_mp3)
         print(f"Die MP3 wurde erstellt: {plan.target_mp3}")
     except Mp3ConversionError as exc:
-        print()
-        print("Die MP3 konnte nicht erstellt werden.")
-        print("Bitte erstelle die MP3 notfalls manuell mit File Converter oder Shutter Encoder.")
-        print(f"Admin-Hinweis: {exc}")
+        _print_mp3_creation_error(
+            plan,
+            "Die MP3 konnte nicht erstellt werden.",
+            str(exc),
+        )
+        return 3
+    except Mp3ResultError as exc:
+        _print_mp3_creation_error(
+            plan,
+            exc.user_message,
+            exc.admin_hint,
+        )
         return 3
 
     if config.write_summary_file:

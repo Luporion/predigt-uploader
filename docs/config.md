@@ -72,6 +72,8 @@ Textmodus erzwingen:
 $env:PREDIGT_UPLOADER_TEXT_UI = "1"
 ```
 
+Bei Dateipfad-Abfragen darf statt einer Datei auch ein Ordner eingegeben werden. Der Wizard zeigt dann passende Dateien direkt aus diesem Ordner an, zum Beispiel `.mp4` bei Video-Abfragen oder `.exe` bei `LosslessCut.exe`. Es wird bewusst nicht rekursiv in Unterordnern gesucht.
+
 ## Sicherheit
 
 Keine Tokens/Passwörter in `config.example.toml`.

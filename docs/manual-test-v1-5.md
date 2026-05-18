@@ -42,6 +42,8 @@ Bei der direkten Eingabe im Wizard sind Anführungszeichen erlaubt, zum Beispiel
 "D:\Programme\LosslessCut\LosslessCut.exe"
 ```
 
+Wenn versehentlich nur der Ordner eingegeben wird, in dem `LosslessCut.exe` liegt, zeigt der Wizard passende `.exe`-Dateien aus diesem Ordner zur Auswahl an.
+
 Keine Zugangsdaten, Tokens oder privaten Passwörter in die Config schreiben.
 
 ## Testablauf
@@ -54,7 +56,7 @@ Keine Zugangsdaten, Tokens oder privaten Passwörter in die Config schreiben.
 
 2. Ziel-Basisordner bestätigen oder für den Testlauf ändern.
 3. Bei der Frage nach einer fertig geschnittenen MP4 mit `nein` antworten.
-4. Vorgeschlagene Rohaufnahme aus `vmix_storage` bestätigen oder einen MP4-Pfad manuell eingeben.
+4. Vorgeschlagene Rohaufnahme aus `vmix_storage` bestätigen oder einen MP4-Pfad manuell eingeben. Wenn nur ein Ordner eingegeben wird, zeigt der Wizard passende `.mp4`-Dateien aus diesem Ordner zur Auswahl an.
 5. Der Wizard öffnet LosslessCut mit der Rohaufnahme.
 6. In LosslessCut nur den Predigtbereich markieren.
 7. Nur die Predigt als MP4 exportieren.
@@ -87,5 +89,6 @@ Im Projektordner liegt zusätzlich eine Logdatei unter `logs/`.
 
 - Wenn LosslessCut nicht startet: Pfad zur `LosslessCut.exe` im Wizard eingeben, `losslesscut_path` in `config.toml` prüfen oder LosslessCut manuell öffnen.
 - Wenn keine neue MP4 gefunden wird: exportierten Pfad manuell eingeben.
+- Wenn versehentlich ein Ordner statt einer Datei eingegeben wurde: passende Datei aus der angezeigten Liste auswählen oder einen anderen Pfad eingeben.
 - Wenn mehrere MP4-Dateien gefunden werden: nur die Datei auswählen, die wirklich die Predigt enthält.
 - Bei technischen Details den Admin-Hinweis und die Logdatei prüfen.

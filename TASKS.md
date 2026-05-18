@@ -34,6 +34,7 @@
 - [x] bei mehreren Exporten bewusste Auswahl erzwingen
 - [x] Terminal-Auswahl mit questionary und Text-Fallback einfuehren
 - [x] Textmodus per PREDIGT_UPLOADER_TEXT_UI=1 erzwingen
+- [x] Dateipfad-Abfragen koennen passende Dateien aus einem angegebenen Ordner anbieten
 - [x] bei fehlendem Export manuellen Pfad erlauben
 - [x] danach bestehenden lokalen Workflow weiterverwenden
 

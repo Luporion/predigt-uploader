@@ -90,9 +90,9 @@ def test_ask_mp4_path_rejects_empty_missing_folder_and_wrong_extension(monkeypat
     assert _ask_mp4_path() == mp4_file
 
     output = capsys.readouterr().out
-    assert "Datei wurde nicht gefunden" in output
+    assert "Pfad wurde nicht gefunden" in output
     assert "Das ist ein Ordner" in output
-    assert "keine MP4-Datei" in output
+    assert "Erwartet wird: .mp4" in output
 
 
 def test_newest_mp4_in_folder_returns_latest_mp4(tmp_path):
@@ -135,7 +135,7 @@ def test_ask_losslesscut_exe_path_validates_file(monkeypatch, tmp_path, capsys):
     output = capsys.readouterr().out
     assert "nicht gefunden" in output
     assert "Das ist ein Ordner" in output
-    assert "sieht nicht nach LosslessCut" in output
+    assert "Erwartet wird: .exe" in output
 
 
 def test_open_losslesscut_starts_external_program(monkeypatch, tmp_path):

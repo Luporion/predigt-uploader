@@ -15,7 +15,7 @@ from .models import AppConfig, ProcessingPlan, SermonInfo
 from .mp3 import Mp3ConversionError, convert_mp4_to_mp3, ffmpeg_available
 from .report import build_summary_text, write_summary_file
 from .run_log import WorkflowLog
-from .ui import MenuOption, UserAbortError, ask_yes_no, choose_from_options
+from .ui import MenuOption, UserAbortError, ask_file_path, ask_yes_no, choose_from_options
 
 
 class Mp4TransferError(RuntimeError):
@@ -179,11 +179,11 @@ def _normalize_user_path(raw_path: str) -> Path:
 
 
 def _ask_mp4_path() -> Path:
-    while True:
-        raw = _ask_required("Pfad zur geschnittenen MP4-Datei")
-        source = _normalize_user_path(raw)
-        if _is_valid_mp4_file(source):
-            return source
+    return ask_file_path(
+        "Pfad zur geschnittenen MP4-Datei",
+        extensions=(".mp4",),
+        file_description="MP4-Dateien",
+    )
 
 
 def _is_valid_mp4_file(path: Path) -> bool:
@@ -200,11 +200,11 @@ def _is_valid_mp4_file(path: Path) -> bool:
 
 
 def _ask_mp4_path_with_prompt(prompt: str) -> Path:
-    while True:
-        raw = _ask_required(prompt)
-        source = _normalize_user_path(raw)
-        if _is_valid_mp4_file(source):
-            return source
+    return ask_file_path(
+        prompt,
+        extensions=(".mp4",),
+        file_description="MP4-Dateien",
+    )
 
 
 def _newest_mp4_in_folder(folder: Path) -> Path | None:
@@ -263,14 +263,11 @@ def _is_plausible_losslesscut_exe(path: Path) -> bool:
 
 def _ask_losslesscut_exe_path() -> Path:
     while True:
-        raw = _ask_required("Pfad zur LosslessCut.exe")
-        path = _normalize_user_path(raw)
-        if not path.exists():
-            print("Diese Datei wurde nicht gefunden. Bitte den vollständigen Pfad zur LosslessCut.exe eingeben.")
-            continue
-        if not path.is_file():
-            print("Das ist ein Ordner, keine Programmdatei. Bitte die Datei LosslessCut.exe auswählen.")
-            continue
+        path = ask_file_path(
+            "Pfad zur LosslessCut.exe",
+            extensions=(".exe",),
+            file_description="EXE-Dateien",
+        )
         if not _is_plausible_losslesscut_exe(path):
             print("Diese Datei sieht nicht nach LosslessCut aus. Bitte eine .exe-Datei oder LosslessCut.exe auswählen.")
             continue

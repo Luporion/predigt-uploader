@@ -10,6 +10,7 @@ Das Projekt ist ein lokaler CLI-Prototyp in Phase 1. Die Grundstruktur, Fachrege
 Für die erste lokale Testversion gibt es eine manuelle Testanleitung und ein PowerShell-Startskript für den Wizard. Der Ziel-Basisordner wird ohne eigene Config aus dem aktuellen Windows-Benutzer abgeleitet und kann im Wizard für den aktuellen Lauf direkt per Pfadeingabe überschrieben werden.
 Phase 1.5 ergänzt einen einfachen LosslessCut-Schnitt-Assistenten: Rohaufnahme wählen, LosslessCut extern öffnen, Predigt manuell schneiden/exportieren und die exportierte MP4 danach in den bestehenden lokalen Workflow übernehmen.
 Die Terminal-Bedienung nutzt nach Möglichkeit `questionary` für Pfeiltasten-Auswahlen und fällt sonst auf robuste Texteingabe zurück. Der Textmodus kann mit `PREDIGT_UPLOADER_TEXT_UI=1` erzwungen werden. Wenn LosslessCut nicht automatisch gefunden wird, kann der Pfad zur `LosslessCut.exe` direkt im Wizard angegeben werden.
+Bei Dateipfad-Abfragen kann auch ein Ordner eingegeben werden; der Wizard zeigt dann passende Dateien im Ordner zur Auswahl an.
 
 ## Was Version 1 bereits kann
 
@@ -41,6 +42,7 @@ Die Terminal-Bedienung nutzt nach Möglichkeit `questionary` für Pfeiltasten-Au
 - Optional eine Rohaufnahme aus `vmix_storage` vorschlagen, in LosslessCut öffnen und nach dem manuellen Export die neue Predigt-MP4 übernehmen.
 - Bei fehlendem LosslessCut-Start einen manuellen Pfad zur `LosslessCut.exe` abfragen und erneut versuchen.
 - Ja/Nein- und Mehrfachauswahlen im Terminal über `questionary` nutzerfreundlicher anzeigen, mit Texteingabe-Fallback.
+- Bei Datei-Abfragen passende Dateien aus einem eingegebenen Ordner anzeigen und auswählen lassen.
 
 ## Bewusst noch nicht enthalten
 

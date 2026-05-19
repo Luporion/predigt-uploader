@@ -2,6 +2,8 @@
 # Kopiere diese Datei später nach config.toml oder nach %APPDATA%\PredigtUploader\config.toml
 
 [paths]
+# Beispiel: Auf Zielrechnern ist ein UNC-Pfad oft robuster als ein gemapptes Laufwerk.
+# vmix_storage = "\\\\SERVER\\Freigabe\\vMixStorage"
 vmix_storage = "V:\\vMixStorage"
 recordings_base = "C:\\Users\\DEIN-NAME\\Desktop\\Aufnahmen"
 mp3_base = "V:\\Predigten\\Predigten"

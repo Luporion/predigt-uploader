@@ -47,6 +47,14 @@
 - [x] manuelle Exportauswahl fuer grosse Ordner begrenzen und geschnittene Dateien bevorzugen
 - [x] Zielordner nach erfolgreichem Workflow optional automatisch oeffnen
 - [x] Rohaufnahme nach erfolgreichem Workflow optional kopieren oder verschieben
+- [x] Zurueck-Logik in Datei-Unterauswahlen reparieren
+- [x] geschnitten wirkende Dateien bei Rohaufnahme-Vorschlaegen niedriger priorisieren und warnen
+- [x] Live-Suche fuer Dateiauswahl mit robustem Text-Fallback ergaenzen
+- [x] LosslessCut-Export-Erkennung per MP4-Snapshot robuster machen
+- [x] Rohaufnahme-Archivierung gegen geschnitten wirkende Dateien absichern
+- [x] Release-ZIP-Paketversion fuer nachgebesserte lokale Auslieferung aktualisieren
+- [x] manuell eingegebenen Rohaufnahme-Ordner als temporaeren Quellordner mit normalem Menue nutzen
+- [x] UNC-Pfade fuer Rohaufnahme-Ordner dokumentieren
 - [x] bei fehlendem Export manuellen Pfad erlauben
 - [x] danach bestehenden lokalen Workflow weiterverwenden
 

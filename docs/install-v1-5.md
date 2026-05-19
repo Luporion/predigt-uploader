@@ -144,7 +144,14 @@ losslesscut_path = ""
 open_target_folder = true
 ```
 
-`vmix_storage` ist der Standardordner für Rohaufnahmen. Der Wizard nutzt diesen Ordner, damit Nutzer nicht selbst durch alte Aufnahmen suchen müssen. Wenn der Ordner fehlt, erklärt der Wizard das und erlaubt eine manuelle Datei- oder Ordnerauswahl.
+`vmix_storage` ist der Standardordner für Rohaufnahmen. Der Wizard nutzt diesen Ordner, damit Nutzer nicht selbst durch alte Aufnahmen suchen müssen. Bereits geschnitten wirkende Dateien werden nicht als beste Rohaufnahme bevorzugt und müssen bei Auswahl extra bestätigt werden. Wenn der Ordner fehlt, erklärt der Wizard das und erlaubt eine manuelle Datei- oder Ordnerauswahl.
+
+Für Netzwerkordner ist ein UNC-Pfad meist robuster als ein gemapptes Laufwerk wie `V:`, weil gemappte Laufwerke je nach Windows-Benutzer fehlen können. Beispiel:
+
+```toml
+[paths]
+vmix_storage = "\\\\SERVER\\Freigabe\\vMixStorage"
+```
 
 `open_target_folder = true` öffnet nach erfolgreicher Verarbeitung den Zielordner automatisch im Explorer. Bei Bedarf kann der Wert auf `false` gesetzt werden.
 

@@ -18,6 +18,8 @@ Für Gemeindemitarbeiter gibt es zusätzlich anklickbare `.cmd`-Startdateien im 
 Die Windows-Starter und PowerShell-Skripte initialisieren UTF-8 und verwenden bei kritischen Konsolentexten ASCII-sichere deutsche Schreibweisen wie `verfuegbar`.
 Für die Weitergabe an den Gemeinderechner gibt es eine einfache Release-ZIP-Anleitung und `scripts/make-release-zip.ps1`.
 Nach dem Gemeinderechner-Praxistest wurde der lokale Zielrechner-Workflow verbessert: `setup-local.ps1` prüft FFmpeg und bietet bei verfügbarem `winget` eine bestätigte Installation an, große vMixStorage-Ordner werden nicht mehr ungefiltert angezeigt, Rohaufnahmen können gesucht oder aus einer begrenzten neuesten Liste gewählt werden, exportierte Dateien mit `_geschnitten` werden bevorzugt angezeigt, der Zielordner kann nach Erfolg automatisch geöffnet werden und die bekannte Rohaufnahme kann optional kopiert oder nach Warnung verschoben werden.
+Eine zweite Nachbesserung behebt Bedien- und Erkennungsprobleme aus dem Praxistest: `Zurück` aus Unterauswahlen führt direkt ins vorherige Menü, Rohaufnahme-Vorschläge vermeiden geschnitten wirkende Dateien, die Suche nutzt nach Möglichkeit Live-Filter per `questionary`, die Export-Erkennung vergleicht einen MP4-Snapshot vor/nach LosslessCut und die Rohaufnahme-Archivierung warnt bei geschnitten wirkenden Dateien.
+Eine weitere Zielrechner-Korrektur behandelt fehlende `vmix_storage`-Ordner besser: Wenn Nutzer manuell einen Ordner eingeben, wird er für diesen Wizard-Lauf als temporärer Rohaufnahme-Quellordner verwendet und das normale Rohaufnahme-Menü inklusive Suche/Filter angezeigt. UNC-Pfade werden als normale Pfade akzeptiert und in der Config-Doku als robuster empfohlen.
 
 ## Was Version 1 bereits kann
 
@@ -51,9 +53,12 @@ Nach dem Gemeinderechner-Praxistest wurde der lokale Zielrechner-Workflow verbes
 - Als einfache lokale ZIP-Auslieferung unter `dist/` vorbereitet werden.
 - Optional eine Rohaufnahme aus `vmix_storage` vorschlagen, in LosslessCut öffnen und nach dem manuellen Export die neue Predigt-MP4 übernehmen.
 - Große Rohaufnahme-Ordner über neueste Aufnahme, begrenzte neueste Liste, Suche/Filter oder manuelle Eingabe bedienen.
-- Bei manueller Exportauswahl neue Dateien seit Assistentenstart und geschnittene Dateien bevorzugen, ohne automatisch eine falsche Datei zu wählen.
+- Bei Rohaufnahme-Vorschlägen echte vMix-Rohaufnahmen gegenüber geschnitten wirkenden Dateien bevorzugen und verdächtige Rohaufnahmen bestätigen lassen.
+- Bei fehlendem `vmix_storage` einen manuell eingegebenen Ordner als temporären Rohaufnahme-Quellordner mit vollständigem Rohaufnahme-Menü verwenden.
+- Bei Datei-Suchen nach Möglichkeit Live-Filter mit Pfeiltasten-Auswahl nutzen und im Textmodus robust auf Suchtext plus Ergebnisliste zurückfallen.
+- Bei Export-Erkennung neue oder veränderte MP4-Dateien über Snapshot, Erstellzeit und typische LosslessCut-Namen finden, ohne automatisch eine falsche Datei zu wählen.
 - Nach erfolgreichem Lauf den Zielordner im Explorer öffnen, falls `open_target_folder = true` gesetzt ist.
-- Eine bekannte Rohaufnahme nach erfolgreichem Lauf optional liegen lassen, kopieren oder nach Warnung verschieben.
+- Eine bekannte Rohaufnahme nach erfolgreichem Lauf optional liegen lassen, kopieren oder nach Warnung verschieben; geschnitten wirkende Dateien werden zusätzlich gewarnt.
 - Bei fehlendem LosslessCut-Start einen manuellen Pfad zur `LosslessCut.exe` abfragen und erneut versuchen.
 - Ja/Nein- und Mehrfachauswahlen im Terminal über `questionary` nutzerfreundlicher anzeigen, mit Texteingabe-Fallback.
 - Bei Datei-Abfragen passende Dateien aus einem eingegebenen Ordner anzeigen und auswählen lassen.
@@ -71,7 +76,7 @@ Nach dem Gemeinderechner-Praxistest wurde der lokale Zielrechner-Workflow verbes
 
 ## Nächster geplanter Schritt
 
-Release-ZIP nach `docs/release-v1-5.md` neu erstellen, auf dem Gemeinderechner entpacken und den verbesserten Zielrechner-Workflow mit FFmpeg-Check, Rohaufnahme-Suche, Exportauswahl, Zielordner-Öffnen und optionaler Rohaufnahme-Archivierung testen.
+Release-ZIP `predigt-uploader-v0.1.6-local.zip` nach `docs/release-v1-5.md` neu erstellen, auf dem Gemeinderechner entpacken und den verbesserten Zielrechner-Workflow mit Rohaufnahme-Auswahl, Live-Suche, Export-Snapshot-Erkennung und optionaler Rohaufnahme-Archivierung testen.
 
 ## Sicherheits-Hinweis
 

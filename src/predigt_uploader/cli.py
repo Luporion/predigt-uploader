@@ -5,7 +5,7 @@ import os
 import re
 import shutil
 import subprocess
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import date, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -17,7 +17,7 @@ from .models import AppConfig, ProcessingPlan, SermonInfo
 from .mp3 import Mp3ConversionError, convert_mp4_to_mp3, ffmpeg_available
 from .report import build_summary_text, write_summary_file
 from .run_log import WorkflowLog
-from .ui import MenuOption, UserAbortError, ask_file_path, ask_yes_no, choose_from_options
+from .ui import MenuOption, UserAbortError, ask_file_path, ask_yes_no, choose_from_options, search_from_options
 
 
 class Mp4TransferError(RuntimeError):
@@ -70,6 +70,14 @@ RAW_ARCHIVE_COPY = "copy"
 RawArchiveMode = str
 RECENT_MP4_LIMIT = 15
 SEARCH_RESULT_LIMIT = 15
+
+
+@dataclass(frozen=True)
+class Mp4FileSnapshot:
+    path: Path
+    size: int
+    modified_at: float
+    created_at: float
 
 
 def _ask(prompt: str, default: str | None = None) -> str:
@@ -338,6 +346,44 @@ def _newest_mp4_in_folder(folder: Path) -> Path | None:
     return candidates[0]
 
 
+def _looks_like_cut_or_final_mp4(path: Path) -> bool:
+    name = path.name.casefold().replace(" ", "")
+    stem = path.stem.casefold()
+    return (
+        "_geschnitten" in stem
+        or "geschnitten" in stem
+        or "predigt(" in name
+        or name.startswith("predigt_")
+        or name.startswith("predigt-")
+    )
+
+
+def _looks_like_vmix_raw_recording(path: Path) -> bool:
+    stem = path.stem.casefold()
+    return bool(re.search(r"\b\d{1,2}\s+[a-zäöüß]+\s+\d{4}\b", stem)) and "gottesdienst" in stem
+
+
+def _raw_recording_sort_key(path: Path) -> tuple[int, float]:
+    if _looks_like_cut_or_final_mp4(path):
+        priority = 2
+    elif _looks_like_vmix_raw_recording(path):
+        priority = 0
+    else:
+        priority = 1
+    return priority, -path.stat().st_mtime
+
+
+def _raw_recording_candidates_sorted(folder: Path) -> tuple[Path, ...]:
+    return tuple(sorted(_mp4_files_sorted(folder), key=_raw_recording_sort_key))
+
+
+def _newest_raw_recording_candidate(folder: Path) -> Path | None:
+    candidates = _raw_recording_candidates_sorted(folder)
+    if not candidates:
+        return None
+    return candidates[0]
+
+
 def _format_file_choice(path: Path) -> str:
     try:
         stat = path.stat()
@@ -367,17 +413,17 @@ def _search_mp4_files(folder: Path, search_text: str, *, limit: int = SEARCH_RES
     return _limit_file_list(matches, limit)
 
 
-def _choose_mp4_from_list(prompt: str, files: tuple[Path, ...], *, overflow_count: int = 0) -> Path | None:
+def _choose_mp4_from_list(prompt: str, files: tuple[Path, ...], *, overflow_count: int = 0, live_search: bool = False) -> Path | None:
     if not files:
         print("Es wurden keine passenden MP4-Dateien gefunden.")
         return None
     if overflow_count > 0:
         print(f"Hinweis: Es gibt {overflow_count} weitere Treffer. Bitte Suchtext genauer eingeben, wenn die Datei nicht dabei ist.")
-    selected = choose_from_options(
-        prompt,
-        [MenuOption(_format_file_choice(path), path) for path in files]
-        + [MenuOption("Zurück", None, ("z", "zurueck", "zurück"))],
-    )
+    options = [MenuOption(_format_file_choice(path), path) for path in files] + [MenuOption("Zurück", None, ("z", "zurueck", "zurück"))]
+    if live_search:
+        selected = search_from_options(prompt, options)
+    else:
+        selected = choose_from_options(prompt, options)
     return selected
 
 
@@ -390,7 +436,9 @@ def _ask_mp4_path_or_limited_folder(prompt: str, *, folder_prompt: str = "MP4-Da
             continue
         if path.is_file():
             if path.suffix.casefold() == ".mp4":
-                return path
+                if _confirm_raw_recording_if_suspicious(path):
+                    return path
+                continue
             print("Diese Datei ist keine MP4-Datei. Bitte eine Datei mit der Endung .mp4 auswählen.")
             continue
         if not path.is_dir():
@@ -410,37 +458,56 @@ def _ask_search_mp4_in_folder(folder: Path) -> Path | None:
         print("Der konfigurierte Rohaufnahme-Ordner wurde nicht gefunden.")
         print(f"Ordner: {folder}")
         return None
-    while True:
-        search_text = _ask_required("Suchtext im Dateinamen")
-        all_matches = tuple(path for path in _mp4_files_sorted(folder) if search_text.casefold() in path.name.casefold())
-        matches = _limit_file_list(all_matches, SEARCH_RESULT_LIMIT)
-        selected = _choose_mp4_from_list(
-            "Passende MP4-Datei auswählen",
-            matches,
-            overflow_count=max(0, len(all_matches) - len(matches)),
-        )
-        if selected is not None:
-            return selected
-        if not _ask_yes_no("Noch einmal suchen?", True):
-            return None
-
-
-def _ask_raw_recording(config: AppConfig) -> Path:
-    print()
-    print("Rohaufnahme auswählen")
-    print(f"Konfigurierter Quellordner: {config.vmix_storage}")
-    if not config.vmix_storage.exists() or not config.vmix_storage.is_dir():
-        print("Der konfigurierte Rohaufnahme-Ordner wurde nicht gefunden.")
-        print("Du kannst die Rohaufnahme trotzdem manuell auswählen.")
-        print(f"Admin-Hinweis: vmix_storage existiert nicht oder ist kein Ordner: {config.vmix_storage}")
-        return _ask_mp4_path_or_limited_folder("Pfad zur vMix-Rohaufnahme oder zu einem Ordner")
-
-    files = _mp4_files_sorted(config.vmix_storage)
+    files = _mp4_files_sorted(folder)
     if not files:
-        print("Im konfigurierten Rohaufnahme-Ordner wurde keine MP4 gefunden.")
-        return _ask_mp4_path_or_limited_folder("Pfad zur vMix-Rohaufnahme oder zu einem Ordner")
+        print("In diesem Ordner wurden keine MP4-Dateien gefunden.")
+        return None
+    return _choose_mp4_from_list(
+        "MP4-Datei suchen und auswählen",
+        files,
+        overflow_count=0,
+        live_search=True,
+    )
 
-    newest = files[0]
+
+def _ask_manual_raw_recording_path() -> Path:
+    while True:
+        raw = _ask_required("Pfad zur vMix-Rohaufnahme oder zu einem Ordner")
+        path = _normalize_user_path(raw)
+        if not path.exists():
+            print("Dieser Pfad wurde nicht gefunden. Bitte den vollständigen Pfad eingeben.")
+            continue
+        if path.is_file():
+            if path.suffix.casefold() == ".mp4":
+                return path
+            print("Diese Datei ist keine MP4-Datei. Bitte eine Datei mit der Endung .mp4 auswählen.")
+            continue
+        if path.is_dir():
+            print("Dieser Ordner wird für diesen Wizard-Lauf als Rohaufnahme-Quellordner verwendet.")
+            print(f"Temporärer Quellordner: {path}")
+            return _ask_raw_recording_from_folder(path, "Temporärer Rohaufnahme-Quellordner")
+        print("Dieser Pfad ist keine Datei und kein Ordner. Bitte erneut eingeben.")
+
+
+def _confirm_raw_recording_if_suspicious(path: Path) -> bool:
+    if not _looks_like_cut_or_final_mp4(path):
+        return True
+    print()
+    print("Diese Datei wirkt bereits geschnitten. Ist das wirklich die Rohaufnahme?")
+    print(f"Datei: {path}")
+    return _ask_yes_no("Diese Datei trotzdem als Rohaufnahme verwenden?", False)
+
+
+def _ask_raw_recording_from_folder(folder: Path, folder_label: str = "Konfigurierter Quellordner") -> Path:
+    print(f"{folder_label}: {folder}")
+    files = _raw_recording_candidates_sorted(folder)
+    if not files:
+        print("In diesem Rohaufnahme-Ordner wurde keine MP4 gefunden.")
+        return _ask_manual_raw_recording_path()
+
+    newest = _newest_raw_recording_candidate(folder)
+    if newest is None:
+        return _ask_manual_raw_recording_path()
     print(f"Vorschlag: {_format_file_choice(newest)}")
     while True:
         choice = choose_from_options(
@@ -454,7 +521,8 @@ def _ask_raw_recording(config: AppConfig) -> Path:
             ],
         )
         if choice == "newest":
-            return newest
+            if _confirm_raw_recording_if_suspicious(newest):
+                return newest
         if choice == "recent":
             shown = _limit_file_list(files, RECENT_MP4_LIMIT)
             selected = _choose_mp4_from_list(
@@ -462,16 +530,30 @@ def _ask_raw_recording(config: AppConfig) -> Path:
                 shown,
                 overflow_count=max(0, len(files) - len(shown)),
             )
-            if selected is not None:
+            if selected is not None and _confirm_raw_recording_if_suspicious(selected):
                 return selected
         elif choice == "search":
-            selected = _ask_search_mp4_in_folder(config.vmix_storage)
-            if selected is not None:
+            selected = _ask_search_mp4_in_folder(folder)
+            if selected is not None and _confirm_raw_recording_if_suspicious(selected):
                 return selected
         elif choice == "manual":
-            return _ask_mp4_path_or_limited_folder("Pfad zur vMix-Rohaufnahme oder zu einem Ordner")
+            selected = _ask_manual_raw_recording_path()
+            return selected
         else:
             raise UserAbortError("Abbruch durch Nutzer.")
+
+
+def _ask_raw_recording(config: AppConfig) -> Path:
+    print()
+    print("Rohaufnahme auswählen")
+    if not config.vmix_storage.exists() or not config.vmix_storage.is_dir():
+        print(f"Konfigurierter Quellordner: {config.vmix_storage}")
+        print("Der konfigurierte Rohaufnahme-Ordner wurde nicht gefunden.")
+        print("Du kannst jetzt einen anderen Rohaufnahme-Ordner oder direkt eine MP4-Datei eingeben.")
+        print(f"Admin-Hinweis: vmix_storage existiert nicht oder ist kein Ordner: {config.vmix_storage}")
+        return _ask_manual_raw_recording_path()
+
+    return _ask_raw_recording_from_folder(config.vmix_storage)
 
 
 def _losslesscut_command(config: AppConfig) -> str:
@@ -592,13 +674,66 @@ def _is_cut_export(path: Path) -> bool:
     return "_geschnitten" in name or "geschnitten" in name
 
 
+def _looks_like_losslesscut_export(path: Path) -> bool:
+    stem = path.stem.casefold()
+    return _is_cut_export(path) or bool(re.search(r"\d{2}\.\d{2}\.\d{3}\s*-\s*\d{2}\.\d{2}\.\d{3}", stem))
+
+
 def _prioritize_export_candidates(candidates: tuple[Path, ...]) -> tuple[Path, ...]:
     return tuple(
         sorted(
             candidates,
-            key=lambda path: (0 if _is_cut_export(path) else 1, -path.stat().st_mtime),
+            key=lambda path: (0 if _looks_like_losslesscut_export(path) else 1, -path.stat().st_mtime),
         )
     )
+
+
+def _snapshot_mp4_files(folders: tuple[Path, ...]) -> dict[Path, Mp4FileSnapshot]:
+    snapshots: dict[Path, Mp4FileSnapshot] = {}
+    for folder in folders:
+        if not folder.exists() or not folder.is_dir():
+            continue
+        for path in folder.glob("*.mp4"):
+            if not path.is_file():
+                continue
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            snapshots[path] = Mp4FileSnapshot(
+                path=path,
+                size=stat.st_size,
+                modified_at=stat.st_mtime,
+                created_at=stat.st_ctime,
+            )
+    return snapshots
+
+
+def _find_mp4_exports_after_snapshot(
+    folders: tuple[Path, ...],
+    before: dict[Path, Mp4FileSnapshot],
+    assistant_start: datetime,
+) -> tuple[Path, ...]:
+    start_timestamp = assistant_start.timestamp()
+    found: list[Path] = []
+    for folder in folders:
+        if not folder.exists() or not folder.is_dir():
+            continue
+        for path in folder.glob("*.mp4"):
+            if not path.is_file() or path in found:
+                continue
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            old = before.get(path)
+            is_new_path = old is None
+            changed_file = old is not None and (old.size != stat.st_size or old.modified_at != stat.st_mtime or old.created_at != stat.st_ctime)
+            created_after_start = stat.st_ctime >= start_timestamp
+            plausible_name = _looks_like_losslesscut_export(path)
+            if is_new_path or created_after_start or (changed_file and plausible_name):
+                found.append(path)
+    return _prioritize_export_candidates(tuple(found))
 
 
 def _manual_export_candidates(folder: Path, assistant_start: datetime) -> tuple[Path, ...]:
@@ -657,19 +792,23 @@ def _ask_exported_mp4_manually(assistant_start: datetime) -> Path:
         )
         if selected is not None:
             return selected
-        if _ask_yes_no("In diesem Ordner suchen/filtern?", True):
-            searched = _ask_search_mp4_in_folder(path)
-            if searched is not None:
-                return searched
+        continue
 
 
-def _select_exported_mp4(config: AppConfig, raw_recording: Path, assistant_start: datetime) -> Path:
+def _select_exported_mp4(
+    config: AppConfig,
+    raw_recording: Path,
+    assistant_start: datetime,
+    before_export: dict[Path, Mp4FileSnapshot] | None = None,
+) -> Path:
     print()
     print("Exportierte Predigt-MP4 übernehmen")
     print("Wenn der Export in LosslessCut fertig ist, sucht der Wizard nach neuen MP4-Dateien.")
     _ask("Drücke Enter, sobald der Export fertig ist")
     folders = _export_search_folders(config, raw_recording)
-    candidates = _find_new_mp4_exports(folders, assistant_start)
+    if before_export is None:
+        before_export = _snapshot_mp4_files(folders)
+    candidates = _find_mp4_exports_after_snapshot(folders, before_export, assistant_start)
     if candidates:
         return _choose_exported_mp4(candidates)
     print("Es wurde keine passende neue MP4 automatisch ausgewählt.")
@@ -683,10 +822,13 @@ def _select_source_mp4_for_workflow(config: AppConfig, log: WorkflowLog) -> tupl
     assistant_start = datetime.now()
     raw_recording = _ask_raw_recording(config)
     log.event(f"Rohaufnahme fuer LosslessCut ausgewaehlt: {raw_recording}")
+    export_folders = _export_search_folders(config, raw_recording)
+    before_export = _snapshot_mp4_files(export_folders)
+    log.event(f"MP4-Snapshot vor LosslessCut-Export erstellt: {len(before_export)} Dateien.")
     _try_start_losslesscut(raw_recording, config, log)
 
     _print_losslesscut_instructions()
-    exported_mp4 = _select_exported_mp4(config, raw_recording, assistant_start)
+    exported_mp4 = _select_exported_mp4(config, raw_recording, assistant_start, before_export)
     log.event(f"Exportierte MP4 ausgewaehlt: {exported_mp4}")
     return exported_mp4, raw_recording
 
@@ -1116,6 +1258,8 @@ def _ask_raw_archive_mode(raw_recording: Path, target_folder: Path) -> RawArchiv
     print("Rohaufnahme aufräumen")
     print(f"Rohaufnahme: {raw_recording}")
     print(f"Zielordner: {target_folder}")
+    if _looks_like_cut_or_final_mp4(raw_recording):
+        print("Diese Datei sieht bereits geschnitten aus. Bitte nicht als Rohaufnahme archivieren, wenn sie nicht der vollständige Gottesdienst ist.")
     return choose_from_options(
         "Rohaufnahme in den Zielordner verschieben, damit vMixStorage frei bleibt?",
         [

@@ -57,9 +57,20 @@ Bei einer einmaligen Eingabe im Wizard sind auch Anführungszeichen erlaubt, zum
 vmix_storage = "V:\\vMixStorage"
 ```
 
-Der LosslessCut-Assistent nutzt diesen Ordner, damit Nutzer nicht manuell suchen muessen. Wenn der Ordner vorhanden ist, schlaegt der Wizard zuerst die neueste MP4 vor. Alternativ koennen die neuesten Aufnahmen angezeigt, Dateinamen gesucht/gefiltert oder ein anderer Datei-/Ordnerpfad eingegeben werden. Bei sehr vielen Dateien zeigt der Wizard nur eine begrenzte Liste und weist darauf hin.
+Auf dem Gemeinderechner ist ein UNC-Pfad oft robuster als ein gemapptes Laufwerk wie `V:`. Gemappte Laufwerke koennen je nach angemeldetem Windows-Benutzer oder Startart fehlen. Ein UNC-Pfad zeigt direkt auf die Netzwerkfreigabe:
 
-Wenn `vmix_storage` fehlt oder nicht erreichbar ist, meldet der Wizard das verstaendlich und erlaubt eine manuelle Auswahl.
+```toml
+[paths]
+vmix_storage = "\\\\SERVER\\Freigabe\\vMixStorage"
+```
+
+In `config.example.toml` stehen nur Beispielpfade. Echte Gemeinde-Pfade gehoeren nur in die lokale `config.toml` auf dem Zielrechner.
+
+Der LosslessCut-Assistent nutzt diesen Ordner, damit Nutzer nicht manuell suchen muessen. Wenn der Ordner vorhanden ist, schlaegt der Wizard zuerst die neueste plausible Rohaufnahme vor. Bereits geschnitten wirkende Dateien wie `_geschnitten` oder fertige `Predigt (...)_Redner.mp4`-Dateien werden dabei niedriger priorisiert und bei Auswahl mit einer Warnung bestaetigt.
+
+Alternativ koennen die neuesten Aufnahmen angezeigt, Dateinamen gesucht/gefiltert oder ein anderer Datei-/Ordnerpfad eingegeben werden. Bei sehr vielen Dateien zeigt der Wizard nur eine begrenzte Liste und weist darauf hin. Die Suche nutzt nach Moeglichkeit eine Live-Auswahl ueber `questionary`; im Textmodus bleibt der Fallback mit Suchtext und Ergebnisliste erhalten.
+
+Wenn `vmix_storage` fehlt oder nicht erreichbar ist, meldet der Wizard das verstaendlich und erlaubt eine manuelle Auswahl. Wird dabei ein Ordner eingegeben, verwendet der Wizard diesen Ordner nur fuer den aktuellen Lauf als temporaeren Rohaufnahme-Quellordner und zeigt danach wieder das normale Rohaufnahme-Menue mit neuester Aufnahme, neuesten Aufnahmen, Suche/Filter, manueller Eingabe und Abbruch.
 
 `recordings_base` ist der Ziel-Basisordner. Darunter legt der Wizard die Jahres- und Datumsordner an, zum Beispiel `2026\2026-05-24`.
 

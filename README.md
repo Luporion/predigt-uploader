@@ -87,6 +87,8 @@ Für Gemeindemitarbeiter gibt es im Projektordner zusätzlich anklickbare Window
 Diese Dateien können per Doppelklick genutzt werden und lassen das Fenster nach Ende oder Fehler offen.
 Die Starter setzen die Windows-Konsole auf UTF-8 und verwenden robuste deutsche Meldungen, damit die Ausgabe auf Zielrechnern lesbar bleibt.
 
+Für eine einfache ZIP-Auslieferung gibt es [docs/release-v1-5.md](docs/release-v1-5.md) und `scripts/make-release-zip.ps1`.
+
 ## Wichtige Dateien
 
 - `SPEC.md` – fachliche Spezifikation
@@ -94,6 +96,7 @@ Die Starter setzen die Windows-Konsole auf UTF-8 und verwenden robuste deutsche 
 - `TASKS.md` – geplanter Entwicklungsablauf
 - `config.example.toml` – Beispielkonfiguration
 - `docs/install-v1-5.md` – Installation und erster Test auf einem Zielrechner
+- `docs/release-v1-5.md` – Inhalt und Erstellung der lokalen Release-ZIP
 - `docs/dev-log/` – kurze Berichte nach KI-Aufgaben
 - `src/predigt_uploader/` – Programmcode
 - `tests/` – automatische Tests

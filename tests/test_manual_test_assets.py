@@ -122,3 +122,61 @@ def test_install_v1_5_guide_documents_clickable_cmd_files() -> None:
     assert "Doppelklick" in content
     assert "Desktop" in content
     assert "Verknüpfung" in content
+
+
+def test_release_zip_script_documents_included_and_excluded_paths() -> None:
+    script = PROJECT_ROOT / "scripts" / "make-release-zip.ps1"
+
+    content = script.read_text(encoding="utf-8")
+
+    assert "predigt-uploader-v$Version-local" in content
+    assert "dist" in content
+    assert "Compress-Archive" in content
+    assert '"src"' in content
+    assert '"scripts"' in content
+    assert '"docs\\install-v1-5.md"' in content
+    assert '"docs\\manual-test-v1-5.md"' in content
+    assert '"README.md"' in content
+    assert '"pyproject.toml"' in content
+    assert '"config.example.toml"' in content
+    assert '"PredigtUploader starten.cmd"' in content
+    assert '"PredigtUploader einrichten.cmd"' in content
+    assert '"PredigtUploader Systemcheck.cmd"' in content
+    assert '".git"' in content
+    assert '".venv"' in content
+    assert '"logs"' in content
+    assert '"dist"' in content
+    assert '"build"' in content
+    assert '"__pycache__"' in content
+    assert '".pytest_cache"' in content
+    assert '"config.toml"' in content
+    assert '"*.egg-info"' in content
+    assert '"*.pyc"' in content
+    assert "ExcludedPatterns" in content
+
+
+def test_release_v1_5_guide_documents_zip_contents_and_target_setup() -> None:
+    guide = PROJECT_ROOT / "docs" / "release-v1-5.md"
+
+    content = guide.read_text(encoding="utf-8")
+
+    assert "predigt-uploader-v0.1.5-local.zip" in content
+    assert "src/" in content
+    assert "scripts/" in content
+    assert "docs/install-v1-5.md" in content
+    assert "docs/manual-test-v1-5.md" in content
+    assert "README.md" in content
+    assert "pyproject.toml" in content
+    assert "config.example.toml" in content
+    assert "PredigtUploader starten.cmd" in content
+    assert ".git/" in content
+    assert ".venv/" in content
+    assert "logs/" in content
+    assert "dist/" in content
+    assert "build/" in content
+    assert "*.egg-info/" in content
+    assert "src/predigt_uploader.egg-info/" in content
+    assert "*.pyc" in content
+    assert "config.toml" in content
+    assert "Gemeinderechner" in content
+    assert "Doppelklick" in content

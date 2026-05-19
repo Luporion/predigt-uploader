@@ -41,6 +41,7 @@
 - [x] Installationsanleitung fuer lokale Version 1.5 dokumentieren
 - [x] anklickbare Windows-Startdateien fuer Einrichtung, Systemcheck und Wizard bereitstellen
 - [x] Encoding der Windows-Startdateien und PowerShell-Ausgaben absichern
+- [x] einfache Release-ZIP fuer lokale Auslieferung vorbereiten
 - [x] bei fehlendem Export manuellen Pfad erlauben
 - [x] danach bestehenden lokalen Workflow weiterverwenden
 

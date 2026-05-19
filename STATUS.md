@@ -16,6 +16,7 @@ Wenn eine finale MP4 im Zielordner bereits existiert, bietet der Wizard eine bew
 Für die Vorbereitung eines Zielrechners gibt es jetzt `scripts/setup-local.ps1`, `scripts/check-system.ps1` und die Installationsanleitung `docs/install-v1-5.md`.
 Für Gemeindemitarbeiter gibt es zusätzlich anklickbare `.cmd`-Startdateien im Projektstamm für Einrichtung, Systemcheck und Wizard-Start.
 Die Windows-Starter und PowerShell-Skripte initialisieren UTF-8 und verwenden bei kritischen Konsolentexten ASCII-sichere deutsche Schreibweisen wie `verfuegbar`.
+Für die Weitergabe an den Gemeinderechner gibt es eine einfache Release-ZIP-Anleitung und `scripts/make-release-zip.ps1`.
 
 ## Was Version 1 bereits kann
 
@@ -46,6 +47,7 @@ Die Windows-Starter und PowerShell-Skripte initialisieren UTF-8 und verwenden be
 - Über `scripts/run-wizard.ps1` lokal gestartet werden, wenn `.venv` eingerichtet ist.
 - Über `scripts/setup-local.ps1` lokal eingerichtet und über `scripts/check-system.ps1` vor dem ersten Lauf geprüft werden.
 - Über anklickbare `.cmd`-Dateien im Projektstamm ohne direkte PowerShell-Eingabe eingerichtet, geprüft und gestartet werden.
+- Als einfache lokale ZIP-Auslieferung unter `dist/` vorbereitet werden.
 - Optional eine Rohaufnahme aus `vmix_storage` vorschlagen, in LosslessCut öffnen und nach dem manuellen Export die neue Predigt-MP4 übernehmen.
 - Bei fehlendem LosslessCut-Start einen manuellen Pfad zur `LosslessCut.exe` abfragen und erneut versuchen.
 - Ja/Nein- und Mehrfachauswahlen im Terminal über `questionary` nutzerfreundlicher anzeigen, mit Texteingabe-Fallback.
@@ -64,7 +66,7 @@ Die Windows-Starter und PowerShell-Skripte initialisieren UTF-8 und verwenden be
 
 ## Nächster geplanter Schritt
 
-Phase 1.5 auf einem Zielrechner nach `docs/install-v1-5.md` einrichten und mit einer kleinen Rohaufnahme nach `docs/manual-test-v1-5.md` testen. Danach den Übergang zu Phase 2 planen.
+Release-ZIP nach `docs/release-v1-5.md` erstellen, auf einem Zielrechner entpacken und dort nach `docs/install-v1-5.md` mit einer kleinen Rohaufnahme testen. Danach den Übergang zu Phase 2 planen.
 
 ## Sicherheits-Hinweis
 

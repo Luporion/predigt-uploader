@@ -22,6 +22,8 @@ class MenuOption[T]:
 YES_VALUES = {"j", "ja", "y", "yes"}
 NO_VALUES = {"n", "nein", "no"}
 TEXT_UI_ENV = "PREDIGT_UPLOADER_TEXT_UI"
+BACK = object()
+SEARCH_FALLBACK_LIMIT = 15
 
 
 class UserAbortError(RuntimeError):
@@ -34,6 +36,27 @@ def _force_text_ui() -> bool:
 
 def _can_try_questionary() -> bool:
     return not _force_text_ui() and sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def _questionary_style():
+    try:
+        from prompt_toolkit.styles import Style
+    except ImportError:
+        return None
+    return Style(
+        [
+            ("qmark", "fg:#00aa88 bold"),
+            ("question", "bold"),
+            ("answer", "fg:#00aa88 bold"),
+            ("pointer", "fg:#ffffff bg:#005f87 bold"),
+            ("highlighted", "fg:#ffffff bg:#005f87 bold"),
+            ("selected", "fg:#ffffff bg:#005f87"),
+            ("separator", "fg:#666666"),
+            ("instruction", "fg:#666666"),
+            ("text", ""),
+            ("disabled", "fg:#888888 italic"),
+        ]
+    )
 
 
 def _questionary_select(prompt: str, options: Sequence[MenuOption[T]], default_index: int) -> T | None:
@@ -51,6 +74,7 @@ def _questionary_select(prompt: str, options: Sequence[MenuOption[T]], default_i
             choices=labels,
             default=labels[default_index],
             use_shortcuts=True,
+            style=_questionary_style(),
         ).ask()
     except (KeyboardInterrupt, EOFError) as exc:
         raise UserAbortError("Abbruch durch Nutzer.") from exc
@@ -61,7 +85,35 @@ def _questionary_select(prompt: str, options: Sequence[MenuOption[T]], default_i
         raise UserAbortError("Abbruch durch Nutzer.")
     for option in options:
         if option.label == selected:
-            print(f"{prompt}: {option.label}")
+            return option.value
+    return None
+
+
+def _questionary_autocomplete(prompt: str, options: Sequence[MenuOption[T]]) -> T | None:
+    if not _can_try_questionary():
+        return None
+    try:
+        import questionary
+    except ImportError:
+        return None
+
+    try:
+        labels = [option.label for option in options]
+        selected = questionary.autocomplete(
+            prompt,
+            choices=labels,
+            match_middle=True,
+            style=_questionary_style(),
+        ).ask()
+    except (KeyboardInterrupt, EOFError) as exc:
+        raise UserAbortError("Abbruch durch Nutzer.") from exc
+    except Exception:
+        return None
+
+    if selected is None:
+        raise UserAbortError("Abbruch durch Nutzer.")
+    for option in options:
+        if option.label == selected:
             return option.value
     return None
 
@@ -98,24 +150,30 @@ def choose_from_options(
     options: Sequence[MenuOption[T]],
     *,
     input_func: InputFunc | None = None,
+    default_index: int = 0,
 ) -> T:
     if input_func is None:
         input_func = input
     if not options:
         raise ValueError("options darf nicht leer sein")
+    if default_index < 0 or default_index >= len(options):
+        raise ValueError("default_index liegt außerhalb der Optionen")
 
-    selected = _questionary_select(prompt, options, 0)
+    selected = _questionary_select(prompt, options, default_index)
     if selected is not None:
         return selected
 
     print(prompt)
     for index, option in enumerate(options, start=1):
-        print(f"  {index}. {option.label}")
+        default_marker = " (Standard)" if index - 1 == default_index else ""
+        print(f"  {index}. {option.label}{default_marker}")
     while True:
         try:
             value = input_func("Nummer auswählen: ").strip()
         except (KeyboardInterrupt, EOFError) as exc:
             raise UserAbortError("Abbruch durch Nutzer.") from exc
+        if not value:
+            return options[default_index].value
         normalized_value = value.casefold()
         for option in options:
             if normalized_value in {alias.casefold() for alias in option.aliases}:
@@ -132,6 +190,41 @@ def choose_from_options(
         if 1 <= choice <= len(options):
             return options[choice - 1].value
         print(f"Bitte eine Nummer zwischen 1 und {len(options)} eingeben.")
+
+
+def search_from_options(
+    prompt: str,
+    options: Sequence[MenuOption[T]],
+    *,
+    input_func: InputFunc | None = None,
+) -> T:
+    if input_func is None:
+        input_func = input
+    if not options:
+        raise ValueError("options darf nicht leer sein")
+
+    selected = _questionary_autocomplete(prompt, options)
+    if selected is not None:
+        return selected
+
+    while True:
+        try:
+            search_text = input_func("Suchtext im Dateinamen: ").strip().casefold()
+        except (KeyboardInterrupt, EOFError) as exc:
+            raise UserAbortError("Abbruch durch Nutzer.") from exc
+        if not search_text:
+            matches = list(options[:SEARCH_FALLBACK_LIMIT])
+        else:
+            matches = [
+                option
+                for option in options
+                if search_text in option.label.casefold()
+                or any(search_text in alias.casefold() for alias in option.aliases)
+            ][:SEARCH_FALLBACK_LIMIT]
+        if not matches:
+            print("Keine passenden Dateien gefunden. Bitte einen anderen Suchtext eingeben.")
+            continue
+        return choose_from_options(prompt, matches, input_func=input_func)
 
 
 def _normalize_user_path(raw_path: str) -> Path:

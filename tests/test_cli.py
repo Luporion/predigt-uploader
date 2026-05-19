@@ -1,5 +1,6 @@
 from datetime import date, datetime, timedelta
 from pathlib import Path
+import subprocess
 
 import pytest
 
@@ -17,6 +18,7 @@ from predigt_uploader.cli import (
     _archive_raw_recording,
     _ask_raw_recording,
     _ask_raw_archive_mode,
+    _choose_mp4_from_list,
     _confirm_raw_recording_if_suspicious,
     _detect_recording_date_from_filename,
     _find_mp4_exports_after_snapshot,
@@ -37,6 +39,7 @@ from predigt_uploader.cli import (
     _select_exported_mp4,
     _snapshot_mp4_files,
     _try_start_losslesscut,
+    _wait_for_losslesscut_or_enter,
     _handle_existing_target_mp4,
     _print_local_workflow_success,
     _print_missing_ffmpeg_message,
@@ -44,12 +47,15 @@ from predigt_uploader.cli import (
     _select_source_mp4,
     _select_recordings_base,
     _select_target_folder,
+    _show_wait_status,
     _transfer_mp4_to_target,
     _validate_created_mp3,
     _validate_local_workflow_result,
+    _year_folder_template_label,
     RAW_ARCHIVE_COPY,
     RAW_ARCHIVE_MOVE,
     RAW_ARCHIVE_NONE,
+    run_start_menu,
     run_wizard,
 )
 from predigt_uploader.mp3 import Mp3ConversionError
@@ -153,6 +159,34 @@ def test_search_mp4_files_filters_and_sorts_newest_first(tmp_path):
     assert _search_mp4_files(tmp_path, "predigt") == (newer, older)
 
 
+def test_search_mp4_files_empty_search_returns_limited_latest_files(tmp_path):
+    files = []
+    for index in range(20):
+        path = tmp_path / f"aufnahme-{index:02}.mp4"
+        path.write_bytes(b"video")
+        timestamp = datetime.now().timestamp() + index
+        path.touch()
+        import os
+
+        os.utime(path, (timestamp, timestamp))
+        files.append(path)
+
+    result = _search_mp4_files(tmp_path, "", limit=15)
+
+    assert len(result) == 15
+    assert result[0].name == "aufnahme-19.mp4"
+
+
+def test_choose_mp4_from_list_back_returns_none_without_second_prompt(monkeypatch, tmp_path):
+    from predigt_uploader.ui import BACK
+
+    mp4 = tmp_path / "aufnahme.mp4"
+    mp4.write_bytes(b"video")
+    monkeypatch.setattr("predigt_uploader.cli.choose_from_options", lambda _prompt, _options: BACK)
+
+    assert _choose_mp4_from_list("Auswahl", (mp4,)) is None
+
+
 def test_limit_file_list_keeps_display_bounded(tmp_path):
     files = tuple(tmp_path / f"clip-{index}.mp4" for index in range(20))
 
@@ -214,7 +248,7 @@ def test_raw_recording_missing_config_folder_opens_normal_menu(monkeypatch, tmp_
     manual_folder.mkdir()
     (manual_folder / "Gottesdienst - 17 Mai 2026 - 09-55-05 .mp4").write_bytes(b"raw")
     config = _config(tmp_path)
-    _inputs(monkeypatch, [str(manual_folder), "5"])
+    _inputs(monkeypatch, [str(manual_folder), "n", "5"])
 
     with pytest.raises(UserAbortError):
         _ask_raw_recording(config)
@@ -234,7 +268,7 @@ def test_raw_recording_manual_folder_uses_search_filter(monkeypatch, tmp_path):
     wanted.write_bytes(b"raw")
     other.write_bytes(b"other")
     config = _config(tmp_path)
-    _inputs(monkeypatch, [str(manual_folder), "3", "17 mai", "1"])
+    _inputs(monkeypatch, [str(manual_folder), "n", "3", "17 mai", "1"])
 
     assert _ask_raw_recording(config) == wanted
 
@@ -251,7 +285,7 @@ def test_raw_recording_manual_folder_back_returns_to_main_menu(monkeypatch, tmp_
     manual_folder.mkdir()
     (manual_folder / "Gottesdienst - 17 Mai 2026 - 09-55-05 .mp4").write_bytes(b"raw")
     config = _config(tmp_path)
-    _inputs(monkeypatch, [str(manual_folder), "2", "z", "5"])
+    _inputs(monkeypatch, [str(manual_folder), "n", "2", "z", "5"])
 
     with pytest.raises(UserAbortError):
         _ask_raw_recording(config)
@@ -305,21 +339,35 @@ def test_open_losslesscut_starts_external_program(monkeypatch, tmp_path):
     raw.write_bytes(b"video")
     calls = []
 
-    def fake_popen(args):
-        calls.append(args)
+    class FakeProcess:
+        pass
+
+    def fake_popen(args, **kwargs):
+        calls.append((args, kwargs))
+        return FakeProcess()
 
     monkeypatch.setattr("subprocess.Popen", fake_popen)
 
-    _open_losslesscut(raw, _config(tmp_path))
+    process = _open_losslesscut(raw, _config(tmp_path))
 
-    assert calls == [["LosslessCut", str(raw)]]
+    assert isinstance(process, FakeProcess)
+    assert calls == [
+        (
+            ["LosslessCut", str(raw)],
+            {
+                "stdin": subprocess.DEVNULL,
+                "stdout": subprocess.DEVNULL,
+                "stderr": subprocess.DEVNULL,
+            },
+        )
+    ]
 
 
 def test_open_losslesscut_reports_start_error(monkeypatch, tmp_path):
     raw = tmp_path / "roh.mp4"
     raw.write_bytes(b"video")
 
-    def fail_popen(_args):
+    def fail_popen(_args, **_kwargs):
         raise FileNotFoundError("fehlt")
 
     monkeypatch.setattr("subprocess.Popen", fail_popen)
@@ -371,6 +419,20 @@ def test_find_exports_after_snapshot_prioritizes_geschnitten_export(tmp_path):
     assert _find_mp4_exports_after_snapshot((tmp_path,), before, start)[0] == cut
 
 
+def test_find_exports_after_snapshot_recognizes_raw_filename_candidate(tmp_path):
+    raw = tmp_path / "Gottesdienst - 10 Mai 2026 - 09-55-08.mp4"
+    raw.write_bytes(b"raw")
+    before = _snapshot_mp4_files((tmp_path,))
+    exported = tmp_path / "_geschnitten_Gottesdienst - 10 Mai 2026 - 09-55-08.mp4"
+    exported.write_bytes(b"export")
+    old_time = (datetime.now() - timedelta(hours=1)).timestamp()
+    import os
+
+    os.utime(exported, (old_time, old_time))
+
+    assert _find_mp4_exports_after_snapshot((tmp_path,), before, datetime.now(), raw) == (exported,)
+
+
 def test_choose_exported_mp4_requires_choice_when_multiple_candidates(monkeypatch, tmp_path):
     first = tmp_path / "chor.mp4"
     second = tmp_path / "predigt_geschnitten.mp4"
@@ -390,6 +452,26 @@ def test_select_exported_mp4_uses_manual_input_when_snapshot_finds_nothing(monke
     _inputs(monkeypatch, ["", str(manual)])
 
     assert _select_exported_mp4(_config(tmp_path), raw, datetime.now(), before) == manual
+
+
+def test_select_exported_mp4_starts_detection_after_losslesscut_process_ends(monkeypatch, tmp_path):
+    raw = tmp_path / "roh.mp4"
+    raw.write_bytes(b"raw")
+    exported = tmp_path / "_geschnitten_roh.mp4"
+    exported.write_bytes(b"export")
+    before = _snapshot_mp4_files((tmp_path,))
+    process = _FakeLosslessCutProcess([0])
+    calls = []
+
+    def fake_find(folders, before_export, assistant_start, raw_recording=None):
+        calls.append((folders, before_export, assistant_start, raw_recording))
+        return (exported,)
+
+    monkeypatch.setattr("predigt_uploader.cli._find_mp4_exports_after_snapshot", fake_find)
+    _inputs(monkeypatch, [""])
+
+    assert _select_exported_mp4(_config(tmp_path), raw, datetime.now(), before, process) == exported
+    assert calls
 
 
 def test_select_source_mp4_can_keep_existing_cut_file(monkeypatch, tmp_path):
@@ -438,7 +520,7 @@ def test_try_start_losslesscut_accepts_manual_path_after_auto_failure(monkeypatc
             raise LosslessCutStartError("LosslessCut konnte nicht gestartet werden.", "nicht gefunden")
 
     monkeypatch.setattr("predigt_uploader.cli._open_losslesscut", fake_open)
-    _inputs(monkeypatch, ["", str(manual_exe)])
+    _inputs(monkeypatch, ["", str(manual_exe), "n"])
 
     _try_start_losslesscut(raw, _config(tmp_path), log)
 
@@ -448,6 +530,94 @@ def test_try_start_losslesscut_accepts_manual_path_after_auto_failure(monkeypatc
     log_text = log.path.read_text(encoding="utf-8")
     assert "Manueller LosslessCut-Pfad" in log_text
     assert "manuellem Pfad gestartet" in log_text
+
+
+def test_try_start_losslesscut_asks_to_remember_before_manual_start(monkeypatch, tmp_path):
+    raw = tmp_path / "roh.mp4"
+    raw.write_bytes(b"raw")
+    manual_exe = tmp_path / "LosslessCut.exe"
+    manual_exe.write_bytes(b"exe")
+    appdata = tmp_path / "appdata"
+    saved_config = appdata / "PredigtUploader" / "config.toml"
+    log = WorkflowLog.start(config_path=None, base_dir=tmp_path)
+    events = []
+
+    def fake_open(_source: Path, config: AppConfig):
+        events.append(("start", config.losslesscut_path or "auto"))
+        if not config.losslesscut_path:
+            raise LosslessCutStartError("LosslessCut konnte nicht gestartet werden.", "nicht gefunden")
+        assert saved_config.exists()
+
+    monkeypatch.setenv("APPDATA", str(appdata))
+    monkeypatch.setattr("predigt_uploader.cli._open_losslesscut", fake_open)
+    _inputs(monkeypatch, ["", str(manual_exe), "ja"])
+
+    _try_start_losslesscut(raw, _config(tmp_path), log)
+
+    assert saved_config.exists()
+    assert str(manual_exe).replace("\\", "\\\\") in saved_config.read_text(encoding="utf-8")
+    assert events == [("start", "auto"), ("start", str(manual_exe))]
+
+
+def test_try_start_losslesscut_does_not_remember_manual_path_when_declined(monkeypatch, tmp_path):
+    raw = tmp_path / "roh.mp4"
+    raw.write_bytes(b"raw")
+    manual_exe = tmp_path / "LosslessCut.exe"
+    manual_exe.write_bytes(b"exe")
+    appdata = tmp_path / "appdata"
+    log = WorkflowLog.start(config_path=None, base_dir=tmp_path)
+    calls = []
+
+    def fake_open(_source: Path, config: AppConfig):
+        calls.append(config.losslesscut_path or "auto")
+        if not config.losslesscut_path:
+            raise LosslessCutStartError("LosslessCut konnte nicht gestartet werden.", "nicht gefunden")
+
+    monkeypatch.setenv("APPDATA", str(appdata))
+    monkeypatch.setattr("predigt_uploader.cli._open_losslesscut", fake_open)
+    _inputs(monkeypatch, ["", str(manual_exe), "nein"])
+
+    _try_start_losslesscut(raw, _config(tmp_path), log)
+
+    assert calls == ["auto", str(manual_exe)]
+    assert not (appdata / "PredigtUploader" / "config.toml").exists()
+
+
+class _FakeLosslessCutProcess:
+    def __init__(self, results: list[int | None]):
+        self.results = results
+
+    def poll(self) -> int | None:
+        if len(self.results) > 1:
+            return self.results.pop(0)
+        return self.results[0]
+
+
+def test_wait_for_losslesscut_process_end_does_not_require_enter(monkeypatch):
+    asked = []
+    monkeypatch.setattr("predigt_uploader.cli._ask", lambda prompt: asked.append(prompt))
+
+    _wait_for_losslesscut_or_enter(_FakeLosslessCutProcess([0]))
+
+    assert asked == []
+
+
+def test_wait_for_losslesscut_enter_fallback(monkeypatch):
+    asked = []
+    monkeypatch.setattr("predigt_uploader.cli._ask", lambda prompt: asked.append(prompt))
+
+    _wait_for_losslesscut_or_enter(_FakeLosslessCutProcess([None]))
+
+    assert asked == ["Drücke Enter, sobald der Export fertig ist"]
+
+
+def test_wait_for_losslesscut_without_process_uses_enter_fallback(monkeypatch):
+    asked = []
+    monkeypatch.setattr("predigt_uploader.cli._ask", lambda prompt: asked.append(prompt))
+
+    _wait_for_losslesscut_or_enter(None)
+
+    assert asked == ["Drücke Enter, sobald der Export fertig ist"]
 
 
 @pytest.mark.parametrize("answer", ["j", "ja", "J", "JA", "y", "yes", "YES"])
@@ -498,7 +668,7 @@ def test_select_recordings_base_can_use_suggested_folder(monkeypatch, tmp_path, 
 
 def test_select_recordings_base_can_use_alternative_folder(monkeypatch, tmp_path):
     alternative = tmp_path / "AndereAufnahmen"
-    _inputs(monkeypatch, [str(alternative), ""])
+    _inputs(monkeypatch, [str(alternative), "", "n"])
 
     selected = _select_recordings_base(_config(tmp_path))
 
@@ -508,7 +678,7 @@ def test_select_recordings_base_can_use_alternative_folder(monkeypatch, tmp_path
 
 def test_select_recordings_base_rejects_invalid_path_before_accepting_alternative(monkeypatch, tmp_path, capsys):
     alternative = tmp_path / "AndereAufnahmen"
-    _inputs(monkeypatch, ["ungueltig:name", str(alternative), ""])
+    _inputs(monkeypatch, ["ungueltig:name", str(alternative), "", "n"])
 
     selected = _select_recordings_base(_config(tmp_path))
 
@@ -531,7 +701,7 @@ def test_select_recordings_base_retries_after_unwritable_folder(monkeypatch, tmp
         return True
 
     monkeypatch.setattr("predigt_uploader.cli._prepare_recordings_base", fail_once)
-    _inputs(monkeypatch, ["", str(alternative)])
+    _inputs(monkeypatch, ["", str(alternative), "n"])
 
     selected = _select_recordings_base(config)
 
@@ -544,7 +714,7 @@ def test_select_recordings_base_retries_after_unwritable_folder(monkeypatch, tmp
 def test_select_recordings_base_can_decline_creation_and_choose_other_folder(monkeypatch, tmp_path, capsys):
     config = _config(tmp_path)
     alternative = tmp_path / "AndereAufnahmen"
-    _inputs(monkeypatch, ["", "nein", str(alternative), ""])
+    _inputs(monkeypatch, ["", "nein", str(alternative), "", "n"])
 
     selected = _select_recordings_base(config)
 
@@ -726,6 +896,17 @@ def test_transfer_mp4_copies_by_default(tmp_path):
     assert plan.target_mp4.read_bytes() == b"video"
 
 
+def test_transfer_mp4_shows_wait_status(monkeypatch, tmp_path):
+    plan = _plan(tmp_path)
+    plan.source_mp4.write_bytes(b"video")
+    messages: list[str] = []
+    monkeypatch.setattr("predigt_uploader.cli._show_wait_status", messages.append)
+
+    _transfer_mp4_to_target(plan, _config(tmp_path))
+
+    assert messages == ["MP4 wird kopiert."]
+
+
 def test_transfer_mp4_does_not_overwrite_existing_target(tmp_path):
     plan = _plan(tmp_path)
     plan.source_mp4.write_bytes(b"neu")
@@ -864,6 +1045,83 @@ def test_archive_mode_warns_when_raw_recording_looks_cut(monkeypatch, tmp_path, 
     output = capsys.readouterr().out
     assert "sieht bereits geschnitten aus" in output
     assert "nicht als Rohaufnahme archivieren" in output
+
+
+def test_archive_mode_defaults_to_move_for_normal_raw_recording(monkeypatch, tmp_path):
+    raw = tmp_path / "Gottesdienst - 10 Mai 2026 - 09-55-08.mp4"
+    target = tmp_path / "ziel"
+    target.mkdir()
+    _inputs(monkeypatch, [""])
+
+    assert _ask_raw_archive_mode(raw, target) == RAW_ARCHIVE_MOVE
+
+
+def test_archive_mode_defaults_to_leave_when_raw_recording_looks_cut(monkeypatch, tmp_path, capsys):
+    raw = tmp_path / "_geschnitten_Gottesdienst.mp4"
+    target = tmp_path / "ziel"
+    target.mkdir()
+    _inputs(monkeypatch, [""])
+
+    assert _ask_raw_archive_mode(raw, target) == RAW_ARCHIVE_NONE
+
+    output = capsys.readouterr().out
+    assert "sieht bereits geschnitten aus" in output
+
+
+def test_archive_raw_recording_move_still_requires_second_confirmation(monkeypatch, tmp_path):
+    raw = tmp_path / "roh.mp4"
+    raw.write_bytes(b"raw")
+    target = tmp_path / "ziel"
+    target.mkdir()
+    _inputs(monkeypatch, ["nein"])
+
+    assert _archive_raw_recording(raw, target, RAW_ARCHIVE_MOVE) is None
+    assert raw.exists()
+
+
+def test_archive_mode_can_use_configured_copy_default(monkeypatch, tmp_path):
+    raw = tmp_path / "Gottesdienst - 10 Mai 2026 - 09-55-08.mp4"
+    target = tmp_path / "ziel"
+    target.mkdir()
+    _inputs(monkeypatch, [""])
+
+    assert _ask_raw_archive_mode(raw, target, RAW_ARCHIVE_COPY) == RAW_ARCHIVE_COPY
+
+
+def test_year_folder_template_label_for_video_audio():
+    assert "2026 Video+Audio" in _year_folder_template_label("{year} Video+Audio")
+
+
+def test_start_menu_starts_wizard(monkeypatch, tmp_path):
+    calls = []
+    args = type("Args", (), {"config": None})()
+    monkeypatch.setattr("predigt_uploader.cli.run_wizard", lambda passed_args: calls.append(passed_args) or 0)
+    _inputs(monkeypatch, [""])
+
+    assert run_start_menu(args) == 0
+    assert calls == [args]
+
+
+def test_settings_menu_saves_year_folder_template(monkeypatch, tmp_path):
+    appdata = tmp_path / "AppData"
+    monkeypatch.setenv("APPDATA", str(appdata))
+    _inputs(monkeypatch, ["2", "4", "2", "6", "5"])
+
+    assert run_start_menu(type("Args", (), {"config": None})()) == 0
+
+    config_text = (appdata / "PredigtUploader" / "config.toml").read_text(encoding="utf-8")
+    assert 'year_folder_template = "{year} Video+Audio"' in config_text
+
+
+def test_settings_menu_saves_raw_archive_mode(monkeypatch, tmp_path):
+    appdata = tmp_path / "AppData"
+    monkeypatch.setenv("APPDATA", str(appdata))
+    _inputs(monkeypatch, ["2", "5", "3", "6", "5"])
+
+    assert run_start_menu(type("Args", (), {"config": None})()) == 0
+
+    config_text = (appdata / "PredigtUploader" / "config.toml").read_text(encoding="utf-8")
+    assert 'raw_archive_mode = "copy"' in config_text
 
 
 def test_print_missing_ffmpeg_message_explains_manual_next_steps(tmp_path, capsys):

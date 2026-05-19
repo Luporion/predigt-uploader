@@ -19,9 +19,13 @@ mp3_base = "V:\\Predigten\\Predigten"
 ffmpeg_path = "ffmpeg"
 losslesscut_path = ""
 
+[naming]
+year_folder_template = "{year}"
+
 [workflow]
 copy_instead_of_move = true
 open_target_folder = true
+raw_archive_mode = "move"
 ```
 
 `ffmpeg_path = "ffmpeg"` bedeutet: FFmpeg wird über PATH gefunden.
@@ -33,7 +37,7 @@ open_target_folder = true
 losslesscut_path = "C:\\Tools\\LosslessCut\\LosslessCut.exe"
 ```
 
-Wenn LosslessCut beim Wizard-Start nicht gefunden wird, kann der Pfad zur `LosslessCut.exe` auch direkt im Wizard eingegeben werden. Das gilt nur für diesen Lauf. Soll der Pfad dauerhaft gelten, `losslesscut_path` in `config.toml` setzen.
+Wenn LosslessCut beim Wizard-Start nicht gefunden wird, kann der Pfad zur `LosslessCut.exe` auch direkt im Wizard eingegeben werden. Der Wizard fragt dann zuerst, ob dieser Pfad künftig gemerkt werden soll, und startet LosslessCut erst danach. Gespeichert wird auf Wunsch unter `%APPDATA%\PredigtUploader\config.toml`.
 
 Bei einer portablen ZIP-Version liegt die Datei meist im entpackten Ordner, zum Beispiel:
 
@@ -57,6 +61,8 @@ Bei einer einmaligen Eingabe im Wizard sind auch Anführungszeichen erlaubt, zum
 vmix_storage = "V:\\vMixStorage"
 ```
 
+`V:\vMixStorage` ist nur ein eingebauter Standardwert und ein typischer Beispielpfad aus dem Gemeinde-Workflow. Wenn dieser Ordner auf einem Rechner nicht existiert, ist das kein Fehler im Video selbst. Der Wert sollte dann dauerhaft in `config.toml` oder auf Wunsch im Wizard unter `%APPDATA%\PredigtUploader\config.toml` angepasst werden.
+
 Auf dem Gemeinderechner ist ein UNC-Pfad oft robuster als ein gemapptes Laufwerk wie `V:`. Gemappte Laufwerke koennen je nach angemeldetem Windows-Benutzer oder Startart fehlen. Ein UNC-Pfad zeigt direkt auf die Netzwerkfreigabe:
 
 ```toml
@@ -72,7 +78,24 @@ Alternativ koennen die neuesten Aufnahmen angezeigt, Dateinamen gesucht/gefilter
 
 Wenn `vmix_storage` fehlt oder nicht erreichbar ist, meldet der Wizard das verstaendlich und erlaubt eine manuelle Auswahl. Wird dabei ein Ordner eingegeben, verwendet der Wizard diesen Ordner nur fuer den aktuellen Lauf als temporaeren Rohaufnahme-Quellordner und zeigt danach wieder das normale Rohaufnahme-Menue mit neuester Aufnahme, neuesten Aufnahmen, Suche/Filter, manueller Eingabe und Abbruch.
 
+Wenn der Rohaufnahme-Ordner im Wizard geaendert wird, kann der Wizard ihn unter `%APPDATA%\PredigtUploader\config.toml` merken. Diese Benutzer-Config liegt nicht im Repository und nicht zwingend in der Release-ZIP.
+
 `recordings_base` ist der Ziel-Basisordner. Darunter legt der Wizard die Jahres- und Datumsordner an, zum Beispiel `2026\2026-05-24`.
+
+Soll der Ziel-Basisordner dauerhaft geaendert werden, entweder `recordings_base` in `config.toml` setzen oder im Wizard beim abweichenden Ordner das Merken bestaetigen.
+
+`year_folder_template` steuert den Namen des Jahresordners. Standard ist `{year}`. Auf dem Gemeinderechner kann zum Beispiel gesetzt werden:
+
+```toml
+[naming]
+year_folder_template = "{year} Video+Audio"
+```
+
+Dann entsteht unter `recordings_base` zum Beispiel:
+
+```text
+2026 Video+Audio\2026-05-17
+```
 
 Wenn keine `config.toml` vorhanden ist, nutzt Version 1 automatisch den Desktop des aktuellen Windows-Benutzers:
 
@@ -80,11 +103,35 @@ Wenn keine `config.toml` vorhanden ist, nutzt Version 1 automatisch den Desktop 
 %USERPROFILE%\Desktop\Aufnahmen
 ```
 
-Beim Start zeigt der Wizard diesen Ziel-Basisordner an. Enter verwendet den Vorschlag, ein eingegebener Pfad verwendet einen anderen Ordner fuer den aktuellen Lauf. Wenn dieser Ordner noch nicht existiert, fragt der Wizard, ob er erstellt werden soll. Soll dauerhaft ein anderer Ordner vorgeschlagen werden, `recordings_base` in `config.toml` anpassen.
+Beim Start zeigt der Wizard diesen Ziel-Basisordner an. Enter verwendet den Vorschlag, ein eingegebener Pfad verwendet einen anderen Ordner fuer den aktuellen Lauf. Wenn dieser Ordner noch nicht existiert, fragt der Wizard, ob er erstellt werden soll. Soll dauerhaft ein anderer Ordner vorgeschlagen werden, `recordings_base` in `config.toml` anpassen oder im Wizard das Merken unter `%APPDATA%\PredigtUploader\config.toml` bestaetigen.
 
 Die Zusammenfassung `predigt-zusammenfassung.txt` wird in Version 1 immer geschrieben. Es gibt dafür keine Config-Option.
 
 `open_target_folder = true` bedeutet: Nach erfolgreicher Verarbeitung oeffnet der Wizard den Zielordner im Explorer. Wenn das auf einem Rechner stoert, kann der Wert auf `false` gesetzt werden.
+
+`raw_archive_mode` steuert die Vorauswahl beim Aufraeumen der Rohaufnahme nach erfolgreichem Lauf:
+
+```toml
+[workflow]
+raw_archive_mode = "move" # verschieben
+```
+
+Moegliche Werte sind `move`, `none` und `copy`. Fuer normale Rohaufnahmen ist `move` sinnvoll, damit `vMixStorage` frei bleibt. Wenn die Datei bereits geschnitten wirkt, bleibt der Wizard aus Sicherheitsgruenden trotzdem bei der sicheren Vorauswahl „liegen lassen“.
+
+## Einstellungen im Startmenue
+
+Normale Nutzer muessen `config.toml` nicht manuell bearbeiten. Im Hauptmenue gibt es „Einstellungen ändern“. Dort koennen Ziel-Basisordner, Rohaufnahme-Ordner, LosslessCut-Pfad, Jahresordner-Format und Rohaufnahme-Aufraeumen geaendert werden. Gespeichert wird unter:
+
+```text
+%APPDATA%\PredigtUploader\config.toml
+```
+
+Beim Jahresordner kann zwischen „nur Jahr“ und „Jahr mit Zusatz“ gewaehlt werden. Die Auswahl „2026 Video+Audio“ speichert intern:
+
+```toml
+[naming]
+year_folder_template = "{year} Video+Audio"
+```
 
 Version 1 wertet nur die Optionen aus `config.example.toml` aus. Weitere Einstellungen sollten erst dokumentiert werden, wenn der Wizard sie tatsaechlich nutzt.
 

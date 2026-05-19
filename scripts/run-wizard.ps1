@@ -53,7 +53,7 @@ try {
         $env:PYTHONPATH = $SrcDir
     }
 
-    & $PythonExe -m predigt_uploader wizard @args
+    & $PythonExe -m predigt_uploader @args
     exit $LASTEXITCODE
 }
 catch {

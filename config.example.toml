@@ -14,7 +14,9 @@ losslesscut_path = ""
 predigt_template = "Predigt ({title}_{bible_reference})_{speaker}{extension}"
 bibelstunde_template = "Bibelstunde ({bible_reference})_{speaker}{extension}"
 folder_suffix_separator = " - "
+year_folder_template = "{year}"
 
 [workflow]
 copy_instead_of_move = true
 open_target_folder = true
+raw_archive_mode = "move"

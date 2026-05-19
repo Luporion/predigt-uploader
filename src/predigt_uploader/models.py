@@ -25,8 +25,10 @@ class AppConfig:
     predigt_template: str = "Predigt ({title}_{bible_reference})_{speaker}{extension}"
     bibelstunde_template: str = "Bibelstunde ({bible_reference})_{speaker}{extension}"
     folder_suffix_separator: str = " - "
+    year_folder_template: str = "{year}"
     copy_instead_of_move: bool = True
     open_target_folder: bool = True
+    raw_archive_mode: str = "move"
 
 
 @dataclass(frozen=True)

@@ -20,6 +20,9 @@ Für die Weitergabe an den Gemeinderechner gibt es eine einfache Release-ZIP-Anl
 Nach dem Gemeinderechner-Praxistest wurde der lokale Zielrechner-Workflow verbessert: `setup-local.ps1` prüft FFmpeg und bietet bei verfügbarem `winget` eine bestätigte Installation an, große vMixStorage-Ordner werden nicht mehr ungefiltert angezeigt, Rohaufnahmen können gesucht oder aus einer begrenzten neuesten Liste gewählt werden, exportierte Dateien mit `_geschnitten` werden bevorzugt angezeigt, der Zielordner kann nach Erfolg automatisch geöffnet werden und die bekannte Rohaufnahme kann optional kopiert oder nach Warnung verschoben werden.
 Eine zweite Nachbesserung behebt Bedien- und Erkennungsprobleme aus dem Praxistest: `Zurück` aus Unterauswahlen führt direkt ins vorherige Menü, Rohaufnahme-Vorschläge vermeiden geschnitten wirkende Dateien, die Suche nutzt nach Möglichkeit Live-Filter per `questionary`, die Export-Erkennung vergleicht einen MP4-Snapshot vor/nach LosslessCut und die Rohaufnahme-Archivierung warnt bei geschnitten wirkenden Dateien.
 Eine weitere Zielrechner-Korrektur behandelt fehlende `vmix_storage`-Ordner besser: Wenn Nutzer manuell einen Ordner eingeben, wird er für diesen Wizard-Lauf als temporärer Rohaufnahme-Quellordner verwendet und das normale Rohaufnahme-Menü inklusive Suche/Filter angezeigt. UNC-Pfade werden als normale Pfade akzeptiert und in der Config-Doku als robuster empfohlen.
+Die aktuelle Stabilisierung ergänzt eine eindeutigere Zurück-Logik ohne doppelte Fallback-Listen, besser lesbare `questionary`-Auswahlen, AppData-Benutzer-Config für gemerkte Ordner und LosslessCut-Pfad, ein konfigurierbares Jahresordner-Template sowie kurze Bitte-warten-Hinweise bei längeren Dateiaktionen. LosslessCut-Exporte werden zusätzlich anhand plausibler Dateinamen mit Bezug zur Rohaufnahme bevorzugt vorgeschlagen, aber weiterhin nicht blind übernommen.
+Die LosslessCut-Bedienung wurde weiter beruhigt: Ein manuell gewählter LosslessCut-Pfad wird vor dem Programmstart optional gemerkt, LosslessCut-Ausgaben werden vom Wizard-Terminal getrennt und der Wizard kann nach dem Export entweder durch Enter oder durch Schließen des gestarteten LosslessCut-Prozesses weiterlaufen. Bei der Rohaufnahme-Archivierung ist Verschieben für normale Rohaufnahmen die Vorauswahl; bei geschnitten wirkenden Dateien bleibt Liegenlassen die sichere Vorauswahl.
+Für normale Gemeindemitarbeiter gibt es jetzt ein einfaches Terminal-Hauptmenü. Darüber kann eine neue Predigt vorbereitet, Einstellungen geändert, ein Systemcheck-Hinweis angezeigt oder die letzte Logdatei geöffnet werden. Die Überschrift wurde auf „PredigtUploader“ mit kurzer Nutzerbeschreibung vereinfacht.
 
 ## Was Version 1 bereits kann
 
@@ -64,6 +67,14 @@ Eine weitere Zielrechner-Korrektur behandelt fehlende `vmix_storage`-Ordner bess
 - Bei Datei-Abfragen passende Dateien aus einem eingegebenen Ordner anzeigen und auswählen lassen.
 - Das Predigtdatum über eine Auswahl bestimmen und vMix-Dateinamen mit deutschen Monatsnamen auswerten.
 - Bei vorhandener Ziel-MP4 behalten, neuen Namen wählen, abbrechen oder nach zweiter Bestätigung überschreiben.
+- Abweichende Ziel-Basisordner, Rohaufnahme-Ordner und funktionierende LosslessCut-Pfade auf Wunsch unter `%APPDATA%\PredigtUploader\config.toml` merken.
+- Jahresordner über `year_folder_template` benennen, zum Beispiel `2026 Video+Audio`.
+- Bei längeren Dateiaktionen einfache Bitte-warten-Hinweise anzeigen.
+- LosslessCut ohne störende Konsolenausgaben starten und nach dem manuellen Export Enter oder das Prozessende als Weiter-Signal nutzen.
+- Normale Rohaufnahmen standardmäßig zum Verschieben in den Zielordner vorschlagen, weiterhin mit zweiter Sicherheitsbestätigung.
+- Beim Doppelklick-Start ein einfaches Hauptmenü anzeigen.
+- Einstellungen ohne manuelles Bearbeiten von `config.toml` in der Benutzer-Config speichern.
+- Jahresordner-Format im Menü zwischen `2026` und `2026 Video+Audio` umstellen.
 
 ## Bewusst noch nicht enthalten
 

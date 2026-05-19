@@ -1,6 +1,6 @@
 import pytest
 
-from predigt_uploader.ui import MenuOption, UserAbortError, ask_file_path, ask_yes_no, choose_from_options
+from predigt_uploader.ui import MenuOption, UserAbortError, ask_file_path, ask_yes_no, choose_from_options, search_from_options
 
 
 def test_ask_yes_no_fallback_accepts_words(monkeypatch):
@@ -46,6 +46,56 @@ def test_choose_from_options_uses_questionary_when_available(monkeypatch):
     monkeypatch.setattr("predigt_uploader.ui._questionary_select", lambda _prompt, _options, _default: "b")
 
     assert choose_from_options("Auswahl", options, input_func=lambda _prompt: "1") == "b"
+
+
+def test_search_from_options_uses_questionary_autocomplete_when_available(monkeypatch):
+    monkeypatch.delenv("PREDIGT_UPLOADER_TEXT_UI", raising=False)
+    options = [MenuOption("Predigt.mp4", "predigt"), MenuOption("Chor.mp4", "chor")]
+    monkeypatch.setattr("predigt_uploader.ui._questionary_autocomplete", lambda _prompt, _options: "predigt")
+
+    assert search_from_options("Suchen", options, input_func=lambda _prompt: "chor") == "predigt"
+
+
+def test_search_from_options_fallback_filters_then_uses_number(monkeypatch):
+    monkeypatch.setenv("PREDIGT_UPLOADER_TEXT_UI", "1")
+    options = [MenuOption("Predigt.mp4", "predigt"), MenuOption("Chor.mp4", "chor")]
+    inputs = iter(["predigt", "1"])
+
+    assert search_from_options("Suchen", options, input_func=lambda _prompt: next(inputs)) == "predigt"
+
+
+def test_search_from_options_fallback_empty_search_shows_full_limited_list(monkeypatch):
+    monkeypatch.setenv("PREDIGT_UPLOADER_TEXT_UI", "1")
+    options = [MenuOption(f"Datei {index}.mp4", index) for index in range(20)]
+    inputs = iter(["", "15"])
+
+    assert search_from_options("Suchen", options, input_func=lambda _prompt: next(inputs)) == 14
+
+
+def test_choose_from_options_questionary_can_return_back_without_text_fallback(monkeypatch):
+    from predigt_uploader.ui import BACK
+
+    monkeypatch.delenv("PREDIGT_UPLOADER_TEXT_UI", raising=False)
+    monkeypatch.setattr("predigt_uploader.ui._questionary_select", lambda _prompt, _options, _default: BACK)
+
+    selected = choose_from_options(
+        "Auswahl",
+        [MenuOption("Zurück", BACK)],
+        input_func=lambda _prompt: pytest.fail("Text-Fallback darf nicht laufen"),
+    )
+
+    assert selected is BACK
+
+
+def test_choose_from_options_fallback_enter_uses_first_option(monkeypatch):
+    monkeypatch.setenv("PREDIGT_UPLOADER_TEXT_UI", "1")
+    selected = choose_from_options(
+        "Auswahl",
+        [MenuOption("Standard", "standard"), MenuOption("Andere", "andere")],
+        input_func=lambda _prompt: "",
+    )
+
+    assert selected == "standard"
 
 
 def test_text_fallback_ctrl_c_raises_user_abort(monkeypatch):

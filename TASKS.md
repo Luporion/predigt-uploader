@@ -56,6 +56,18 @@
 - [x] manuell eingegebenen Rohaufnahme-Ordner als temporaeren Quellordner mit normalem Menue nutzen
 - [x] UNC-Pfade fuer Rohaufnahme-Ordner dokumentieren
 - [x] bei fehlendem Export manuellen Pfad erlauben
+- [x] Ziel-Basisordner, Rohaufnahme-Ordner und LosslessCut-Pfad optional in Benutzer-Config unter APPDATA merken
+- [x] Jahresordner per year_folder_template konfigurierbar machen
+- [x] Bitte-warten-Hinweise fuer laengere Dateiaktionen anzeigen
+- [x] LosslessCut-Export-Kandidaten auch anhand des Rohdateinamens bevorzugen
+- [x] manuellen LosslessCut-Pfad vor dem Start optional merken
+- [x] LosslessCut-Ausgaben vom Wizard-Terminal trennen
+- [x] nach LosslessCut-Export per Enter oder Prozessende weiterlaufen
+- [x] Rohaufnahme-Archivierung fuer normale Rohaufnahmen standardmaessig auf Verschieben setzen
+- [x] einfaches Hauptmenue fuer normale Nutzer ergaenzen
+- [x] Einstellungen im Menue in APPDATA-config.toml speichern
+- [x] Jahresordner-Format im Menue zwischen Jahr und Jahr Video+Audio waehlen
+- [x] nutzerfreundlichere Startueberschrift anzeigen
 - [x] danach bestehenden lokalen Workflow weiterverwenden
 
 ## Phase 2: Windows-Nutzerfreundlichkeit

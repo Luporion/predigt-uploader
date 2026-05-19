@@ -23,15 +23,43 @@ def default_config() -> AppConfig:
     )
 
 
+def user_config_path() -> Path | None:
+    appdata = os.environ.get("APPDATA")
+    if not appdata:
+        return None
+    return Path(appdata) / "PredigtUploader" / "config.toml"
+
+
 def candidate_config_paths(explicit_path: Path | None = None) -> list[Path]:
     paths: list[Path] = []
     if explicit_path is not None:
         paths.append(explicit_path)
     paths.append(Path.cwd() / "config.toml")
-    appdata = os.environ.get("APPDATA")
-    if appdata:
-        paths.append(Path(appdata) / "PredigtUploader" / "config.toml")
+    app_config = user_config_path()
+    if app_config is not None:
+        paths.append(app_config)
     return paths
+
+
+def find_config_path(explicit_path: Path | None = None) -> Path | None:
+    for path in candidate_config_paths(explicit_path):
+        if path.exists():
+            return path
+    return None
+
+
+def describe_config_source(explicit_path: Path | None = None) -> str:
+    found = find_config_path(explicit_path)
+    if explicit_path is not None:
+        return str(explicit_path)
+    if found is None:
+        return "Standardconfig"
+    app_config = user_config_path()
+    if app_config is not None and found == app_config:
+        return f"%APPDATA%\\PredigtUploader\\config.toml ({found})"
+    if found == Path.cwd() / "config.toml":
+        return f"Projekt-config.toml ({found})"
+    return str(found)
 
 
 def _get_nested(data: dict[str, Any], section: str, key: str, fallback: Any) -> Any:
@@ -74,6 +102,65 @@ def load_config(explicit_path: Path | None = None) -> AppConfig:
         predigt_template=str(_get_nested(loaded, "naming", "predigt_template", base.predigt_template)),
         bibelstunde_template=str(_get_nested(loaded, "naming", "bibelstunde_template", base.bibelstunde_template)),
         folder_suffix_separator=str(_get_nested(loaded, "naming", "folder_suffix_separator", base.folder_suffix_separator)),
+        year_folder_template=str(_get_nested(loaded, "naming", "year_folder_template", base.year_folder_template)),
         copy_instead_of_move=bool(_get_nested(loaded, "workflow", "copy_instead_of_move", base.copy_instead_of_move)),
         open_target_folder=bool(_get_nested(loaded, "workflow", "open_target_folder", base.open_target_folder)),
+        raw_archive_mode=str(_get_nested(loaded, "workflow", "raw_archive_mode", base.raw_archive_mode)),
     )
+
+
+def _toml_string(value: str) -> str:
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def save_user_config_values(
+    *,
+    paths: dict[str, str] | None = None,
+    naming: dict[str, str] | None = None,
+    workflow: dict[str, str | bool] | None = None,
+) -> Path:
+    path = user_config_path()
+    if path is None:
+        raise ConfigLoadError(
+            "Die Einstellungen konnten nicht gespeichert werden.",
+            "APPDATA ist nicht gesetzt; Benutzer-config.toml kann nicht bestimmt werden.",
+        )
+
+    data: dict[str, Any] = {}
+    if path.exists():
+        try:
+            with path.open("rb") as handle:
+                data = tomllib.load(handle)
+        except (tomllib.TOMLDecodeError, OSError):
+            data = {}
+
+    if paths:
+        data.setdefault("paths", {}).update(paths)
+    if naming:
+        data.setdefault("naming", {}).update(naming)
+    if workflow:
+        data.setdefault("workflow", {}).update(workflow)
+
+    lines: list[str] = []
+    for section in ("paths", "naming", "workflow"):
+        values = data.get(section)
+        if not isinstance(values, dict) or not values:
+            continue
+        lines.append(f"[{section}]")
+        for key, value in values.items():
+            if isinstance(value, bool):
+                rendered = "true" if value else "false"
+            else:
+                rendered = _toml_string(str(value))
+            lines.append(f"{key} = {rendered}")
+        lines.append("")
+
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("\n".join(lines), encoding="utf-8")
+    except OSError as exc:
+        raise ConfigLoadError(
+            "Die Einstellungen konnten nicht gespeichert werden.",
+            f"Benutzer-config.toml konnte nicht geschrieben werden: {path}. Details: {exc}",
+        ) from exc
+    return path

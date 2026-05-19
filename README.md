@@ -29,7 +29,7 @@ Phase 1.5 ergänzt vor dem lokalen Workflow einen einfachen Assistenten für den
 
 LosslessCut bleibt ein externes Programm. Der PredigtUploader ist kein eigener Video-Editor und steuert den Schnitt nicht automatisch.
 
-Im Terminal nutzt der Wizard nach Möglichkeit `questionary` für Pfeiltasten-Auswahlen. Wenn das Terminal dies nicht unterstützt, bleibt die robuste Texteingabe mit `ja`/`nein` oder Nummern erhalten. Der Textmodus kann mit `PREDIGT_UPLOADER_TEXT_UI=1` erzwungen werden.
+Im Terminal nutzt der Wizard nach Möglichkeit `questionary` für Pfeiltasten-Auswahlen und Live-Suche. Wenn das Terminal dies nicht unterstützt, bleibt die robuste Texteingabe mit `ja`/`nein` oder Nummern erhalten. Der Textmodus kann mit `PREDIGT_UPLOADER_TEXT_UI=1` erzwungen werden.
 
 ## Zielgruppe
 
@@ -61,6 +61,7 @@ python -m pip install --upgrade pip
 pip install -e .[dev]
 pytest
 python -m predigt_uploader --help
+python -m predigt_uploader
 python -m predigt_uploader wizard
 ```
 
@@ -76,7 +77,7 @@ Kurzablauf in PowerShell:
 .\scripts\run-wizard.ps1
 ```
 
-`setup-local.ps1` richtet `.venv` und die Python-Abhängigkeiten ein. `check-system.ps1` prüft Python, Wizard-Start, FFmpeg und optional den konfigurierten LosslessCut-Pfad. Der Wizard arbeitet weiterhin nur lokal und lädt nichts zu Vimeo oder WordPress hoch.
+`setup-local.ps1` richtet `.venv` und die Python-Abhängigkeiten ein. `check-system.ps1` prüft Python, Wizard-Start, FFmpeg und optional den konfigurierten LosslessCut-Pfad. Der Doppelklick-Start öffnet zuerst ein einfaches Hauptmenü. Der Wizard arbeitet weiterhin nur lokal und lädt nichts zu Vimeo oder WordPress hoch. Abweichende Ordner und ein funktionierender LosslessCut-Pfad können auf Wunsch unter `%APPDATA%\PredigtUploader\config.toml` gemerkt werden.
 
 Für Gemeindemitarbeiter gibt es im Projektordner zusätzlich anklickbare Windows-Startdateien:
 

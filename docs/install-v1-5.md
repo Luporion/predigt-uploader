@@ -140,11 +140,17 @@ recordings_base = "C:\\Users\\DEIN-NAME\\Desktop\\Aufnahmen"
 ffmpeg_path = "ffmpeg"
 losslesscut_path = ""
 
+[naming]
+year_folder_template = "{year}"
+
 [workflow]
 open_target_folder = true
+raw_archive_mode = "move"
 ```
 
 `vmix_storage` ist der Standardordner für Rohaufnahmen. Der Wizard nutzt diesen Ordner, damit Nutzer nicht selbst durch alte Aufnahmen suchen müssen. Bereits geschnitten wirkende Dateien werden nicht als beste Rohaufnahme bevorzugt und müssen bei Auswahl extra bestätigt werden. Wenn der Ordner fehlt, erklärt der Wizard das und erlaubt eine manuelle Datei- oder Ordnerauswahl.
+
+Wenn Nutzer im Wizard einen anderen Ziel-Basisordner, Rohaufnahme-Ordner oder einen funktionierenden LosslessCut-Pfad angeben, kann der Wizard diese Werte künftig unter `%APPDATA%\PredigtUploader\config.toml` merken. Diese Benutzer-Config liegt außerhalb des Projektordners und gehört nicht in die Release-ZIP.
 
 Für Netzwerkordner ist ein UNC-Pfad meist robuster als ein gemapptes Laufwerk wie `V:`, weil gemappte Laufwerke je nach Windows-Benutzer fehlen können. Beispiel:
 
@@ -155,7 +161,16 @@ vmix_storage = "\\\\SERVER\\Freigabe\\vMixStorage"
 
 `open_target_folder = true` öffnet nach erfolgreicher Verarbeitung den Zielordner automatisch im Explorer. Bei Bedarf kann der Wert auf `false` gesetzt werden.
 
+`year_folder_template` steuert den Namen des Jahresordners unterhalb von `recordings_base`. Standard ist `{year}`. Für Gemeinderechner mit Ordnern wie `2026 Video+Audio` kann gesetzt werden:
+
+```toml
+[naming]
+year_folder_template = "{year} Video+Audio"
+```
+
 Keine Zugangsdaten, Tokens, Passwörter oder privaten Schlüssel in `config.toml` eintragen.
+
+Normale Nutzer können diese Werte später auch im Startmenü unter „Einstellungen ändern“ setzen. Der Wizard speichert sie dann in `%APPDATA%\PredigtUploader\config.toml`.
 
 ## 7. Wizard starten
 
@@ -165,7 +180,7 @@ Für normale Nutzer:
 PredigtUploader starten.cmd
 ```
 
-Diese Datei startet den Wizard per Doppelklick. Sie setzt automatisch den Projektordner als Arbeitsverzeichnis und lässt das Fenster nach Ende oder Fehler offen.
+Diese Datei startet per Doppelklick ein einfaches Hauptmenü. Dort kann man eine neue Predigt vorbereiten, Einstellungen ändern, den Systemcheck-Hinweis anzeigen oder Logs öffnen. Sie setzt automatisch den Projektordner als Arbeitsverzeichnis und lässt das Fenster nach Ende oder Fehler offen.
 
 Alternativ in PowerShell:
 
@@ -183,6 +198,12 @@ Der Wizard führt durch den lokalen Ablauf:
 6. Zusammenfassung und Logdatei schreiben
 7. optional die Rohaufnahme in den Zielordner verschieben oder kopieren
 8. Zielordner automatisch öffnen
+
+Erfahrene Nutzer können den langen Workflow direkt starten:
+
+```powershell
+.\scripts\run-wizard.ps1 wizard
+```
 
 Später kann auf dem Desktop eine Verknüpfung zu `PredigtUploader starten.cmd` erstellt werden. Die Datei selbst sollte im Projektordner bleiben, damit sie die Skripte zuverlässig findet.
 

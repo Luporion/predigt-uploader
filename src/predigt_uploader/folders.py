@@ -16,8 +16,12 @@ def find_date_folders(year_folder: Path, prefix: str) -> tuple[Path, ...]:
     return tuple(sorted(path for path in year_folder.iterdir() if path.is_dir() and path.name.startswith(prefix)))
 
 
+def year_folder_name(config: AppConfig, info: SermonInfo) -> str:
+    return config.year_folder_template.format(year=info.sermon_date.year)
+
+
 def suggest_folder(config: AppConfig, info: SermonInfo) -> Path:
-    year_folder = config.recordings_base / str(info.sermon_date.year)
+    year_folder = config.recordings_base / year_folder_name(config, info)
     prefix = date_prefix(info)
     note = build_folder_suffix(info.folder_note)
     folder_name = prefix
@@ -27,7 +31,7 @@ def suggest_folder(config: AppConfig, info: SermonInfo) -> Path:
 
 
 def resolve_folder(config: AppConfig, info: SermonInfo) -> FolderResolution:
-    year_folder = config.recordings_base / str(info.sermon_date.year)
+    year_folder = config.recordings_base / year_folder_name(config, info)
     prefix = date_prefix(info)
     candidates = find_date_folders(year_folder, prefix)
     suggested = suggest_folder(config, info)

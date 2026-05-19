@@ -28,7 +28,7 @@ def test_run_wizard_script_checks_venv_and_starts_cli_wizard() -> None:
     assert "Die virtuelle Python-Umgebung .venv wurde nicht gefunden." in content
     assert "Python wurde auf diesem Rechner nicht gefunden." in content
     assert "[Console]::OutputEncoding" in content
-    assert "-m predigt_uploader wizard" in content
+    assert "-m predigt_uploader @args" in content
 
 
 def test_local_setup_script_prepares_venv_and_installs_package() -> None:
@@ -163,7 +163,7 @@ def test_release_v1_5_guide_documents_zip_contents_and_target_setup() -> None:
 
     content = guide.read_text(encoding="utf-8")
 
-    assert "predigt-uploader-v0.1.5-local.zip" in content
+    assert "predigt-uploader-v0.1.6-local.zip" in content
     assert "src/" in content
     assert "scripts/" in content
     assert "docs/install-v1-5.md" in content

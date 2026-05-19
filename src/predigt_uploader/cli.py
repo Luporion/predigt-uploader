@@ -5,19 +5,21 @@ import os
 import re
 import shutil
 import subprocess
+import sys
+import time
 from dataclasses import dataclass, replace
 from datetime import date, datetime
 from pathlib import Path
 from uuid import uuid4
 
-from .config import ConfigLoadError, load_config
+from .config import ConfigLoadError, describe_config_source, load_config, save_user_config_values, user_config_path
 from .filename import build_media_filename, sanitize_filename_part
 from .folders import ensure_folder, resolve_folder
 from .models import AppConfig, ProcessingPlan, SermonInfo
 from .mp3 import Mp3ConversionError, convert_mp4_to_mp3, ffmpeg_available
 from .report import build_summary_text, write_summary_file
 from .run_log import WorkflowLog
-from .ui import MenuOption, UserAbortError, ask_file_path, ask_yes_no, choose_from_options, search_from_options
+from .ui import BACK, MenuOption, UserAbortError, ask_file_path, ask_yes_no, choose_from_options, search_from_options
 
 
 class Mp4TransferError(RuntimeError):
@@ -98,6 +100,22 @@ def _ask_yes_no(prompt: str, default: bool = False) -> bool:
     return ask_yes_no(prompt, default)
 
 
+def _remember_path_setting(section_key: str, path: Path, prompt: str, log: WorkflowLog | None = None) -> None:
+    if not _ask_yes_no(prompt, False):
+        return
+    try:
+        saved_path = save_user_config_values(paths={section_key: str(path)})
+    except ConfigLoadError as exc:
+        print("Die Einstellung konnte nicht gespeichert werden.")
+        print(f"Admin-Hinweis: {exc.admin_hint}")
+        if log is not None:
+            log.error("Einstellung konnte nicht gespeichert werden.", admin_hint=exc.admin_hint)
+        return
+    print(f"Einstellung gespeichert: {saved_path}")
+    if log is not None:
+        log.event(f"Einstellung gespeichert: {section_key}={path}")
+
+
 def _path_has_windows_invalid_chars(path: Path) -> bool:
     invalid_chars = set('<>"|?*')
     parts_to_check = [part for part in path.parts if part not in {path.drive, path.root, path.anchor}]
@@ -175,12 +193,15 @@ def _select_recordings_base(config: AppConfig) -> AppConfig:
     print("In diesem Ordner legt der Wizard später Jahres- und Datumsordner an.")
     print(f"Vorschlag: {config.recordings_base}")
 
-    current_path = _ask_initial_recordings_base_path(config.recordings_base)
+    suggested_path = config.recordings_base
+    current_path = _ask_initial_recordings_base_path(suggested_path)
 
     while True:
         try:
             if _prepare_recordings_base(current_path):
                 print(f"Ziel-Basisordner ist bereit: {current_path}")
+                if current_path != suggested_path:
+                    _remember_path_setting("recordings_base", current_path, "Diesen Ziel-Basisordner künftig merken?")
                 return replace(config, recordings_base=current_path)
             current_path = _ask_recordings_base_path()
         except Mp4TransferError as exc:
@@ -198,6 +219,10 @@ def _ask_choice(prompt: str, choices: dict[str, str], default: str | None = None
             if raw in {key, label.casefold()}:
                 return key
         print("Bitte eine der angezeigten Optionen eingeben.")
+
+
+def _show_wait_status(message: str) -> None:
+    print(f"{message} Bitte warten ...")
 
 
 GERMAN_MONTHS = {
@@ -408,7 +433,7 @@ def _limit_file_list(files: tuple[Path, ...], limit: int) -> tuple[Path, ...]:
 def _search_mp4_files(folder: Path, search_text: str, *, limit: int = SEARCH_RESULT_LIMIT) -> tuple[Path, ...]:
     normalized = search_text.strip().casefold()
     if not normalized:
-        return ()
+        return _limit_file_list(_mp4_files_sorted(folder), limit)
     matches = tuple(path for path in _mp4_files_sorted(folder) if normalized in path.name.casefold())
     return _limit_file_list(matches, limit)
 
@@ -419,11 +444,13 @@ def _choose_mp4_from_list(prompt: str, files: tuple[Path, ...], *, overflow_coun
         return None
     if overflow_count > 0:
         print(f"Hinweis: Es gibt {overflow_count} weitere Treffer. Bitte Suchtext genauer eingeben, wenn die Datei nicht dabei ist.")
-    options = [MenuOption(_format_file_choice(path), path) for path in files] + [MenuOption("Zurück", None, ("z", "zurueck", "zurück"))]
+    options = [MenuOption(_format_file_choice(path), path) for path in files] + [MenuOption("Zurück", BACK, ("z", "zurueck", "zurück"))]
     if live_search:
         selected = search_from_options(prompt, options)
     else:
         selected = choose_from_options(prompt, options)
+    if selected is BACK:
+        return None
     return selected
 
 
@@ -470,7 +497,7 @@ def _ask_search_mp4_in_folder(folder: Path) -> Path | None:
     )
 
 
-def _ask_manual_raw_recording_path() -> Path:
+def _ask_manual_raw_recording_path(config: AppConfig | None = None, log: WorkflowLog | None = None) -> Path:
     while True:
         raw = _ask_required("Pfad zur vMix-Rohaufnahme oder zu einem Ordner")
         path = _normalize_user_path(raw)
@@ -485,7 +512,9 @@ def _ask_manual_raw_recording_path() -> Path:
         if path.is_dir():
             print("Dieser Ordner wird für diesen Wizard-Lauf als Rohaufnahme-Quellordner verwendet.")
             print(f"Temporärer Quellordner: {path}")
-            return _ask_raw_recording_from_folder(path, "Temporärer Rohaufnahme-Quellordner")
+            if config is not None and path != config.vmix_storage:
+                _remember_path_setting("vmix_storage", path, "Diesen Rohaufnahme-Ordner künftig merken?", log)
+            return _ask_raw_recording_from_folder(path, "Temporärer Rohaufnahme-Quellordner", config=config, log=log)
         print("Dieser Pfad ist keine Datei und kein Ordner. Bitte erneut eingeben.")
 
 
@@ -498,16 +527,22 @@ def _confirm_raw_recording_if_suspicious(path: Path) -> bool:
     return _ask_yes_no("Diese Datei trotzdem als Rohaufnahme verwenden?", False)
 
 
-def _ask_raw_recording_from_folder(folder: Path, folder_label: str = "Konfigurierter Quellordner") -> Path:
+def _ask_raw_recording_from_folder(
+    folder: Path,
+    folder_label: str = "Konfigurierter Quellordner",
+    *,
+    config: AppConfig | None = None,
+    log: WorkflowLog | None = None,
+) -> Path:
     print(f"{folder_label}: {folder}")
     files = _raw_recording_candidates_sorted(folder)
     if not files:
         print("In diesem Rohaufnahme-Ordner wurde keine MP4 gefunden.")
-        return _ask_manual_raw_recording_path()
+        return _ask_manual_raw_recording_path(config, log)
 
     newest = _newest_raw_recording_candidate(folder)
     if newest is None:
-        return _ask_manual_raw_recording_path()
+        return _ask_manual_raw_recording_path(config, log)
     print(f"Vorschlag: {_format_file_choice(newest)}")
     while True:
         choice = choose_from_options(
@@ -537,13 +572,13 @@ def _ask_raw_recording_from_folder(folder: Path, folder_label: str = "Konfigurie
             if selected is not None and _confirm_raw_recording_if_suspicious(selected):
                 return selected
         elif choice == "manual":
-            selected = _ask_manual_raw_recording_path()
+            selected = _ask_manual_raw_recording_path(config, log)
             return selected
         else:
             raise UserAbortError("Abbruch durch Nutzer.")
 
 
-def _ask_raw_recording(config: AppConfig) -> Path:
+def _ask_raw_recording(config: AppConfig, log: WorkflowLog | None = None) -> Path:
     print()
     print("Rohaufnahme auswählen")
     if not config.vmix_storage.exists() or not config.vmix_storage.is_dir():
@@ -551,9 +586,9 @@ def _ask_raw_recording(config: AppConfig) -> Path:
         print("Der konfigurierte Rohaufnahme-Ordner wurde nicht gefunden.")
         print("Du kannst jetzt einen anderen Rohaufnahme-Ordner oder direkt eine MP4-Datei eingeben.")
         print(f"Admin-Hinweis: vmix_storage existiert nicht oder ist kein Ordner: {config.vmix_storage}")
-        return _ask_manual_raw_recording_path()
+        return _ask_manual_raw_recording_path(config, log)
 
-    return _ask_raw_recording_from_folder(config.vmix_storage)
+    return _ask_raw_recording_from_folder(config.vmix_storage, config=config, log=log)
 
 
 def _losslesscut_command(config: AppConfig) -> str:
@@ -565,10 +600,15 @@ def _losslesscut_source_label(config: AppConfig) -> str:
     return "config.toml" if config.losslesscut_path.strip() else "PATH/App-Alias"
 
 
-def _open_losslesscut(raw_recording: Path, config: AppConfig) -> None:
+def _open_losslesscut(raw_recording: Path, config: AppConfig) -> subprocess.Popen[bytes]:
     command = _losslesscut_command(config)
     try:
-        subprocess.Popen([command, str(raw_recording)])
+        return subprocess.Popen(
+            [command, str(raw_recording)],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
     except FileNotFoundError as exc:
         raise LosslessCutStartError(
             "LosslessCut konnte nicht gestartet werden.",
@@ -599,12 +639,12 @@ def _ask_losslesscut_exe_path() -> Path:
         return path
 
 
-def _try_start_losslesscut(raw_recording: Path, config: AppConfig, log: WorkflowLog) -> None:
+def _try_start_losslesscut(raw_recording: Path, config: AppConfig, log: WorkflowLog) -> subprocess.Popen[bytes] | None:
     log.event(f"LosslessCut-Startversuch ueber {_losslesscut_source_label(config)}: {_losslesscut_command(config)!r}")
     try:
-        _open_losslesscut(raw_recording, config)
+        process = _open_losslesscut(raw_recording, config)
         log.event("LosslessCut wurde gestartet.")
-        return
+        return process
     except LosslessCutStartError as exc:
         log.error("LosslessCut konnte automatisch nicht gestartet werden.", admin_hint=exc.admin_hint)
         print()
@@ -616,10 +656,11 @@ def _try_start_losslesscut(raw_recording: Path, config: AppConfig, log: Workflow
         manual_path = _ask_losslesscut_exe_path()
         log.event(f"Manueller LosslessCut-Pfad eingegeben: {manual_path}")
         manual_config = replace(config, losslesscut_path=str(manual_path))
+        _remember_path_setting("losslesscut_path", manual_path, "LosslessCut-Pfad künftig merken?", log)
         try:
-            _open_losslesscut(raw_recording, manual_config)
+            process = _open_losslesscut(raw_recording, manual_config)
             log.event("LosslessCut wurde mit manuellem Pfad gestartet.")
-            return
+            return process
         except LosslessCutStartError as exc:
             log.error("LosslessCut konnte auch mit manuellem Pfad nicht gestartet werden.", admin_hint=exc.admin_hint)
             print()
@@ -630,6 +671,7 @@ def _try_start_losslesscut(raw_recording: Path, config: AppConfig, log: Workflow
         log.event("Nutzer ueberspringt manuellen LosslessCut-Pfad.")
 
     print(f"Rohaufnahme: {raw_recording}")
+    return None
 
 
 def _print_losslesscut_instructions() -> None:
@@ -639,7 +681,41 @@ def _print_losslesscut_instructions() -> None:
     print("- Markiere nur den Predigtbereich.")
     print("- Exportiere nur die Predigt als MP4.")
     print("- Chorlieder, Beiträge oder Ansagen nicht als Predigtdatei verwenden.")
-    print("- Komm danach zu diesem Wizard zurück.")
+    print("- Exportiere die Predigt in LosslessCut.")
+    print("- Danach kannst du LosslessCut schließen oder hier Enter drücken.")
+
+
+def _process_finished(process: subprocess.Popen[bytes] | None) -> bool:
+    return process is not None and process.poll() is not None
+
+
+def _wait_for_losslesscut_or_enter(process: subprocess.Popen[bytes] | None) -> None:
+    print()
+    print("Warten auf LosslessCut-Export")
+    print("Exportiere die Predigt in LosslessCut. Danach kannst du LosslessCut schließen oder hier Enter drücken.")
+    if process is None:
+        _ask("Drücke Enter, sobald der Export fertig ist")
+        return
+    if _process_finished(process):
+        print("LosslessCut wurde geschlossen. Ich suche jetzt nach der exportierten MP4.")
+        return
+    if os.name == "nt" and sys.stdin.isatty():
+        try:
+            import msvcrt
+        except ImportError:
+            _ask("Drücke Enter, sobald der Export fertig ist")
+            return
+        print("Drücke Enter, sobald der Export fertig ist. Wenn LosslessCut geschlossen wird, geht es automatisch weiter.")
+        while not _process_finished(process):
+            if msvcrt.kbhit():
+                key = msvcrt.getwch()
+                if key in {"\r", "\n"}:
+                    print()
+                    return
+            time.sleep(0.5)
+        print("LosslessCut wurde geschlossen. Ich suche jetzt nach der exportierten MP4.")
+        return
+    _ask("Drücke Enter, sobald der Export fertig ist")
 
 
 def _export_search_folders(config: AppConfig, raw_recording: Path) -> tuple[Path, ...]:
@@ -679,11 +755,27 @@ def _looks_like_losslesscut_export(path: Path) -> bool:
     return _is_cut_export(path) or bool(re.search(r"\d{2}\.\d{2}\.\d{3}\s*-\s*\d{2}\.\d{2}\.\d{3}", stem))
 
 
-def _prioritize_export_candidates(candidates: tuple[Path, ...]) -> tuple[Path, ...]:
+def _looks_like_raw_named_export(path: Path, raw_recording: Path | None) -> bool:
+    if raw_recording is None:
+        return False
+    stem = path.stem.casefold()
+    raw_stem = raw_recording.stem.casefold()
+    return (
+        stem.startswith(f"_geschnitten_{raw_stem}")
+        or stem.startswith(f"geschnitten_{raw_stem}")
+        or (raw_stem in stem and _looks_like_losslesscut_export(path))
+    )
+
+
+def _prioritize_export_candidates(candidates: tuple[Path, ...], raw_recording: Path | None = None) -> tuple[Path, ...]:
     return tuple(
         sorted(
             candidates,
-            key=lambda path: (0 if _looks_like_losslesscut_export(path) else 1, -path.stat().st_mtime),
+            key=lambda path: (
+                0 if _looks_like_raw_named_export(path, raw_recording) else 1,
+                0 if _looks_like_losslesscut_export(path) else 1,
+                -path.stat().st_mtime,
+            ),
         )
     )
 
@@ -713,6 +805,7 @@ def _find_mp4_exports_after_snapshot(
     folders: tuple[Path, ...],
     before: dict[Path, Mp4FileSnapshot],
     assistant_start: datetime,
+    raw_recording: Path | None = None,
 ) -> tuple[Path, ...]:
     start_timestamp = assistant_start.timestamp()
     found: list[Path] = []
@@ -731,9 +824,10 @@ def _find_mp4_exports_after_snapshot(
             changed_file = old is not None and (old.size != stat.st_size or old.modified_at != stat.st_mtime or old.created_at != stat.st_ctime)
             created_after_start = stat.st_ctime >= start_timestamp
             plausible_name = _looks_like_losslesscut_export(path)
-            if is_new_path or created_after_start or (changed_file and plausible_name):
+            raw_named_export = _looks_like_raw_named_export(path, raw_recording)
+            if is_new_path or created_after_start or raw_named_export or (changed_file and plausible_name):
                 found.append(path)
-    return _prioritize_export_candidates(tuple(found))
+    return _prioritize_export_candidates(tuple(found), raw_recording)
 
 
 def _manual_export_candidates(folder: Path, assistant_start: datetime) -> tuple[Path, ...]:
@@ -747,8 +841,8 @@ def _manual_export_candidates(folder: Path, assistant_start: datetime) -> tuple[
     return _prioritize_export_candidates(files)
 
 
-def _choose_exported_mp4(candidates: tuple[Path, ...]) -> Path:
-    candidates = _prioritize_export_candidates(candidates)
+def _choose_exported_mp4(candidates: tuple[Path, ...], raw_recording: Path | None = None) -> Path:
+    candidates = _prioritize_export_candidates(candidates, raw_recording)
     if len(candidates) == 1:
         candidate = candidates[0]
         print(f"Gefundene neue MP4: {candidate}")
@@ -800,17 +894,21 @@ def _select_exported_mp4(
     raw_recording: Path,
     assistant_start: datetime,
     before_export: dict[Path, Mp4FileSnapshot] | None = None,
+    losslesscut_process: subprocess.Popen[bytes] | None = None,
 ) -> Path:
     print()
     print("Exportierte Predigt-MP4 übernehmen")
     print("Wenn der Export in LosslessCut fertig ist, sucht der Wizard nach neuen MP4-Dateien.")
-    _ask("Drücke Enter, sobald der Export fertig ist")
+    _wait_for_losslesscut_or_enter(losslesscut_process)
     folders = _export_search_folders(config, raw_recording)
     if before_export is None:
         before_export = _snapshot_mp4_files(folders)
-    candidates = _find_mp4_exports_after_snapshot(folders, before_export, assistant_start)
+    try:
+        candidates = _find_mp4_exports_after_snapshot(folders, before_export, assistant_start, raw_recording)
+    except TypeError:
+        candidates = _find_mp4_exports_after_snapshot(folders, before_export, assistant_start)
     if candidates:
-        return _choose_exported_mp4(candidates)
+        return _choose_exported_mp4(candidates, raw_recording)
     print("Es wurde keine passende neue MP4 automatisch ausgewählt.")
     return _ask_exported_mp4_manually(assistant_start)
 
@@ -820,15 +918,15 @@ def _select_source_mp4_for_workflow(config: AppConfig, log: WorkflowLog) -> tupl
         return _ask_mp4_path(), None
 
     assistant_start = datetime.now()
-    raw_recording = _ask_raw_recording(config)
+    raw_recording = _ask_raw_recording(config, log)
     log.event(f"Rohaufnahme fuer LosslessCut ausgewaehlt: {raw_recording}")
     export_folders = _export_search_folders(config, raw_recording)
     before_export = _snapshot_mp4_files(export_folders)
     log.event(f"MP4-Snapshot vor LosslessCut-Export erstellt: {len(before_export)} Dateien.")
-    _try_start_losslesscut(raw_recording, config, log)
+    losslesscut_process = _try_start_losslesscut(raw_recording, config, log)
 
     _print_losslesscut_instructions()
-    exported_mp4 = _select_exported_mp4(config, raw_recording, assistant_start, before_export)
+    exported_mp4 = _select_exported_mp4(config, raw_recording, assistant_start, before_export, losslesscut_process)
     log.event(f"Exportierte MP4 ausgewaehlt: {exported_mp4}")
     return exported_mp4, raw_recording
 
@@ -1052,6 +1150,7 @@ def _transfer_mp4_to_target(
 
     try:
         if config.copy_instead_of_move:
+            _show_wait_status("MP4 wird kopiert.")
             shutil.copy2(plan.source_mp4, plan.target_mp4)
             if overwrite_existing:
                 print(f"Die vorhandene MP4 wurde überschrieben: {plan.target_mp4}")
@@ -1060,6 +1159,7 @@ def _transfer_mp4_to_target(
         else:
             if overwrite_existing and plan.target_mp4.exists():
                 plan.target_mp4.unlink()
+            _show_wait_status("MP4 wird verschoben.")
             shutil.move(str(plan.source_mp4), str(plan.target_mp4))
             if overwrite_existing:
                 print(f"Die vorhandene MP4 wurde überschrieben: {plan.target_mp4}")
@@ -1251,7 +1351,14 @@ def _archive_target_for_raw_recording(raw_recording: Path, target_folder: Path) 
     return None
 
 
-def _ask_raw_archive_mode(raw_recording: Path, target_folder: Path) -> RawArchiveMode:
+def _raw_archive_default_index(options: list[MenuOption[RawArchiveMode]], default_mode: RawArchiveMode) -> int:
+    for index, option in enumerate(options):
+        if option.value == default_mode:
+            return index
+    return 0
+
+
+def _ask_raw_archive_mode(raw_recording: Path, target_folder: Path, default_mode: RawArchiveMode = RAW_ARCHIVE_MOVE) -> RawArchiveMode:
     if _same_file(raw_recording.parent, target_folder):
         return RAW_ARCHIVE_NONE
     print()
@@ -1260,13 +1367,16 @@ def _ask_raw_archive_mode(raw_recording: Path, target_folder: Path) -> RawArchiv
     print(f"Zielordner: {target_folder}")
     if _looks_like_cut_or_final_mp4(raw_recording):
         print("Diese Datei sieht bereits geschnitten aus. Bitte nicht als Rohaufnahme archivieren, wenn sie nicht der vollständige Gottesdienst ist.")
+        default_mode = RAW_ARCHIVE_NONE
+    options = [
+        MenuOption("Ja, Rohaufnahme in Zielordner verschieben", RAW_ARCHIVE_MOVE, ("v", "verschieben", "j", "ja")),
+        MenuOption("Nein, Rohaufnahme liegen lassen", RAW_ARCHIVE_NONE, ("n", "nein")),
+        MenuOption("Rohaufnahme kopieren statt verschieben", RAW_ARCHIVE_COPY, ("k", "kopieren")),
+    ]
     return choose_from_options(
         "Rohaufnahme in den Zielordner verschieben, damit vMixStorage frei bleibt?",
-        [
-            MenuOption("Nein, Rohaufnahme liegen lassen", RAW_ARCHIVE_NONE, ("n", "nein")),
-            MenuOption("Ja, Rohaufnahme in Zielordner verschieben", RAW_ARCHIVE_MOVE, ("v", "verschieben")),
-            MenuOption("Rohaufnahme kopieren statt verschieben", RAW_ARCHIVE_COPY, ("k", "kopieren")),
-        ],
+        options,
+        default_index=_raw_archive_default_index(options, default_mode),
     )
 
 
@@ -1291,8 +1401,10 @@ def _archive_raw_recording(raw_recording: Path, target_folder: Path, mode: RawAr
             print("Wichtig: Beim Verschieben wird die Rohaufnahme aus dem Quellordner entfernt.")
             if not _ask_yes_no("Rohaufnahme wirklich verschieben?", False):
                 return None
+            _show_wait_status("Rohaufnahme wird verschoben.")
             shutil.move(str(raw_recording), str(target))
         elif mode == RAW_ARCHIVE_COPY:
+            _show_wait_status("Rohaufnahme wird kopiert.")
             shutil.copy2(raw_recording, target)
         else:
             return None
@@ -1309,7 +1421,7 @@ def _archive_raw_recording(raw_recording: Path, target_folder: Path, mode: RawAr
     return target
 
 
-def _maybe_archive_raw_recording(raw_recording: Path | None, plan: ProcessingPlan, log: WorkflowLog) -> None:
+def _maybe_archive_raw_recording(raw_recording: Path | None, plan: ProcessingPlan, config: AppConfig, log: WorkflowLog) -> None:
     if raw_recording is None:
         return
     if _same_file(raw_recording, plan.source_mp4):
@@ -1318,7 +1430,7 @@ def _maybe_archive_raw_recording(raw_recording: Path | None, plan: ProcessingPla
         log.event("Rohaufnahme liegt bereits im Zielordner.")
         return
 
-    mode = _ask_raw_archive_mode(raw_recording, plan.target_mp4.parent)
+    mode = _ask_raw_archive_mode(raw_recording, plan.target_mp4.parent, config.raw_archive_mode)
     if mode == RAW_ARCHIVE_NONE:
         log.event("Rohaufnahme bleibt im Quellordner.")
         return
@@ -1348,11 +1460,192 @@ def _print_config_load_error(exc: ConfigLoadError) -> None:
     print(f"Admin-Hinweis: {exc.admin_hint}")
 
 
+def _save_user_settings(
+    *,
+    paths: dict[str, str] | None = None,
+    naming: dict[str, str] | None = None,
+    workflow: dict[str, str | bool] | None = None,
+) -> Path | None:
+    try:
+        saved_path = save_user_config_values(paths=paths, naming=naming, workflow=workflow)
+    except ConfigLoadError as exc:
+        print("Die Einstellung konnte nicht gespeichert werden.")
+        print(f"Admin-Hinweis: {exc.admin_hint}")
+        return None
+    print(f"Einstellung gespeichert: {saved_path}")
+    return saved_path
+
+
+def _ask_folder_setting(prompt: str) -> Path:
+    while True:
+        raw = _ask_required(prompt)
+        path = _normalize_user_path(raw)
+        if _path_has_windows_invalid_chars(path):
+            print("Dieser Pfad ist nicht gültig. Bitte keine Zeichen wie < > \" | ? * verwenden.")
+            continue
+        return path
+
+
+def _year_folder_template_label(template: str) -> str:
+    if template == "{year} Video+Audio":
+        return "Jahresordner mit Zusatz, z. B. 2026 Video+Audio"
+    return "Nur Jahr, z. B. 2026"
+
+
+def _ask_year_folder_template(current_template: str) -> str:
+    options = [
+        MenuOption("Nur Jahr, z. B. 2026", "{year}", ("1", "jahr")),
+        MenuOption("Jahresordner mit Zusatz, z. B. 2026 Video+Audio", "{year} Video+Audio", ("2", "video", "audio")),
+    ]
+    default_index = 1 if current_template == "{year} Video+Audio" else 0
+    return choose_from_options("Wie soll der Jahresordner heißen?", options, default_index=default_index)
+
+
+def _raw_archive_mode_label(mode: str) -> str:
+    labels = {
+        RAW_ARCHIVE_MOVE: "Rohaufnahme in Zielordner verschieben",
+        RAW_ARCHIVE_NONE: "Rohaufnahme liegen lassen",
+        RAW_ARCHIVE_COPY: "Rohaufnahme kopieren statt verschieben",
+    }
+    return labels.get(mode, labels[RAW_ARCHIVE_MOVE])
+
+
+def _ask_raw_archive_setting(current_mode: str) -> RawArchiveMode:
+    options = [
+        MenuOption("Rohaufnahme in Zielordner verschieben", RAW_ARCHIVE_MOVE, ("v", "verschieben", "j", "ja")),
+        MenuOption("Rohaufnahme liegen lassen", RAW_ARCHIVE_NONE, ("n", "nein", "liegen")),
+        MenuOption("Rohaufnahme kopieren statt verschieben", RAW_ARCHIVE_COPY, ("k", "kopieren")),
+    ]
+    return choose_from_options(
+        "Was soll nach erfolgreichem Lauf mit der Rohaufnahme vorgeschlagen werden?",
+        options,
+        default_index=_raw_archive_default_index(options, current_mode),
+    )
+
+
+def _run_settings_menu(args: argparse.Namespace) -> int:
+    explicit_config = Path(args.config) if args.config else None
+    try:
+        config = load_config(explicit_config)
+    except ConfigLoadError as exc:
+        _print_config_load_error(exc)
+        return 6
+
+    print()
+    print("Einstellungen ändern")
+    print("--------------------")
+    print("Gespeichert wird in der Benutzer-Config:")
+    path = user_config_path()
+    print(path if path is not None else "%APPDATA% konnte nicht bestimmt werden.")
+    print()
+    print(f"Aktuell: Ziel-Basisordner: {config.recordings_base}")
+    print(f"Aktuell: Rohaufnahme-Ordner: {config.vmix_storage}")
+    print(f"Aktuell: LosslessCut-Pfad: {config.losslesscut_path or 'PATH/App-Alias'}")
+    print(f"Aktuell: Jahresordner: {_year_folder_template_label(config.year_folder_template)}")
+    print(f"Aktuell: Rohaufnahme nach Erfolg: {_raw_archive_mode_label(config.raw_archive_mode)}")
+
+    while True:
+        choice = choose_from_options(
+            "Welche Einstellung möchtest du ändern?",
+            [
+                MenuOption("Ziel-Basisordner", "recordings_base", ("ziel", "z")),
+                MenuOption("Rohaufnahme-Ordner / vMixStorage", "vmix_storage", ("roh", "vmix", "v")),
+                MenuOption("LosslessCut-Pfad", "losslesscut_path", ("losslesscut", "l")),
+                MenuOption("Jahresordner-Format", "year_folder_template", ("jahr", "j")),
+                MenuOption("Rohaufnahme nach Erfolg", "raw_archive_mode", ("aufraeumen", "a")),
+                MenuOption("Zurück zum Hauptmenü", "back", ("zurueck", "zurück", "b")),
+            ],
+        )
+        if choice == "back":
+            return 0
+        if choice == "recordings_base":
+            folder = _ask_folder_setting("Neuer Ziel-Basisordner")
+            _save_user_settings(paths={"recordings_base": str(folder)})
+            config = replace(config, recordings_base=folder)
+        elif choice == "vmix_storage":
+            folder = _ask_folder_setting("Neuer Rohaufnahme-Ordner / vMixStorage")
+            _save_user_settings(paths={"vmix_storage": str(folder)})
+            config = replace(config, vmix_storage=folder)
+        elif choice == "losslesscut_path":
+            path_value = _ask_losslesscut_exe_path()
+            _save_user_settings(paths={"losslesscut_path": str(path_value)})
+            config = replace(config, losslesscut_path=str(path_value))
+        elif choice == "year_folder_template":
+            template = _ask_year_folder_template(config.year_folder_template)
+            _save_user_settings(naming={"year_folder_template": template})
+            config = replace(config, year_folder_template=template)
+        elif choice == "raw_archive_mode":
+            mode = _ask_raw_archive_setting(config.raw_archive_mode)
+            _save_user_settings(workflow={"raw_archive_mode": mode})
+            config = replace(config, raw_archive_mode=mode)
+
+
+def _latest_log_file(log_dir: Path) -> Path | None:
+    if not log_dir.exists() or not log_dir.is_dir():
+        return None
+    logs = tuple(path for path in log_dir.glob("predigt-uploader-*.log") if path.is_file())
+    if not logs:
+        return None
+    return max(logs, key=lambda path: path.stat().st_mtime)
+
+
+def _open_path_safely(path: Path, description: str) -> None:
+    try:
+        os.startfile(path)  # type: ignore[attr-defined]
+    except AttributeError:
+        print(f"{description} kann auf diesem System nicht automatisch geöffnet werden: {path}")
+    except OSError as exc:
+        print(f"{description} konnte nicht automatisch geöffnet werden: {path}")
+        print(f"Admin-Hinweis: {exc}")
+
+
+def _open_latest_log_or_log_folder() -> None:
+    log_dir = Path.cwd() / "logs"
+    latest = _latest_log_file(log_dir)
+    if latest is None:
+        print("Es wurde noch keine Logdatei gefunden.")
+        if _ask_yes_no("Logordner trotzdem öffnen?", True):
+            log_dir.mkdir(parents=True, exist_ok=True)
+            _open_path_safely(log_dir, "Logordner")
+        return
+    choice = choose_from_options(
+        "Was möchtest du öffnen?",
+        [
+            MenuOption(f"Letzte Logdatei öffnen: {latest.name}", "file", ("datei", "log")),
+            MenuOption("Logordner öffnen", "folder", ("ordner", "o")),
+            MenuOption("Zurück", "back", ("zurueck", "zurück", "z")),
+        ],
+    )
+    if choice == "file":
+        _open_path_safely(latest, "Logdatei")
+    elif choice == "folder":
+        _open_path_safely(log_dir, "Logordner")
+
+
+def _print_systemcheck_hint() -> None:
+    print()
+    print("Systemcheck")
+    print("-----------")
+    print("Für eine schnelle Prüfung doppelklicke im Projektordner:")
+    print("PredigtUploader Systemcheck.cmd")
+    print()
+    print("Der Systemcheck prüft Python, die virtuelle Umgebung, den Wizard, FFmpeg und optional LosslessCut.")
+
+
+def _print_app_header() -> None:
+    print("PredigtUploader")
+    print("================")
+    print("Bereitet Predigtvideo, MP3 und Website-Dateien vor.")
+    print("Es wird nichts zu Vimeo oder WordPress hochgeladen.")
+    print()
+
+
 def run_wizard(args: argparse.Namespace) -> int:
-    log = WorkflowLog.start(config_path=args.config)
+    explicit_config = Path(args.config) if args.config else None
+    log = WorkflowLog.start(config_path=describe_config_source(explicit_config))
     log.event("Wizard gestartet.")
     try:
-        config = load_config(Path(args.config) if args.config else None)
+        config = load_config(explicit_config)
     except ConfigLoadError as exc:
         log.error("Konfiguration konnte nicht geladen werden.", admin_hint=exc.admin_hint)
         log.finish("Abbruch wegen Config-Fehler.")
@@ -1360,10 +1653,7 @@ def run_wizard(args: argparse.Namespace) -> int:
         return 6
     log.event("Konfiguration geladen.")
 
-    print("PredigtUploader – lokaler Version-1-Prototyp")
-    print("============================================")
-    print("Dieses Programm bereitet die Dateien nur lokal vor. Es lädt nichts zu Vimeo oder WordPress hoch.")
-    print()
+    _print_app_header()
 
     config = _select_recordings_base(config)
     log.event(f"Ziel-Basisordner vorbereitet: {config.recordings_base}")
@@ -1450,6 +1740,7 @@ def run_wizard(args: argparse.Namespace) -> int:
     log.event("FFmpeg ist verfuegbar.")
 
     try:
+        _show_wait_status("MP3 wird erstellt.")
         convert_mp4_to_mp3(plan.target_mp4, plan.target_mp3, config)
         _validate_created_mp3(plan.target_mp3)
         print(f"Die MP3 wurde erstellt: {plan.target_mp3}")
@@ -1495,7 +1786,7 @@ def run_wizard(args: argparse.Namespace) -> int:
         return 5
     log.event("Lokaler Workflow-Endzustand geprueft.")
 
-    _maybe_archive_raw_recording(raw_recording, plan, log)
+    _maybe_archive_raw_recording(raw_recording, plan, config, log)
     _print_local_workflow_success(plan, summary_path)
     _open_target_folder_safely(config, plan.target_mp4.parent, log)
     if log.enabled:
@@ -1504,9 +1795,42 @@ def run_wizard(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_start_menu(args: argparse.Namespace) -> int:
+    _print_app_header()
+    while True:
+        choice = choose_from_options(
+            "Was möchtest du tun?",
+            [
+                MenuOption("Neue Predigt vorbereiten", "wizard", ("predigt", "neu", "n")),
+                MenuOption("Einstellungen ändern", "settings", ("einstellungen", "e")),
+                MenuOption("Systemcheck-Hinweis anzeigen", "systemcheck", ("systemcheck", "s")),
+                MenuOption("Letzte Logdatei öffnen oder Logordner öffnen", "logs", ("logs", "l")),
+                MenuOption("Beenden", "exit", ("beenden", "b", "q")),
+            ],
+        )
+        if choice == "wizard":
+            return run_wizard(args)
+        if choice == "settings":
+            result = _run_settings_menu(args)
+            if result != 0:
+                return result
+            print()
+            continue
+        if choice == "systemcheck":
+            _print_systemcheck_hint()
+            print()
+            continue
+        if choice == "logs":
+            _open_latest_log_or_log_folder()
+            print()
+            continue
+        print("Beendet.")
+        return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="predigt-uploader")
-    parser.add_argument("command", nargs="?", default="wizard", choices=["wizard"])
+    parser.add_argument("command", nargs="?", default="menu", choices=["menu", "wizard"])
     parser.add_argument("--config", help="Pfad zu config.toml")
     return parser
 
@@ -1515,6 +1839,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     try:
         args = parser.parse_args(argv)
+        if args.command == "menu":
+            return run_start_menu(args)
         if args.command == "wizard":
             return run_wizard(args)
         parser.print_help()

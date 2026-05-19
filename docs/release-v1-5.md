@@ -13,8 +13,10 @@ Im Projektordner:
 Das Skript erstellt:
 
 ```text
-dist\predigt-uploader-v0.1.5-local.zip
+dist\predigt-uploader-v0.1.6-local.zip
 ```
+
+Hinweis: Die Dokumentation bleibt bei "lokale Version 1.5", weil es weiterhin um den lokalen LosslessCut-Zielrechner-Workflow geht. Der ZIP-Dateiname nutzt eine kleinere Paketversion, damit Gemeinderechner-Tests mit nachgebesserten Bedien- und Erkennungsfixes nicht mit der ersten 1.5-ZIP verwechselt werden.
 
 ## Diese Dateien und Ordner gehören in die ZIP
 

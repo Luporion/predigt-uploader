@@ -47,6 +47,18 @@ Alternativ in PowerShell:
 ```
 
 Das Skript prüft Python, erstellt bei Bedarf `.venv` und installiert die benötigten Python-Abhängigkeiten.
+Danach prüft es auch FFmpeg. FFmpeg ist nötig, damit der Wizard aus der MP4 eine MP3 erstellen kann.
+
+Wenn FFmpeg fehlt und `winget` verfügbar ist, fragt das Setup ausdrücklich, ob FFmpeg automatisch installiert werden soll. Die Installation passiert nicht still. Wenn du zustimmst, kann Windows weitere Rückfragen anzeigen.
+
+Wichtig: Nach einer FFmpeg-Installation muss oft ein neues PowerShell-Fenster geöffnet werden, damit Windows den neuen PATH kennt. Danach bitte den Systemcheck erneut starten.
+
+Wenn `winget` nicht verfügbar ist oder die automatische Installation nicht klappt, zeigt das Setup eine manuelle Anleitung. Alternativ kann ein Admin später in `config.toml` einen festen Pfad setzen:
+
+```toml
+[paths]
+ffmpeg_path = "C:\\Tools\\ffmpeg\\bin\\ffmpeg.exe"
+```
 
 Wenn PowerShell das Skript wegen Ausführungsrichtlinien blockiert, kann es für diesen Start so aufgerufen werden:
 
@@ -70,7 +82,7 @@ Alternativ in PowerShell:
 .\scripts\check-system.ps1
 ```
 
-Die Prüfung meldet verständlich, ob Python, `.venv`, der Wizard und FFmpeg verfügbar sind. Wenn in `config.toml` ein `losslesscut_path` gesetzt ist, wird auch dieser Pfad geprüft.
+Die Prüfung meldet verständlich, ob Python, `.venv`, der Wizard und FFmpeg verfügbar sind. Wenn FFmpeg direkt vorher installiert wurde und noch fehlt, ein neues PowerShell-Fenster öffnen und erneut prüfen. Wenn in `config.toml` ein `losslesscut_path` gesetzt ist, wird auch dieser Pfad geprüft.
 
 ## 4. FFmpeg installieren
 
@@ -123,11 +135,18 @@ Danach `config.toml` prüfen und bei Bedarf anpassen:
 
 ```toml
 [paths]
-vmix_storage = "D:\\vMixStorage"
+vmix_storage = "V:\\vMixStorage"
 recordings_base = "C:\\Users\\DEIN-NAME\\Desktop\\Aufnahmen"
 ffmpeg_path = "ffmpeg"
 losslesscut_path = ""
+
+[workflow]
+open_target_folder = true
 ```
+
+`vmix_storage` ist der Standardordner für Rohaufnahmen. Der Wizard nutzt diesen Ordner, damit Nutzer nicht selbst durch alte Aufnahmen suchen müssen. Wenn der Ordner fehlt, erklärt der Wizard das und erlaubt eine manuelle Datei- oder Ordnerauswahl.
+
+`open_target_folder = true` öffnet nach erfolgreicher Verarbeitung den Zielordner automatisch im Explorer. Bei Bedarf kann der Wert auf `false` gesetzt werden.
 
 Keine Zugangsdaten, Tokens, Passwörter oder privaten Schlüssel in `config.toml` eintragen.
 
@@ -155,6 +174,8 @@ Der Wizard führt durch den lokalen Ablauf:
 4. MP4 in den Zielordner übernehmen
 5. MP3 per FFmpeg erzeugen
 6. Zusammenfassung und Logdatei schreiben
+7. optional die Rohaufnahme in den Zielordner verschieben oder kopieren
+8. Zielordner automatisch öffnen
 
 Später kann auf dem Desktop eine Verknüpfung zu `PredigtUploader starten.cmd` erstellt werden. Die Datei selbst sollte im Projektordner bleiben, damit sie die Skripte zuverlässig findet.
 

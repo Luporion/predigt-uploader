@@ -20,6 +20,15 @@ losslesscut_path = ""
 ```
 
 `vmix_storage` ist der Ordner mit Rohaufnahmen. Der Wizard schlägt daraus die neueste MP4 vor.
+Wenn dort viele alte Dateien liegen, zeigt der Wizard nicht sofort alle MP4-Dateien an. Erwartet wird:
+
+- neueste Aufnahme verwenden
+- in den neuesten Aufnahmen auswählen
+- suchen/filtern
+- Datei/Ordner manuell eingeben
+- abbrechen
+
+Bei der Liste der neuesten Aufnahmen werden nur die neuesten Dateien angezeigt. Bei der Suche werden nur passende Dateinamen angezeigt. Bei sehr vielen Treffern erscheint ein Hinweis.
 
 `losslesscut_path = ""` bedeutet: LosslessCut wird über PATH oder Windows-App-Alias gestartet. Wenn das nicht klappt, kann ein vollständiger Pfad eingetragen werden.
 
@@ -56,15 +65,17 @@ Keine Zugangsdaten, Tokens oder privaten Passwörter in die Config schreiben.
 
 2. Ziel-Basisordner bestätigen oder für den Testlauf ändern.
 3. Bei der Frage nach einer fertig geschnittenen MP4 mit `nein` antworten.
-4. Vorgeschlagene Rohaufnahme aus `vmix_storage` bestätigen oder einen MP4-Pfad manuell eingeben. Wenn nur ein Ordner eingegeben wird, zeigt der Wizard passende `.mp4`-Dateien aus diesem Ordner zur Auswahl an.
+4. Vorgeschlagene neueste Rohaufnahme aus `vmix_storage` verwenden, aus den neuesten Aufnahmen auswählen, suchen/filtern oder einen MP4-Pfad manuell eingeben. Wenn nur ein Ordner eingegeben wird, zeigt der Wizard nur eine begrenzte Auswahl der neuesten `.mp4`-Dateien aus diesem Ordner.
 5. Der Wizard öffnet LosslessCut mit der Rohaufnahme.
 6. In LosslessCut nur den Predigtbereich markieren.
 7. Nur die Predigt als MP4 exportieren.
 8. Chorlieder, Beiträge oder Ansagen nicht als Predigtdatei verwenden.
 9. Nach dem Export zum Wizard zurückkehren und Enter drücken.
 10. Wenn mehrere neue MP4-Dateien gefunden werden, bewusst die richtige Predigtdatei auswählen.
-11. Wenn keine Datei gefunden wird, den exportierten MP4-Pfad manuell eingeben.
+11. Wenn keine Datei gefunden wird, den exportierten MP4-Pfad manuell eingeben. Wenn ein Ordner wie `V:\vMixStorage` eingegeben wird, soll der Wizard zuerst neue Dateien seit Start des Assistenten zeigen. Sonst werden neueste/geschnittene Dateien bevorzugt angezeigt; Dateien mit `_geschnitten` im Namen sollen oben stehen.
 12. Danach läuft der bekannte lokale Workflow weiter: Datum, Metadaten, Zielordner, MP4 übernehmen, MP3 erzeugen, Zusammenfassung, Log.
+13. Nach erfolgreichem Lauf fragt der Wizard optional, ob die Rohaufnahme im Zielordner archiviert werden soll. Standard ist Nein. Verschieben warnt vorher deutlich, weil die Datei aus `vmix_storage` entfernt wird.
+14. Am Ende soll sich der Zielordner im Explorer öffnen. Wenn das nicht klappt, bleibt der Workflow trotzdem erfolgreich und es erscheint nur ein verständlicher Hinweis.
 
 Bei der Datumsauswahl bietet der Wizard nach Möglichkeit das Aufnahmedatum aus typischen vMix-Dateinamen an, zum Beispiel aus `Gottesdienst - 10 Mai 2026 - 09-55-08.mp4`. Falls kein Datum im Dateinamen erkannt wird, kann das Dateidatum der MP4 angeboten werden. Alternativ können immer das heutige Datum oder ein anderes Datum per Hand gewählt werden.
 
@@ -93,6 +104,7 @@ Im Zielordner liegen nach erfolgreichem Lauf:
 - finale MP4
 - gleichnamige MP3
 - `predigt-zusammenfassung.txt`
+- optional die Rohaufnahme, wenn Kopieren oder Verschieben ausgewählt wurde
 
 Im Projektordner liegt zusätzlich eine Logdatei unter `logs/`.
 

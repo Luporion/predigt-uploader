@@ -42,6 +42,11 @@
 - [x] anklickbare Windows-Startdateien fuer Einrichtung, Systemcheck und Wizard bereitstellen
 - [x] Encoding der Windows-Startdateien und PowerShell-Ausgaben absichern
 - [x] einfache Release-ZIP fuer lokale Auslieferung vorbereiten
+- [x] FFmpeg-Pruefung im Setup mit winget-Angebot verbessern
+- [x] Rohaufnahme-Auswahl fuer grosse vMixStorage-Ordner begrenzen und Suche ergaenzen
+- [x] manuelle Exportauswahl fuer grosse Ordner begrenzen und geschnittene Dateien bevorzugen
+- [x] Zielordner nach erfolgreichem Workflow optional automatisch oeffnen
+- [x] Rohaufnahme nach erfolgreichem Workflow optional kopieren oder verschieben
 - [x] bei fehlendem Export manuellen Pfad erlauben
 - [x] danach bestehenden lokalen Workflow weiterverwenden
 

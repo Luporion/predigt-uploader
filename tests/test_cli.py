@@ -13,15 +13,20 @@ from predigt_uploader.cli import (
     SummaryWriteError,
     _ask_sermon_date,
     _choose_exported_mp4,
+    _archive_raw_recording,
     _detect_recording_date_from_filename,
     _find_new_mp4_exports,
+    _search_mp4_files,
+    _limit_file_list,
     _ask_yes_no,
     _ask_mp4_path,
     _ask_required,
     _losslesscut_command,
     _ask_losslesscut_exe_path,
     _newest_mp4_in_folder,
+    _open_target_folder_safely,
     _open_losslesscut,
+    _prioritize_export_candidates,
     _try_start_losslesscut,
     _handle_existing_target_mp4,
     _print_local_workflow_success,
@@ -33,6 +38,9 @@ from predigt_uploader.cli import (
     _transfer_mp4_to_target,
     _validate_created_mp3,
     _validate_local_workflow_result,
+    RAW_ARCHIVE_COPY,
+    RAW_ARCHIVE_MOVE,
+    RAW_ARCHIVE_NONE,
     run_wizard,
 )
 from predigt_uploader.mp3 import Mp3ConversionError
@@ -119,6 +127,43 @@ def test_newest_mp4_in_folder_returns_latest_mp4(tmp_path):
     assert _newest_mp4_in_folder(tmp_path) == newer
 
 
+def test_search_mp4_files_filters_and_sorts_newest_first(tmp_path):
+    older = tmp_path / "Predigt alt.mp4"
+    newer = tmp_path / "Predigt neu.mp4"
+    other = tmp_path / "Chor.mp4"
+    older.write_bytes(b"alt")
+    newer.write_bytes(b"neu")
+    other.write_bytes(b"chor")
+    import os
+
+    old_time = datetime.now().timestamp() - 100
+    new_time = datetime.now().timestamp()
+    os.utime(older, (old_time, old_time))
+    os.utime(newer, (new_time, new_time))
+
+    assert _search_mp4_files(tmp_path, "predigt") == (newer, older)
+
+
+def test_limit_file_list_keeps_display_bounded(tmp_path):
+    files = tuple(tmp_path / f"clip-{index}.mp4" for index in range(20))
+
+    assert _limit_file_list(files, 15) == files[:15]
+
+
+def test_prioritize_export_candidates_prefers_geschnitten_files(tmp_path):
+    plain = tmp_path / "Export neu.mp4"
+    cut = tmp_path / "Export_geschnitten.mp4"
+    plain.write_bytes(b"plain")
+    cut.write_bytes(b"cut")
+    import os
+
+    now = datetime.now().timestamp()
+    os.utime(plain, (now, now))
+    os.utime(cut, (now - 100, now - 100))
+
+    assert _prioritize_export_candidates((plain, cut))[0] == cut
+
+
 def test_losslesscut_command_uses_path_or_app_alias(tmp_path):
     config = _config(tmp_path)
 
@@ -192,10 +237,10 @@ def test_find_new_mp4_exports_only_returns_files_since_start(tmp_path):
 
 def test_choose_exported_mp4_requires_choice_when_multiple_candidates(monkeypatch, tmp_path):
     first = tmp_path / "chor.mp4"
-    second = tmp_path / "predigt.mp4"
+    second = tmp_path / "predigt_geschnitten.mp4"
     first.write_bytes(b"chor")
     second.write_bytes(b"predigt")
-    _inputs(monkeypatch, ["2"])
+    _inputs(monkeypatch, ["1"])
 
     assert _choose_exported_mp4((first, second)) == second
 
@@ -219,10 +264,9 @@ def test_select_source_mp4_opens_losslesscut_and_uses_export(monkeypatch, tmp_pa
     config = _config(tmp_path)
     calls = []
 
-    monkeypatch.setattr("predigt_uploader.cli._newest_mp4_in_folder", lambda _folder: raw)
     monkeypatch.setattr("predigt_uploader.cli._open_losslesscut", lambda source, _config: calls.append(source))
     monkeypatch.setattr("predigt_uploader.cli._find_new_mp4_exports", lambda _folders, _since: (exported,))
-    _inputs(monkeypatch, ["nein", "", "", ""])
+    _inputs(monkeypatch, ["nein", "2", "2", "", ""])
 
     selected = _select_source_mp4(config, log)
 
@@ -598,6 +642,68 @@ def test_transfer_mp4_reports_permission_error(monkeypatch, tmp_path):
 
     assert "fehlender Berechtigungen" in error.value.user_message
     assert "kein Zugriff" in error.value.admin_hint
+
+
+def test_open_target_folder_is_called_when_enabled(monkeypatch, tmp_path):
+    calls = []
+    config = _config(tmp_path)
+    log = WorkflowLog.start(config_path=None, base_dir=tmp_path)
+
+    monkeypatch.setattr("predigt_uploader.cli._open_target_folder", lambda folder: calls.append(folder))
+
+    _open_target_folder_safely(config, tmp_path, log)
+
+    assert calls == [tmp_path]
+
+
+def test_archive_raw_recording_can_leave_file_in_place(tmp_path):
+    raw = tmp_path / "roh.mp4"
+    raw.write_bytes(b"raw")
+    target = tmp_path / "ziel"
+    target.mkdir()
+
+    assert _archive_raw_recording(raw, target, RAW_ARCHIVE_NONE) is None
+    assert raw.exists()
+
+
+def test_archive_raw_recording_can_copy(tmp_path):
+    raw = tmp_path / "roh.mp4"
+    raw.write_bytes(b"raw")
+    target = tmp_path / "ziel"
+    target.mkdir()
+
+    archived = _archive_raw_recording(raw, target, RAW_ARCHIVE_COPY)
+
+    assert archived == target / "roh.mp4"
+    assert raw.exists()
+    assert archived.read_bytes() == b"raw"
+
+
+def test_archive_raw_recording_can_move_after_warning(monkeypatch, tmp_path):
+    raw = tmp_path / "roh.mp4"
+    raw.write_bytes(b"raw")
+    target = tmp_path / "ziel"
+    target.mkdir()
+    _inputs(monkeypatch, ["ja"])
+
+    archived = _archive_raw_recording(raw, target, RAW_ARCHIVE_MOVE)
+
+    assert archived == target / "roh.mp4"
+    assert not raw.exists()
+    assert archived.read_bytes() == b"raw"
+
+
+def test_archive_raw_recording_does_not_overwrite_conflict(monkeypatch, tmp_path):
+    raw = tmp_path / "roh.mp4"
+    raw.write_bytes(b"raw")
+    target = tmp_path / "ziel"
+    target.mkdir()
+    existing = target / "roh.mp4"
+    existing.write_bytes(b"existing")
+    _inputs(monkeypatch, ["nein"])
+
+    assert _archive_raw_recording(raw, target, RAW_ARCHIVE_COPY) is None
+    assert existing.read_bytes() == b"existing"
 
 
 def test_print_missing_ffmpeg_message_explains_manual_next_steps(tmp_path, capsys):

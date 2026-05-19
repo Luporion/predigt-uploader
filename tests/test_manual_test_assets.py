@@ -42,6 +42,9 @@ def test_local_setup_script_prepares_venv_and_installs_package() -> None:
     assert "-m pip install -e" in content
     assert "Einrichtung abgeschlossen." in content
     assert "Abhaengigkeiten" in content
+    assert "FFmpeg wurde nicht gefunden." in content
+    assert "winget install --id Gyan.FFmpeg -e" in content
+    assert "neues PowerShell-Fenster" in content
     assert "[Console]::OutputEncoding" in content
 
 

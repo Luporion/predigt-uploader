@@ -15,3 +15,4 @@ folder_suffix_separator = " - "
 
 [workflow]
 copy_instead_of_move = true
+open_target_folder = true

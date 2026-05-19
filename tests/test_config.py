@@ -17,6 +17,7 @@ ffmpeg_path = "C:\\\\tools\\\\ffmpeg.exe"
 
 [workflow]
 copy_instead_of_move = false
+open_target_folder = false
 ''',
         encoding="utf-8",
     )
@@ -25,6 +26,7 @@ copy_instead_of_move = false
     assert str(config.recordings_base) == "D:\\Aufnahmen"
     assert config.ffmpeg_path == "C:\\tools\\ffmpeg.exe"
     assert config.copy_instead_of_move is False
+    assert config.open_target_folder is False
 
 
 def test_default_recordings_base_uses_current_user_desktop(monkeypatch, tmp_path: Path):

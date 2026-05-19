@@ -17,6 +17,7 @@ Für die Vorbereitung eines Zielrechners gibt es jetzt `scripts/setup-local.ps1`
 Für Gemeindemitarbeiter gibt es zusätzlich anklickbare `.cmd`-Startdateien im Projektstamm für Einrichtung, Systemcheck und Wizard-Start.
 Die Windows-Starter und PowerShell-Skripte initialisieren UTF-8 und verwenden bei kritischen Konsolentexten ASCII-sichere deutsche Schreibweisen wie `verfuegbar`.
 Für die Weitergabe an den Gemeinderechner gibt es eine einfache Release-ZIP-Anleitung und `scripts/make-release-zip.ps1`.
+Nach dem Gemeinderechner-Praxistest wurde der lokale Zielrechner-Workflow verbessert: `setup-local.ps1` prüft FFmpeg und bietet bei verfügbarem `winget` eine bestätigte Installation an, große vMixStorage-Ordner werden nicht mehr ungefiltert angezeigt, Rohaufnahmen können gesucht oder aus einer begrenzten neuesten Liste gewählt werden, exportierte Dateien mit `_geschnitten` werden bevorzugt angezeigt, der Zielordner kann nach Erfolg automatisch geöffnet werden und die bekannte Rohaufnahme kann optional kopiert oder nach Warnung verschoben werden.
 
 ## Was Version 1 bereits kann
 
@@ -49,6 +50,10 @@ Für die Weitergabe an den Gemeinderechner gibt es eine einfache Release-ZIP-Anl
 - Über anklickbare `.cmd`-Dateien im Projektstamm ohne direkte PowerShell-Eingabe eingerichtet, geprüft und gestartet werden.
 - Als einfache lokale ZIP-Auslieferung unter `dist/` vorbereitet werden.
 - Optional eine Rohaufnahme aus `vmix_storage` vorschlagen, in LosslessCut öffnen und nach dem manuellen Export die neue Predigt-MP4 übernehmen.
+- Große Rohaufnahme-Ordner über neueste Aufnahme, begrenzte neueste Liste, Suche/Filter oder manuelle Eingabe bedienen.
+- Bei manueller Exportauswahl neue Dateien seit Assistentenstart und geschnittene Dateien bevorzugen, ohne automatisch eine falsche Datei zu wählen.
+- Nach erfolgreichem Lauf den Zielordner im Explorer öffnen, falls `open_target_folder = true` gesetzt ist.
+- Eine bekannte Rohaufnahme nach erfolgreichem Lauf optional liegen lassen, kopieren oder nach Warnung verschieben.
 - Bei fehlendem LosslessCut-Start einen manuellen Pfad zur `LosslessCut.exe` abfragen und erneut versuchen.
 - Ja/Nein- und Mehrfachauswahlen im Terminal über `questionary` nutzerfreundlicher anzeigen, mit Texteingabe-Fallback.
 - Bei Datei-Abfragen passende Dateien aus einem eingegebenen Ordner anzeigen und auswählen lassen.
@@ -66,7 +71,7 @@ Für die Weitergabe an den Gemeinderechner gibt es eine einfache Release-ZIP-Anl
 
 ## Nächster geplanter Schritt
 
-Release-ZIP nach `docs/release-v1-5.md` erstellen, auf einem Zielrechner entpacken und dort nach `docs/install-v1-5.md` mit einer kleinen Rohaufnahme testen. Danach den Übergang zu Phase 2 planen.
+Release-ZIP nach `docs/release-v1-5.md` neu erstellen, auf dem Gemeinderechner entpacken und den verbesserten Zielrechner-Workflow mit FFmpeg-Check, Rohaufnahme-Suche, Exportauswahl, Zielordner-Öffnen und optionaler Rohaufnahme-Archivierung testen.
 
 ## Sicherheits-Hinweis
 

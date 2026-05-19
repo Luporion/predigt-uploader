@@ -108,7 +108,7 @@ if (Test-Path -LiteralPath $VenvPython -PathType Leaf) {
             Write-CheckOk "FFmpeg ist fuer den Wizard verfuegbar."
         }
         else {
-            Write-CheckWarn "FFmpeg wurde nicht gefunden. Bitte FFmpeg installieren oder ffmpeg_path in config.toml setzen."
+            Write-CheckWarn "FFmpeg wurde nicht gefunden. Ohne FFmpeg kann keine MP3 erstellt werden. Bitte FFmpeg installieren oder ffmpeg_path in config.toml setzen. Falls FFmpeg gerade installiert wurde, ein neues PowerShell-Fenster oeffnen und diese Pruefung erneut starten."
         }
     }
     catch {

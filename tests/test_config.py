@@ -24,6 +24,9 @@ raw_archive_mode = "copy"
 
 [naming]
 year_folder_template = "{year} Video+Audio"
+
+[service_types]
+additional = ["Andacht|true|true|false"]
 ''',
         encoding="utf-8",
     )
@@ -36,6 +39,10 @@ year_folder_template = "{year} Video+Audio"
     assert config.open_target_folder is False
     assert config.raw_archive_mode == "copy"
     assert config.year_folder_template == "{year} Video+Audio"
+    assert config.custom_service_types[0].name == "Andacht"
+    assert config.custom_service_types[0].requires_title is True
+    assert config.custom_service_types[0].requires_bible_reference is True
+    assert config.custom_service_types[0].requires_speaker is False
 
 
 def test_default_recordings_base_uses_current_user_desktop(monkeypatch, tmp_path: Path):
@@ -124,6 +131,17 @@ def test_save_user_config_values_writes_naming_and_workflow(monkeypatch, tmp_pat
     text = saved_path.read_text(encoding="utf-8")
     assert 'year_folder_template = "{year} Video+Audio"' in text
     assert 'raw_archive_mode = "move"' in text
+
+
+def test_save_user_config_values_writes_custom_service_types(monkeypatch, tmp_path: Path):
+    appdata = tmp_path / "AppData"
+    monkeypatch.setenv("APPDATA", str(appdata))
+
+    saved_path = save_user_config_values(service_types=["Andacht|true|true|false"])
+
+    text = saved_path.read_text(encoding="utf-8")
+    assert "[service_types]" in text
+    assert 'additional = ["Andacht|true|true|false"]' in text
 
 
 def test_describe_config_source_mentions_appdata(monkeypatch, tmp_path: Path):

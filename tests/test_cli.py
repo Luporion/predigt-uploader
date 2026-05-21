@@ -13,7 +13,10 @@ from predigt_uploader.cli import (
     Mp4TransferError,
     SummaryWriteError,
     UserAbortError,
+    METADATA_HELP_TEXT,
     _ask_sermon_date,
+    _ask_sermon_metadata,
+    _ask_service_type,
     _choose_exported_mp4,
     _archive_raw_recording,
     _cut_mp4_candidates_sorted,
@@ -62,7 +65,7 @@ from predigt_uploader.cli import (
     run_wizard,
 )
 from predigt_uploader.mp3 import Mp3ConversionError
-from predigt_uploader.models import AppConfig, ProcessingPlan, SermonInfo
+from predigt_uploader.models import AppConfig, ProcessingPlan, SermonInfo, ServiceTypeConfig
 from predigt_uploader.report import build_summary_text
 from predigt_uploader.run_log import WorkflowLog
 
@@ -892,6 +895,44 @@ def test_ask_sermon_date_can_use_today(monkeypatch):
     assert selected == datetime.now().date()
 
 
+def test_service_type_default_is_bibelstunde_on_wednesday(monkeypatch, tmp_path):
+    captured = {}
+
+    def fake_choose(_prompt, options, default_index=0):
+        captured["default"] = default_index
+        return options[default_index].value
+
+    monkeypatch.setattr("predigt_uploader.cli.choose_from_options", fake_choose)
+
+    selected = _ask_service_type(_config(tmp_path), date(2026, 5, 20))
+
+    assert selected.name == "Bibelstunde"
+    assert captured["default"] == 1
+
+
+def test_ask_sermon_metadata_prints_help_and_keeps_required_fields(monkeypatch, tmp_path, capsys):
+    _inputs(monkeypatch, ["", "Heiligkeit", "Jesaja 6,1-3", "Eduard Wiebe", "n"])
+
+    info = _ask_sermon_metadata(_config(tmp_path), date(2026, 5, 24))
+
+    assert info.sermon_type == "Predigt"
+    assert info.title == "Heiligkeit"
+    assert info.bible_reference == "Jesaja 6,1-3"
+    assert info.speaker == "Eduard Wiebe"
+    assert METADATA_HELP_TEXT in capsys.readouterr().out
+
+
+def test_ask_sermon_metadata_bibelstunde_does_not_require_title(monkeypatch, tmp_path):
+    _inputs(monkeypatch, ["", "Johannes 3,16", "Max Muster", "n"])
+
+    info = _ask_sermon_metadata(_config(tmp_path), date(2026, 5, 20))
+
+    assert info.sermon_type == "Bibelstunde"
+    assert info.title == ""
+    assert info.bible_reference == "Johannes 3,16"
+    assert info.speaker == "Max Muster"
+
+
 def test_ask_sermon_date_can_use_manual_date(monkeypatch):
     monkeypatch.setattr("predigt_uploader.cli.choose_from_options", lambda _prompt, _options: "manual")
     _inputs(monkeypatch, ["2026-05-24"])
@@ -1189,7 +1230,7 @@ def test_start_menu_starts_wizard(monkeypatch, tmp_path):
 def test_settings_menu_saves_year_folder_template(monkeypatch, tmp_path):
     appdata = tmp_path / "AppData"
     monkeypatch.setenv("APPDATA", str(appdata))
-    _inputs(monkeypatch, ["2", "4", "2", "6", "5"])
+    _inputs(monkeypatch, ["2", "4", "2", "7", "5"])
 
     assert run_start_menu(type("Args", (), {"config": None})()) == 0
 
@@ -1200,12 +1241,24 @@ def test_settings_menu_saves_year_folder_template(monkeypatch, tmp_path):
 def test_settings_menu_saves_raw_archive_mode(monkeypatch, tmp_path):
     appdata = tmp_path / "AppData"
     monkeypatch.setenv("APPDATA", str(appdata))
-    _inputs(monkeypatch, ["2", "5", "3", "6", "5"])
+    _inputs(monkeypatch, ["2", "5", "3", "7", "5"])
 
     assert run_start_menu(type("Args", (), {"config": None})()) == 0
 
     config_text = (appdata / "PredigtUploader" / "config.toml").read_text(encoding="utf-8")
     assert 'raw_archive_mode = "copy"' in config_text
+
+
+def test_settings_menu_saves_custom_service_type(monkeypatch, tmp_path):
+    appdata = tmp_path / "AppData"
+    monkeypatch.setenv("APPDATA", str(appdata))
+    _inputs(monkeypatch, ["2", "6", "", "Andacht", "ja", "ja", "nein", "2", "7", "5"])
+
+    assert run_start_menu(type("Args", (), {"config": None})()) == 0
+
+    config_text = (appdata / "PredigtUploader" / "config.toml").read_text(encoding="utf-8")
+    assert "[service_types]" in config_text
+    assert '"Andacht|true|true|false"' in config_text
 
 
 def test_print_missing_ffmpeg_message_explains_manual_next_steps(tmp_path, capsys):
@@ -1256,6 +1309,7 @@ def test_run_wizard_stops_before_mp3_conversion_when_ffmpeg_is_missing(monkeypat
             str(source),
             "3",
             "2026-05-24",
+            "",
             "Heiligkeit",
             "Jesaja 6,1-3",
             "Eduard Wiebe",
@@ -1346,6 +1400,7 @@ def test_run_wizard_reports_conversion_failure_without_traceback(monkeypatch, tm
             str(source),
             "3",
             "2026-05-24",
+            "",
             "Heiligkeit",
             "Jesaja 6,1-3",
             "Eduard Wiebe",
@@ -1410,6 +1465,7 @@ def test_run_wizard_reports_empty_mp3_after_conversion(monkeypatch, tmp_path, ca
             str(source),
             "3",
             "2026-05-24",
+            "",
             "Heiligkeit",
             "Jesaja 6,1-3",
             "Eduard Wiebe",
@@ -1439,10 +1495,10 @@ def test_build_summary_text_contains_required_fields_and_filenames(tmp_path):
     text = build_summary_text(plan)
 
     assert "Datum: 24.05.2026" in text
-    assert "Typ: Predigt" in text
-    assert "Titel: Heiligkeit" in text
-    assert "Hauptbibelstelle: Jesaja 6,1-3" in text
-    assert "Redner: Eduard Wiebe" in text
+    assert "Dienstart: Predigt" in text
+    assert "Titel/Bezeichnung: Heiligkeit" in text
+    assert "Bibelstelle: Jesaja 6,1-3" in text
+    assert "Redner/Leitung/Name: Eduard Wiebe" in text
     assert "Besonderheit Ordner: -" in text
     assert f"MP4-Dateiname: {plan.target_mp4.name}" in text
     assert f"MP3-Dateiname: {plan.target_mp3.name}" in text
@@ -1516,6 +1572,7 @@ def test_run_wizard_success_writes_summary_and_prints_final_state(monkeypatch, t
             str(source),
             "3",
             "2026-05-24",
+            "",
             "Heiligkeit",
             "Jesaja 6,1-3",
             "Eduard Wiebe",
@@ -1594,6 +1651,7 @@ def test_run_wizard_reports_summary_write_error(monkeypatch, tmp_path, capsys):
             str(source),
             "3",
             "2026-05-24",
+            "",
             "Heiligkeit",
             "Jesaja 6,1-3",
             "Eduard Wiebe",

@@ -22,11 +22,19 @@ losslesscut_path = ""
 
 [naming]
 year_folder_template = "{year}"
+predigt_template = "Predigt ({title}_{bible_reference})_{speaker}{extension}"
+bibelstunde_template = "Bibelstunde ({bible_reference})_{speaker}{extension}"
+vortrag_template = "Vortrag ({title})_{speaker}{extension}"
+lobpreis_template = "Lobpreis ({title}){speaker_suffix}{extension}"
+sonstiges_template = "{service_type} ({title}){speaker_suffix}{extension}"
 
 [workflow]
 copy_instead_of_move = true
 open_target_folder = true
 raw_archive_mode = "move"
+
+[service_types]
+additional = []
 ```
 
 `ffmpeg_path = "ffmpeg"` bedeutet: FFmpeg wird über PATH gefunden.
@@ -121,6 +129,83 @@ Beim Start zeigt der Wizard diesen Ziel-Basisordner an. Enter verwendet den Vors
 
 Die Zusammenfassung `predigt-zusammenfassung.txt` wird in Version 1 immer geschrieben. Es gibt dafür keine Config-Option.
 
+## Dienstarten und Dateinamen
+
+Der Wizard fragt nach dem Datum:
+
+```text
+Welche Art von Aufnahme ist das?
+```
+
+Eingebaute Dienstarten sind:
+
+- Predigt
+- Bibelstunde
+- Vortrag
+- Lobpreis
+- Gebetsstunde
+- Zeugnis
+- Seminar
+- Sonstiges
+
+Am Sonntag ist „Predigt“ vorausgewaehlt. Am Mittwoch ist „Bibelstunde“ vorausgewaehlt. Die Auswahl kann bewusst geaendert werden.
+
+Die Dateinamen werden je nach Dienstart gebildet:
+
+```text
+Predigt (Titel_Hauptbibelstelle)_Redner.mp4
+Bibelstunde (Hauptbibelstelle)_Redner.mp4
+Vortrag (Titel)_Redner.mp4
+Lobpreis (Titel).mp4
+Lobpreis (Titel)_Leitung.mp4
+Sonstiges (Titel).mp4
+Sonstiges (Titel)_Name.mp4
+```
+
+Die MP3 erhaelt immer denselben Namen wie die MP4, nur mit `.mp3`.
+
+Die bestehenden Templates fuer Predigt und Bibelstunde bleiben gueltig:
+
+```toml
+[naming]
+predigt_template = "Predigt ({title}_{bible_reference})_{speaker}{extension}"
+bibelstunde_template = "Bibelstunde ({bible_reference})_{speaker}{extension}"
+vortrag_template = "Vortrag ({title})_{speaker}{extension}"
+lobpreis_template = "Lobpreis ({title}){speaker_suffix}{extension}"
+sonstiges_template = "{service_type} ({title}){speaker_suffix}{extension}"
+```
+
+Verfuegbare Platzhalter:
+
+- `{service_type}` fuer die Dienstart
+- `{title}` fuer Titel, Thema oder Bezeichnung
+- `{bible_reference}` fuer die Bibelstelle
+- `{speaker}` fuer Redner, Leitung oder Name
+- `{speaker_suffix}` fuer einen optionalen Zusatz wie `_Max Muster`
+- `{extension}` fuer `.mp4` oder `.mp3`
+
+Im Startmenue gibt es unter „Einstellungen ändern“ den Punkt „Dienstarten verwalten“. Dort koennen zusaetzliche Dienstarten hinzugefuegt werden. Der Wizard fragt:
+
+- Name der Dienstart
+- ob ein Titel/Thema noetig ist
+- ob eine Bibelstelle noetig ist
+- ob ein Redner, Leiter oder Name noetig ist
+
+Daraus wird automatisch eine einfache Dateinamen-Vorlage gebaut. Gespeichert wird in der Benutzer-Config:
+
+```toml
+[service_types]
+additional = ["Andacht|true|true|false"]
+```
+
+Das Format ist:
+
+```text
+Name|Titel nötig|Bibelstelle nötig|Redner/Name nötig
+```
+
+Standard-Dienstarten koennen in Version 1 nicht geloescht werden.
+
 `open_target_folder = true` bedeutet: Nach erfolgreicher Verarbeitung oeffnet der Wizard den Zielordner im Explorer. Wenn das auf einem Rechner stoert, kann der Wert auf `false` gesetzt werden.
 
 `raw_archive_mode` steuert die Vorauswahl beim Aufraeumen der Rohaufnahme nach erfolgreichem Lauf:
@@ -160,6 +245,16 @@ $env:PREDIGT_UPLOADER_TEXT_UI = "1"
 ```
 
 Bei Dateipfad-Abfragen darf statt einer Datei auch ein Ordner eingegeben werden. Der Wizard zeigt dann passende Dateien direkt aus diesem Ordner an, zum Beispiel `.mp4` bei Video-Abfragen oder `.exe` bei `LosslessCut.exe`. Es wird bewusst nicht rekursiv in Unterordnern gesucht.
+
+In Suchfeldern steht der Hinweis:
+
+```text
+Tippe zum Suchen. Wähle 'Zurück', wenn du zum vorherigen Menü möchtest.
+```
+
+Im Textmodus kann mit `zurück`, `z` oder `back` zum vorherigen Auswahlmenue zurueckgegangen werden. Das bricht nicht den ganzen Wizard ab.
+
+`Strg+C` ist kein Zurueck-Schritt, sondern bricht den laufenden Vorgang ab. Beim Start ueber `.cmd` kann Windows danach zusaetzlich „Batchvorgang abbrechen (J/N)?“ anzeigen. Zum Zurueckgehen im Wizard bitte immer die Option „Zurück“ verwenden.
 
 ## Sicherheit
 

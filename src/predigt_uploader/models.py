@@ -6,6 +6,20 @@ from pathlib import Path
 
 
 @dataclass(frozen=True)
+class ServiceTypeConfig:
+    name: str
+    requires_title: bool
+    requires_bible_reference: bool
+    requires_speaker: bool
+    template: str
+    title_label: str = "Titel"
+    bible_reference_label: str = "Hauptbibelstelle"
+    speaker_label: str = "Redner"
+    optional_bible_reference: bool = False
+    optional_speaker: bool = False
+
+
+@dataclass(frozen=True)
 class SermonInfo:
     sermon_date: date
     title: str
@@ -25,6 +39,10 @@ class AppConfig:
     losslesscut_path: str = ""
     predigt_template: str = "Predigt ({title}_{bible_reference})_{speaker}{extension}"
     bibelstunde_template: str = "Bibelstunde ({bible_reference})_{speaker}{extension}"
+    vortrag_template: str = "Vortrag ({title})_{speaker}{extension}"
+    lobpreis_template: str = "Lobpreis ({title}){speaker_suffix}{extension}"
+    sonstiges_template: str = "{service_type} ({title}){speaker_suffix}{extension}"
+    custom_service_types: tuple[ServiceTypeConfig, ...] = ()
     folder_suffix_separator: str = " - "
     year_folder_template: str = "{year}"
     copy_instead_of_move: bool = True

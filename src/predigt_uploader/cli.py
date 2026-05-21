@@ -12,10 +12,10 @@ from datetime import date, datetime
 from pathlib import Path
 from uuid import uuid4
 
-from .config import ConfigLoadError, describe_config_source, load_config, save_user_config_values, user_config_path
-from .filename import build_media_filename, sanitize_filename_part
+from .config import ConfigLoadError, default_service_types, describe_config_source, load_config, save_user_config_values, user_config_path
+from .filename import build_media_filename, sanitize_filename_part, service_type_config_for
 from .folders import ensure_folder, resolve_folder
-from .models import AppConfig, ProcessingPlan, SermonInfo
+from .models import AppConfig, ProcessingPlan, SermonInfo, ServiceTypeConfig
 from .mp3 import Mp3ConversionError, convert_mp4_to_mp3, ffmpeg_available
 from .report import build_summary_text, write_summary_file
 from .run_log import WorkflowLog
@@ -1093,6 +1093,74 @@ def _ask_optional_folder_note() -> str:
     return _ask_required("Besonderheit für den Ordnernamen")
 
 
+METADATA_HELP_TEXT = (
+    "Diese Informationen findest du z. B. im Broadcast/Ablaufplan, bei der Beamertechnik bzw. "
+    "in der Präsentation, in ChurchTools oder beim Prediger. Wenn etwas fehlt, bitte kurz Kontakt aufnehmen."
+)
+
+
+def _print_metadata_help() -> None:
+    print()
+    print("Hinweis zu den Angaben")
+    print(METADATA_HELP_TEXT)
+
+
+def _ask_optional_text(prompt: str) -> str:
+    return _ask(prompt).strip()
+
+
+def _service_types_for(config: AppConfig) -> tuple[ServiceTypeConfig, ...]:
+    return default_service_types(config) + config.custom_service_types
+
+
+def _service_type_default_index(service_types: tuple[ServiceTypeConfig, ...], sermon_date: date) -> int:
+    preferred = "Bibelstunde" if sermon_date.weekday() == 2 else "Predigt"
+    for index, service_type in enumerate(service_types):
+        if service_type.name.casefold() == preferred.casefold():
+            return index
+    return 0
+
+
+def _ask_service_type(config: AppConfig, sermon_date: date) -> ServiceTypeConfig:
+    service_types = _service_types_for(config)
+    options = [MenuOption(service_type.name, service_type) for service_type in service_types]
+    return choose_from_options(
+        "Welche Art von Aufnahme ist das?",
+        options,
+        default_index=_service_type_default_index(service_types, sermon_date),
+    )
+
+
+def _ask_sermon_metadata(config: AppConfig, sermon_date: date) -> SermonInfo:
+    service_type = _ask_service_type(config, sermon_date)
+    _print_metadata_help()
+
+    title = ""
+    bible_reference = ""
+    speaker = ""
+
+    if service_type.requires_title:
+        title = _ask_required(service_type.title_label)
+    if service_type.requires_bible_reference:
+        bible_reference = _ask_required(service_type.bible_reference_label)
+    elif service_type.optional_bible_reference and _ask_yes_no("Gibt es eine Bibelstelle, die in die Zusammenfassung soll?", False):
+        bible_reference = _ask_optional_text(service_type.bible_reference_label)
+    if service_type.requires_speaker:
+        speaker = _ask_required(service_type.speaker_label)
+    elif service_type.optional_speaker and _ask_yes_no(f"{service_type.speaker_label} angeben?", False):
+        speaker = _ask_optional_text(service_type.speaker_label)
+
+    folder_note = _ask_optional_folder_note()
+    return SermonInfo(
+        sermon_date=sermon_date,
+        title=title,
+        bible_reference=bible_reference,
+        speaker=speaker,
+        sermon_type=service_type.name,
+        folder_note=folder_note,
+    )
+
+
 def _choose_from_existing_folders(candidates: tuple[Path, ...]) -> Path:
     while True:
         raw_choice = _ask_required("Nummer des Zielordners")
@@ -1613,9 +1681,10 @@ def _save_user_settings(
     paths: dict[str, str] | None = None,
     naming: dict[str, str] | None = None,
     workflow: dict[str, str | bool] | None = None,
+    service_types: list[str] | None = None,
 ) -> Path | None:
     try:
-        saved_path = save_user_config_values(paths=paths, naming=naming, workflow=workflow)
+        saved_path = save_user_config_values(paths=paths, naming=naming, workflow=workflow, service_types=service_types)
     except ConfigLoadError as exc:
         print("Die Einstellung konnte nicht gespeichert werden.")
         print(f"Admin-Hinweis: {exc.admin_hint}")
@@ -1671,6 +1740,75 @@ def _ask_raw_archive_setting(current_mode: str) -> RawArchiveMode:
     )
 
 
+def _encode_custom_service_type(service_type: ServiceTypeConfig) -> str:
+    return "|".join(
+        [
+            service_type.name,
+            "true" if service_type.requires_title else "false",
+            "true" if service_type.requires_bible_reference else "false",
+            "true" if service_type.requires_speaker else "false",
+        ]
+    )
+
+
+def _ask_custom_service_type() -> ServiceTypeConfig:
+    print()
+    print("Neue Dienstart hinzufügen")
+    print("Standard-Dienstarten bleiben immer erhalten.")
+    name = _ask_required("Name der Dienstart")
+    requires_title = _ask_yes_no("Braucht diese Dienstart einen Titel oder ein Thema?", True)
+    requires_bible = _ask_yes_no("Braucht diese Dienstart eine Bibelstelle?", False)
+    requires_speaker = _ask_yes_no("Braucht diese Dienstart einen Redner, Leiter oder Namen?", True)
+    template = _automatic_custom_service_template(name, requires_title, requires_bible, requires_speaker)
+    print(f"Dateinamen-Vorlage wird automatisch verwendet: {template}")
+    return ServiceTypeConfig(name, requires_title, requires_bible, requires_speaker, template)
+
+
+def _automatic_custom_service_template(name: str, requires_title: bool, requires_bible: bool, requires_speaker: bool) -> str:
+    safe_name = sanitize_filename_part(name) or "Sonstiges"
+    if requires_title and requires_bible:
+        base = f"{safe_name} " + "({title}_{bible_reference})"
+    elif requires_title:
+        base = f"{safe_name} " + "({title})"
+    elif requires_bible:
+        base = f"{safe_name} " + "({bible_reference})"
+    else:
+        base = safe_name
+    if requires_speaker:
+        return base + "_{speaker}{extension}"
+    return base + "{extension}"
+
+
+def _run_service_types_settings(config: AppConfig) -> AppConfig:
+    while True:
+        print()
+        print("Dienstarten verwalten")
+        print("---------------------")
+        print("Standard-Dienstarten:")
+        for service_type in default_service_types(config):
+            print(f"- {service_type.name}")
+        if config.custom_service_types:
+            print("Zusätzliche Dienstarten:")
+            for service_type in config.custom_service_types:
+                print(f"- {service_type.name}")
+        else:
+            print("Zusätzliche Dienstarten: keine")
+
+        choice = choose_from_options(
+            "Was möchtest du tun?",
+            [
+                MenuOption("Dienstart hinzufügen", "add", ("h", "hinzufuegen", "hinzufügen")),
+                MenuOption("Zurück zu den Einstellungen", "back", ("z", "zurueck", "zurück")),
+            ],
+        )
+        if choice == "back":
+            return config
+        new_service_type = _ask_custom_service_type()
+        custom = config.custom_service_types + (new_service_type,)
+        _save_user_settings(service_types=[_encode_custom_service_type(service_type) for service_type in custom])
+        config = replace(config, custom_service_types=custom)
+
+
 def _run_settings_menu(args: argparse.Namespace) -> int:
     explicit_config = Path(args.config) if args.config else None
     try:
@@ -1691,6 +1829,7 @@ def _run_settings_menu(args: argparse.Namespace) -> int:
     print(f"Aktuell: LosslessCut-Pfad: {config.losslesscut_path or 'PATH/App-Alias'}")
     print(f"Aktuell: Jahresordner: {_year_folder_template_label(config.year_folder_template)}")
     print(f"Aktuell: Rohaufnahme nach Erfolg: {_raw_archive_mode_label(config.raw_archive_mode)}")
+    print(f"Aktuell: zusätzliche Dienstarten: {len(config.custom_service_types)}")
 
     while True:
         choice = choose_from_options(
@@ -1701,6 +1840,7 @@ def _run_settings_menu(args: argparse.Namespace) -> int:
                 MenuOption("LosslessCut-Pfad", "losslesscut_path", ("losslesscut", "l")),
                 MenuOption("Jahresordner-Format", "year_folder_template", ("jahr", "j")),
                 MenuOption("Rohaufnahme nach Erfolg", "raw_archive_mode", ("aufraeumen", "a")),
+                MenuOption("Dienstarten verwalten", "service_types", ("dienstart", "d")),
                 MenuOption("Zurück zum Hauptmenü", "back", ("zurueck", "zurück", "b")),
             ],
         )
@@ -1726,6 +1866,8 @@ def _run_settings_menu(args: argparse.Namespace) -> int:
             mode = _ask_raw_archive_setting(config.raw_archive_mode)
             _save_user_settings(workflow={"raw_archive_mode": mode})
             config = replace(config, raw_archive_mode=mode)
+        elif choice == "service_types":
+            config = _run_service_types_settings(config)
 
 
 def _latest_log_file(log_dir: Path) -> Path | None:
@@ -1785,6 +1927,7 @@ def _print_app_header() -> None:
     print("================")
     print("Bereitet Predigtvideo, MP3 und Website-Dateien vor.")
     print("Es wird nichts zu Vimeo oder WordPress hochgeladen.")
+    print("Strg+C bricht den Vorgang ab. Zum Zurückgehen bitte die Option 'Zurück' verwenden.")
     print()
 
 
@@ -1810,18 +1953,8 @@ def run_wizard(args: argparse.Namespace) -> int:
     log.event(f"Quell-MP4 ausgewaehlt: {source}")
 
     sermon_date = _ask_sermon_date(source)
-    title = _ask_required("Predigttitel")
-    bible_reference = _ask_required("Hauptbibelstelle")
-    speaker = _ask_required("Redner Vorname Nachname")
-    folder_note = _ask_optional_folder_note()
-
-    info = SermonInfo(
-        sermon_date=sermon_date,
-        title=title,
-        bible_reference=bible_reference,
-        speaker=speaker,
-        folder_note=folder_note,
-    )
+    info = _ask_sermon_metadata(config, sermon_date)
+    log.event(f"Dienstart ausgewaehlt: {info.sermon_type}")
 
     selected = _select_target_folder(config, info)
     if selected is None:

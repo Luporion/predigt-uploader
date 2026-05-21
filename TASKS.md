@@ -69,6 +69,9 @@
 - [x] Jahresordner-Format im Menue zwischen Jahr und Jahr Video+Audio waehlen
 - [x] nutzerfreundlichere Startueberschrift anzeigen
 - [x] Auswahl bereits geschnittener MP4-Dateien mit vorgeschlagenem Ordner, Suche und AppData-Merker verbessern
+- [x] Metadaten-Hilfetexte, Suchfeld-Zurueck und Strg+C-Abbruchhinweis ergaenzen
+- [x] Dienstarten mit passenden Pflichtfeldern und Dateinamen einfuehren
+- [x] zusaetzliche Dienstarten im Einstellungsmenue in APPDATA-config.toml speichern
 - [x] danach bestehenden lokalen Workflow weiterverwenden
 
 ## Phase 2: Windows-Nutzerfreundlichkeit

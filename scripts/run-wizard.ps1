@@ -53,6 +53,8 @@ try {
         $env:PYTHONPATH = $SrcDir
     }
 
+    Write-Host "Hinweis: Strg+C bricht den Vorgang ab. Zum Zurueckgehen bitte im Menue 'Zurueck' verwenden."
+    Write-Host ""
     & $PythonExe -m predigt_uploader @args
     exit $LASTEXITCODE
 }

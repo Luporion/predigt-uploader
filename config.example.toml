@@ -14,6 +14,9 @@ losslesscut_path = ""
 [naming]
 predigt_template = "Predigt ({title}_{bible_reference})_{speaker}{extension}"
 bibelstunde_template = "Bibelstunde ({bible_reference})_{speaker}{extension}"
+vortrag_template = "Vortrag ({title})_{speaker}{extension}"
+lobpreis_template = "Lobpreis ({title}){speaker_suffix}{extension}"
+sonstiges_template = "{service_type} ({title}){speaker_suffix}{extension}"
 folder_suffix_separator = " - "
 year_folder_template = "{year}"
 
@@ -21,3 +24,8 @@ year_folder_template = "{year}"
 copy_instead_of_move = true
 open_target_folder = true
 raw_archive_mode = "move"
+
+[service_types]
+# Zusätzliche Dienstarten für die lokale Benutzer-Config.
+# Format je Eintrag: "Name|Titel nötig|Bibelstelle nötig|Redner/Name nötig"
+additional = []

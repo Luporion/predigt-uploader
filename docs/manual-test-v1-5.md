@@ -22,9 +22,17 @@ losslesscut_path = ""
 
 [naming]
 year_folder_template = "{year}"
+predigt_template = "Predigt ({title}_{bible_reference})_{speaker}{extension}"
+bibelstunde_template = "Bibelstunde ({bible_reference})_{speaker}{extension}"
+vortrag_template = "Vortrag ({title})_{speaker}{extension}"
+lobpreis_template = "Lobpreis ({title}){speaker_suffix}{extension}"
+sonstiges_template = "{service_type} ({title}){speaker_suffix}{extension}"
 
 [workflow]
 raw_archive_mode = "move"
+
+[service_types]
+additional = []
 ```
 
 `vmix_storage` ist der Ordner mit Rohaufnahmen. Der Wizard schlägt daraus die neueste MP4 vor.
@@ -40,6 +48,14 @@ Bei der Liste der neuesten Aufnahmen werden nur die neuesten Dateien angezeigt. 
 
 Bei der Suche nutzt der Wizard nach Möglichkeit eine Live-Suche: Suchtext tippen, Treffer werden enger, Auswahl per Pfeiltasten. Ein leeres Suchfeld zeigt die begrenzte vollständige Liste. Wenn das Terminal diese Suche nicht unterstützt oder der Textmodus aktiv ist, bleibt der robuste Fallback erhalten: Suchtext eingeben, Ergebnisliste anzeigen, Nummer auswählen. Bei sehr vielen Treffern erscheint ein Hinweis.
 
+In Suchfeldern muss sichtbar sein:
+
+```text
+Tippe zum Suchen. Wähle 'Zurück', wenn du zum vorherigen Menü möchtest.
+```
+
+Im Textmodus muessen `zurück`, `z` und `back` ins vorherige Menue zurueckfuehren, nicht den ganzen Wizard abbrechen.
+
 `recordings_base` ist der Ziel-Basisordner. Der Wizard fragt beim Start, ob ein abweichender Ziel-Basisordner künftig gemerkt werden soll. Gespeichert wird dann unter `%APPDATA%\PredigtUploader\config.toml`, nicht im Repository. Mit `year_folder_template = "{year} Video+Audio"` kann der Jahresordner zum Beispiel `2026 Video+Audio` heißen.
 
 `cut_mp4_folder` ist optional und kann leer bleiben. Wenn bereits eine fertig geschnittene MP4-Datei vorhanden ist, zeigt der Wizard einen vorgeschlagenen Ordner an. Vorrang hat der zuletzt gemerkte Schnitt-/Exportordner, danach `vmix_storage`, danach `recordings_base`. Dateien mit `_geschnitten`, `geschnitten` oder fertigem Predigt-Dateinamen werden bevorzugt. Wenn keine eindeutig geschnittene Datei gefunden wird, muss bewusst die richtige Predigtdatei ausgewählt werden.
@@ -51,6 +67,9 @@ Im Startmenü können normale Nutzer Einstellungen ändern, ohne `config.toml` v
 - LosslessCut-Pfad
 - Jahresordner-Format
 - Rohaufnahme nach Erfolg: verschieben, liegen lassen oder kopieren
+- Dienstarten verwalten
+
+Unter „Dienstarten verwalten“ koennen zusaetzliche Dienstarten hinzugefuegt werden. Standard-Dienstarten duerfen dabei nicht verschwinden oder kaputt geaendert werden. Gespeichert wird unter `%APPDATA%\PredigtUploader\config.toml`.
 
 `losslesscut_path = ""` bedeutet: LosslessCut wird über PATH oder Windows-App-Alias gestartet. Wenn das nicht klappt, kann ein vollständiger Pfad eingetragen werden.
 
@@ -104,6 +123,81 @@ Keine Zugangsdaten, Tokens oder privaten Passwörter in die Config schreiben.
 17. Am Ende soll sich der Zielordner im Explorer öffnen. Wenn das nicht klappt, bleibt der Workflow trotzdem erfolgreich und es erscheint nur ein verständlicher Hinweis.
 
 Bei der Datumsauswahl bietet der Wizard nach Möglichkeit das Aufnahmedatum aus typischen vMix-Dateinamen an, zum Beispiel aus `Gottesdienst - 10 Mai 2026 - 09-55-08.mp4`. Falls kein Datum im Dateinamen erkannt wird, kann das Dateidatum der MP4 angeboten werden. Alternativ können immer das heutige Datum oder ein anderes Datum per Hand gewählt werden.
+
+Direkt nach der Datumsauswahl fragt der Wizard:
+
+```text
+Welche Art von Aufnahme ist das?
+```
+
+Erwartete Standardauswahl:
+
+- Sonntag: Predigt
+- Mittwoch: Bibelstunde
+- sonst: Predigt
+
+Vor den Eingaben zu Titel, Bibelstelle und Redner muss ein Hinweis erscheinen, wo diese Angaben zu finden sind: Broadcast/Ablaufplan, Beamertechnik bzw. Präsentation, ChurchTools oder Prediger.
+
+### Predigt-Test
+
+Auswahl „Predigt“:
+
+- Titel eingeben
+- Hauptbibelstelle eingeben
+- Redner eingeben
+
+Erwarteter Dateiname:
+
+```text
+Predigt (Titel_Hauptbibelstelle)_Redner.mp4
+```
+
+### Bibelstunde-Test
+
+Auswahl „Bibelstunde“:
+
+- kein Predigttitel als Pflichtfeld
+- Hauptbibelstelle eingeben
+- Redner eingeben
+
+Erwarteter Dateiname:
+
+```text
+Bibelstunde (Hauptbibelstelle)_Redner.mp4
+```
+
+### Vortrag/Lobpreis/Sonstiges-Test
+
+Vortrag:
+
+```text
+Vortrag (Titel)_Redner.mp4
+```
+
+Lobpreis ohne Leitung:
+
+```text
+Lobpreis (Titel).mp4
+```
+
+Lobpreis mit Leitung:
+
+```text
+Lobpreis (Titel)_Leitung.mp4
+```
+
+Sonstiges:
+
+```text
+Sonstiges (Titel).mp4
+Sonstiges (Titel)_Name.mp4
+```
+
+Die MP3-Datei muss jeweils denselben Namen wie die MP4 bekommen, nur mit `.mp3`.
+
+### Strg+C-Test
+
+`Strg+C` bricht den Vorgang ab und ist nicht die Zurueck-Funktion. Beim Doppelklick-Start ueber `.cmd` kann Windows danach „Batchvorgang abbrechen (J/N)?“ anzeigen. Zum Zurueckgehen im Wizard immer „Zurück“ verwenden.
 
 Wenn die finale MP4-Datei im Zielordner bereits existiert, überschreibt der Wizard sie nicht automatisch. Es gibt eine bewusste Auswahl:
 

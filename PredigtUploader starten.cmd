@@ -6,6 +6,7 @@ title PredigtUploader starten
 cd /d "%~dp0"
 
 echo PredigtUploader wird gestartet.
+echo Strg+C bricht den Vorgang ab. Zum Zurueckgehen bitte im Menue "Zurueck" verwenden.
 echo.
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\run-wizard.ps1"

@@ -24,6 +24,8 @@ NO_VALUES = {"n", "nein", "no"}
 TEXT_UI_ENV = "PREDIGT_UPLOADER_TEXT_UI"
 BACK = object()
 SEARCH_FALLBACK_LIMIT = 15
+SEARCH_BACK_VALUES = {"z", "zurück", "zurueck", "back"}
+SEARCH_HELP = "Tippe zum Suchen. Wähle 'Zurück', wenn du zum vorherigen Menü möchtest."
 
 
 class UserAbortError(RuntimeError):
@@ -203,21 +205,29 @@ def search_from_options(
     if not options:
         raise ValueError("options darf nicht leer sein")
 
-    selected = _questionary_autocomplete(prompt, options)
+    search_options = list(options)
+    if not any(option.value is BACK for option in search_options):
+        search_options.append(MenuOption("Zurück", BACK, ("z", "zurueck", "zurück", "back")))
+
+    search_prompt = f"{prompt}\n{SEARCH_HELP}"
+    selected = _questionary_autocomplete(search_prompt, search_options)
     if selected is not None:
         return selected
 
+    print(SEARCH_HELP)
     while True:
         try:
-            search_text = input_func("Suchtext im Dateinamen: ").strip().casefold()
+            search_text = input_func("Suchtext im Dateinamen (oder z für Zurück): ").strip().casefold()
         except (KeyboardInterrupt, EOFError) as exc:
             raise UserAbortError("Abbruch durch Nutzer.") from exc
+        if search_text in SEARCH_BACK_VALUES:
+            return BACK
         if not search_text:
-            matches = list(options[:SEARCH_FALLBACK_LIMIT])
+            matches = list(search_options[:SEARCH_FALLBACK_LIMIT])
         else:
             matches = [
                 option
-                for option in options
+                for option in search_options
                 if search_text in option.label.casefold()
                 or any(search_text in alias.casefold() for alias in option.aliases)
             ][:SEARCH_FALLBACK_LIMIT]

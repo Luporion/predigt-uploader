@@ -1,6 +1,6 @@
 import pytest
 
-from predigt_uploader.ui import MenuOption, UserAbortError, ask_file_path, ask_yes_no, choose_from_options, search_from_options
+from predigt_uploader.ui import BACK, MenuOption, UserAbortError, ask_file_path, ask_yes_no, choose_from_options, search_from_options
 
 
 def test_ask_yes_no_fallback_accepts_words(monkeypatch):
@@ -72,9 +72,32 @@ def test_search_from_options_fallback_empty_search_shows_full_limited_list(monke
     assert search_from_options("Suchen", options, input_func=lambda _prompt: next(inputs)) == 14
 
 
-def test_choose_from_options_questionary_can_return_back_without_text_fallback(monkeypatch):
-    from predigt_uploader.ui import BACK
+def test_search_from_options_fallback_accepts_back_alias(monkeypatch, capsys):
+    monkeypatch.setenv("PREDIGT_UPLOADER_TEXT_UI", "1")
+    options = [MenuOption("Predigt.mp4", "predigt")]
 
+    assert search_from_options("Suchen", options, input_func=lambda _prompt: "zurück") is BACK
+    output = capsys.readouterr().out
+    assert "Wähle 'Zurück'" in output
+
+
+def test_search_from_options_adds_visible_back_option_for_questionary(monkeypatch):
+    monkeypatch.delenv("PREDIGT_UPLOADER_TEXT_UI", raising=False)
+    captured = {}
+
+    def fake_autocomplete(prompt, options):
+        captured["prompt"] = prompt
+        captured["options"] = options
+        return BACK
+
+    monkeypatch.setattr("predigt_uploader.ui._questionary_autocomplete", fake_autocomplete)
+
+    assert search_from_options("Suchen", [MenuOption("Predigt.mp4", "predigt")]) is BACK
+    assert "Tippe zum Suchen" in captured["prompt"]
+    assert any(option.value is BACK for option in captured["options"])
+
+
+def test_choose_from_options_questionary_can_return_back_without_text_fallback(monkeypatch):
     monkeypatch.delenv("PREDIGT_UPLOADER_TEXT_UI", raising=False)
     monkeypatch.setattr("predigt_uploader.ui._questionary_select", lambda _prompt, _options, _default: BACK)
 

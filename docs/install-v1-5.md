@@ -143,10 +143,18 @@ losslesscut_path = ""
 
 [naming]
 year_folder_template = "{year}"
+predigt_template = "Predigt ({title}_{bible_reference})_{speaker}{extension}"
+bibelstunde_template = "Bibelstunde ({bible_reference})_{speaker}{extension}"
+vortrag_template = "Vortrag ({title})_{speaker}{extension}"
+lobpreis_template = "Lobpreis ({title}){speaker_suffix}{extension}"
+sonstiges_template = "{service_type} ({title}){speaker_suffix}{extension}"
 
 [workflow]
 open_target_folder = true
 raw_archive_mode = "move"
+
+[service_types]
+additional = []
 ```
 
 `vmix_storage` ist der Standardordner für Rohaufnahmen. Der Wizard nutzt diesen Ordner, damit Nutzer nicht selbst durch alte Aufnahmen suchen müssen. Bereits geschnitten wirkende Dateien werden nicht als beste Rohaufnahme bevorzugt und müssen bei Auswahl extra bestätigt werden. Wenn der Ordner fehlt, erklärt der Wizard das und erlaubt eine manuelle Datei- oder Ordnerauswahl.
@@ -175,6 +183,8 @@ Keine Zugangsdaten, Tokens, Passwörter oder privaten Schlüssel in `config.toml
 
 Normale Nutzer können diese Werte später auch im Startmenü unter „Einstellungen ändern“ setzen. Der Wizard speichert sie dann in `%APPDATA%\PredigtUploader\config.toml`.
 
+Im Einstellungsmenü können zusätzlich Dienstarten verwaltet werden. Standardmäßig gibt es Predigt, Bibelstunde, Vortrag, Lobpreis, Gebetsstunde, Zeugnis, Seminar und Sonstiges. Zusätzliche Dienstarten werden nur in der Benutzer-Config unter `%APPDATA%\PredigtUploader\config.toml` gespeichert.
+
 ## 7. Wizard starten
 
 Für normale Nutzer:
@@ -184,6 +194,8 @@ PredigtUploader starten.cmd
 ```
 
 Diese Datei startet per Doppelklick ein einfaches Hauptmenü. Dort kann man eine neue Predigt vorbereiten, Einstellungen ändern, den Systemcheck-Hinweis anzeigen oder Logs öffnen. Sie setzt automatisch den Projektordner als Arbeitsverzeichnis und lässt das Fenster nach Ende oder Fehler offen.
+
+Wichtig: `Strg+C` bricht den laufenden Vorgang ab. Zum Zurückgehen im Wizard bitte die Option „Zurück“ verwenden. Beim Start per `.cmd` kann Windows nach `Strg+C` zusätzlich „Batchvorgang abbrechen (J/N)?“ anzeigen.
 
 Alternativ in PowerShell:
 
@@ -195,7 +207,7 @@ Der Wizard führt durch den lokalen Ablauf:
 
 1. Ziel-Basisordner prüfen
 2. fertige MP4 über den vorgeschlagenen Schnitt-/Exportordner wählen oder LosslessCut-Schnitt-Assistent starten
-3. Predigtdaten abfragen
+3. Datum, Dienstart und passende Metadaten abfragen
 4. MP4 in den Zielordner übernehmen
 5. MP3 per FFmpeg erzeugen
 6. Zusammenfassung und Logdatei schreiben

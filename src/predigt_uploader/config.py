@@ -97,6 +97,7 @@ def load_config(explicit_path: Path | None = None) -> AppConfig:
         vmix_storage=Path(_get_nested(loaded, "paths", "vmix_storage", str(base.vmix_storage))),
         recordings_base=Path(_get_nested(loaded, "paths", "recordings_base", str(base.recordings_base))),
         mp3_base=Path(_get_nested(loaded, "paths", "mp3_base", str(base.mp3_base))),
+        cut_mp4_folder=_optional_path(_get_nested(loaded, "paths", "cut_mp4_folder", "")),
         ffmpeg_path=str(_get_nested(loaded, "paths", "ffmpeg_path", base.ffmpeg_path)),
         losslesscut_path=str(_get_nested(loaded, "paths", "losslesscut_path", base.losslesscut_path)),
         predigt_template=str(_get_nested(loaded, "naming", "predigt_template", base.predigt_template)),
@@ -107,6 +108,13 @@ def load_config(explicit_path: Path | None = None) -> AppConfig:
         open_target_folder=bool(_get_nested(loaded, "workflow", "open_target_folder", base.open_target_folder)),
         raw_archive_mode=str(_get_nested(loaded, "workflow", "raw_archive_mode", base.raw_archive_mode)),
     )
+
+
+def _optional_path(value: Any) -> Path | None:
+    text = str(value).strip()
+    if not text:
+        return None
+    return Path(text)
 
 
 def _toml_string(value: str) -> str:

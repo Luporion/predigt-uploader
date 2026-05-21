@@ -137,6 +137,7 @@ Danach `config.toml` prüfen und bei Bedarf anpassen:
 [paths]
 vmix_storage = "V:\\vMixStorage"
 recordings_base = "C:\\Users\\DEIN-NAME\\Desktop\\Aufnahmen"
+cut_mp4_folder = ""
 ffmpeg_path = "ffmpeg"
 losslesscut_path = ""
 
@@ -150,7 +151,9 @@ raw_archive_mode = "move"
 
 `vmix_storage` ist der Standardordner für Rohaufnahmen. Der Wizard nutzt diesen Ordner, damit Nutzer nicht selbst durch alte Aufnahmen suchen müssen. Bereits geschnitten wirkende Dateien werden nicht als beste Rohaufnahme bevorzugt und müssen bei Auswahl extra bestätigt werden. Wenn der Ordner fehlt, erklärt der Wizard das und erlaubt eine manuelle Datei- oder Ordnerauswahl.
 
-Wenn Nutzer im Wizard einen anderen Ziel-Basisordner, Rohaufnahme-Ordner oder einen funktionierenden LosslessCut-Pfad angeben, kann der Wizard diese Werte künftig unter `%APPDATA%\PredigtUploader\config.toml` merken. Diese Benutzer-Config liegt außerhalb des Projektordners und gehört nicht in die Release-ZIP.
+`cut_mp4_folder` kann leer bleiben. Wenn Nutzer bereits eine fertig geschnittene MP4-Datei haben, schlägt der Wizard zuerst den zuletzt gemerkten Schnitt-/Exportordner vor, sonst `vmix_storage`, sonst `recordings_base`. In diesem Ordner können sie suchen, die neueste geschnittene MP4 verwenden, aus den neuesten MP4-Dateien wählen oder einen anderen Ordner beziehungsweise eine Datei eingeben.
+
+Wenn Nutzer im Wizard einen anderen Ziel-Basisordner, Rohaufnahme-Ordner, Schnitt-/Exportordner oder einen funktionierenden LosslessCut-Pfad angeben, kann der Wizard diese Werte künftig unter `%APPDATA%\PredigtUploader\config.toml` merken. Diese Benutzer-Config liegt außerhalb des Projektordners und gehört nicht in die Release-ZIP.
 
 Für Netzwerkordner ist ein UNC-Pfad meist robuster als ein gemapptes Laufwerk wie `V:`, weil gemappte Laufwerke je nach Windows-Benutzer fehlen können. Beispiel:
 
@@ -191,7 +194,7 @@ Alternativ in PowerShell:
 Der Wizard führt durch den lokalen Ablauf:
 
 1. Ziel-Basisordner prüfen
-2. fertige MP4 wählen oder LosslessCut-Schnitt-Assistent starten
+2. fertige MP4 über den vorgeschlagenen Schnitt-/Exportordner wählen oder LosslessCut-Schnitt-Assistent starten
 3. Predigtdaten abfragen
 4. MP4 in den Zielordner übernehmen
 5. MP3 per FFmpeg erzeugen

@@ -383,6 +383,36 @@ def _looks_like_cut_or_final_mp4(path: Path) -> bool:
     )
 
 
+def _looks_like_final_sermon_mp4(path: Path) -> bool:
+    name = path.name.casefold()
+    compact = name.replace(" ", "")
+    return (
+        path.suffix.casefold() == ".mp4"
+        and (
+            re.match(r"^predigt\s*\(.+\)_.+\.mp4$", name) is not None
+            or re.match(r"^bibelstunde\s*\(.+\)_.+\.mp4$", name) is not None
+            or compact.startswith("predigt(")
+        )
+    )
+
+
+def _cut_mp4_sort_key(path: Path) -> tuple[int, float]:
+    stem = path.stem.casefold()
+    if "_geschnitten" in stem:
+        priority = 0
+    elif "geschnitten" in stem:
+        priority = 1
+    elif _looks_like_final_sermon_mp4(path):
+        priority = 2
+    else:
+        priority = 3
+    return priority, -path.stat().st_mtime
+
+
+def _cut_mp4_candidates_sorted(folder: Path) -> tuple[Path, ...]:
+    return tuple(sorted(_mp4_files_sorted(folder), key=_cut_mp4_sort_key))
+
+
 def _looks_like_vmix_raw_recording(path: Path) -> bool:
     stem = path.stem.casefold()
     return bool(re.search(r"\b\d{1,2}\s+[a-zäöüß]+\s+\d{4}\b", stem)) and "gottesdienst" in stem
@@ -589,6 +619,119 @@ def _ask_raw_recording(config: AppConfig, log: WorkflowLog | None = None) -> Pat
         return _ask_manual_raw_recording_path(config, log)
 
     return _ask_raw_recording_from_folder(config.vmix_storage, config=config, log=log)
+
+
+def _default_cut_mp4_folder(config: AppConfig) -> Path:
+    if config.cut_mp4_folder is not None:
+        return config.cut_mp4_folder
+    for folder in (config.vmix_storage, config.recordings_base):
+        if folder.exists() and folder.is_dir():
+            return folder
+    return config.vmix_storage
+
+
+def _newest_cut_mp4_candidate(folder: Path) -> Path | None:
+    candidates = _cut_mp4_candidates_sorted(folder)
+    if not candidates:
+        return None
+    return candidates[0]
+
+
+def _warn_if_no_clear_cut_mp4(candidates: tuple[Path, ...]) -> None:
+    if any(_cut_mp4_sort_key(path)[0] < 3 for path in candidates):
+        return
+    print("Ich habe keine eindeutig geschnittene Datei gefunden. Bitte bewusst die richtige Predigtdatei auswählen.")
+
+
+def _choose_cut_mp4_from_folder(prompt: str, folder: Path, *, live_search: bool = False) -> Path | None:
+    candidates = _cut_mp4_candidates_sorted(folder)
+    if not candidates:
+        print("In diesem Ordner wurden keine MP4-Dateien gefunden.")
+        return None
+    _warn_if_no_clear_cut_mp4(candidates)
+    return _choose_mp4_from_list(prompt, candidates, live_search=live_search)
+
+
+def _ask_manual_cut_mp4_path(config: AppConfig, log: WorkflowLog | None = None) -> Path:
+    while True:
+        raw = _ask_required("Anderen Ordner oder vollständigen MP4-Dateipfad eingeben")
+        path = _normalize_user_path(raw)
+        if not path.exists():
+            print("Dieser Pfad wurde nicht gefunden. Bitte den vollständigen Pfad eingeben.")
+            continue
+        if path.is_file():
+            if _is_valid_mp4_file(path):
+                return path
+            continue
+        if not path.is_dir():
+            print("Dieser Pfad ist keine Datei und kein Ordner. Bitte erneut eingeben.")
+            continue
+
+        print("Dieser Ordner wird für die Auswahl der geschnittenen MP4-Datei verwendet.")
+        print(f"Ordner: {path}")
+        if path != config.cut_mp4_folder:
+            _remember_path_setting("cut_mp4_folder", path, "Diesen Ordner künftig für geschnittene MP4-Dateien merken?", log)
+        selected = _choose_cut_mp4_from_folder("Geschnittene MP4-Datei auswählen", path)
+        if selected is not None:
+            return selected
+
+
+def _select_existing_cut_mp4(config: AppConfig, log: WorkflowLog | None = None) -> Path | None:
+    print()
+    print("Fertig geschnittene MP4 auswählen")
+    folder = _default_cut_mp4_folder(config)
+    print(f"Vorgeschlagener Ordner: {folder}")
+    if not folder.exists() or not folder.is_dir():
+        print("Dieser vorgeschlagene Ordner wurde nicht gefunden.")
+        print("Bitte gib jetzt einen anderen Ordner oder direkt die fertige MP4-Datei ein.")
+        print(f"Admin-Hinweis: vorgeschlagener Ordner existiert nicht oder ist kein Ordner: {folder}")
+        return _ask_manual_cut_mp4_path(config, log)
+
+    newest = _newest_cut_mp4_candidate(folder)
+    if newest is not None:
+        print(f"Vorschlag: {_format_file_choice(newest)}")
+    else:
+        print("In diesem Ordner wurden keine MP4-Dateien gefunden.")
+
+    while True:
+        choice = choose_from_options(
+            "Was möchtest du tun?",
+            [
+                MenuOption("In diesem Ordner suchen/auswählen", "search", ("1", "suchen", "auswaehlen", "auswählen")),
+                MenuOption("Neueste geschnittene MP4 verwenden", "newest", ("2", "neueste")),
+                MenuOption(f"In den neuesten {RECENT_MP4_LIMIT} MP4-Dateien auswählen", "recent", ("3", "liste")),
+                MenuOption("Anderen Ordner oder Datei eingeben", "manual", ("4", "manuell")),
+                MenuOption("Zurück", "back", ("5", "zurueck", "zurück", "z")),
+            ],
+        )
+        if choice == "back":
+            return None
+        if choice == "search":
+            selected = _choose_cut_mp4_from_folder("MP4-Datei suchen und auswählen", folder, live_search=True)
+            if selected is not None:
+                return selected
+        elif choice == "newest":
+            if newest is None:
+                print("In diesem Ordner wurde keine MP4-Datei gefunden. Bitte einen anderen Ordner oder eine Datei eingeben.")
+                continue
+            if _cut_mp4_sort_key(newest)[0] >= 3:
+                print("Ich habe keine eindeutig geschnittene Datei gefunden. Bitte bewusst die richtige Predigtdatei auswählen.")
+                if not _ask_yes_no("Diese MP4 trotzdem als fertige Predigtdatei verwenden?", False):
+                    continue
+            return newest
+        elif choice == "recent":
+            candidates = _cut_mp4_candidates_sorted(folder)
+            shown = _limit_file_list(candidates, RECENT_MP4_LIMIT)
+            _warn_if_no_clear_cut_mp4(shown)
+            selected = _choose_mp4_from_list(
+                "MP4-Datei auswählen",
+                shown,
+                overflow_count=max(0, len(candidates) - len(shown)),
+            )
+            if selected is not None:
+                return selected
+        else:
+            return _ask_manual_cut_mp4_path(config, log)
 
 
 def _losslesscut_command(config: AppConfig) -> str:
@@ -914,8 +1057,13 @@ def _select_exported_mp4(
 
 
 def _select_source_mp4_for_workflow(config: AppConfig, log: WorkflowLog) -> tuple[Path, Path | None]:
-    if _ask_yes_no("Hast du bereits eine fertig geschnittene MP4-Datei?", True):
-        return _ask_mp4_path(), None
+    while True:
+        if _ask_yes_no("Hast du bereits eine fertig geschnittene MP4-Datei?", True):
+            selected = _select_existing_cut_mp4(config, log)
+            if selected is not None:
+                return selected, None
+            continue
+        break
 
     assistant_start = datetime.now()
     raw_recording = _ask_raw_recording(config, log)

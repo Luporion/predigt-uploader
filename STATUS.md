@@ -23,6 +23,7 @@ Eine weitere Zielrechner-Korrektur behandelt fehlende `vmix_storage`-Ordner bess
 Die aktuelle Stabilisierung ergänzt eine eindeutigere Zurück-Logik ohne doppelte Fallback-Listen, besser lesbare `questionary`-Auswahlen, AppData-Benutzer-Config für gemerkte Ordner und LosslessCut-Pfad, ein konfigurierbares Jahresordner-Template sowie kurze Bitte-warten-Hinweise bei längeren Dateiaktionen. LosslessCut-Exporte werden zusätzlich anhand plausibler Dateinamen mit Bezug zur Rohaufnahme bevorzugt vorgeschlagen, aber weiterhin nicht blind übernommen.
 Die LosslessCut-Bedienung wurde weiter beruhigt: Ein manuell gewählter LosslessCut-Pfad wird vor dem Programmstart optional gemerkt, LosslessCut-Ausgaben werden vom Wizard-Terminal getrennt und der Wizard kann nach dem Export entweder durch Enter oder durch Schließen des gestarteten LosslessCut-Prozesses weiterlaufen. Bei der Rohaufnahme-Archivierung ist Verschieben für normale Rohaufnahmen die Vorauswahl; bei geschnitten wirkenden Dateien bleibt Liegenlassen die sichere Vorauswahl.
 Für normale Gemeindemitarbeiter gibt es jetzt ein einfaches Terminal-Hauptmenü. Darüber kann eine neue Predigt vorbereitet, Einstellungen geändert, ein Systemcheck-Hinweis angezeigt oder die letzte Logdatei geöffnet werden. Die Überschrift wurde auf „PredigtUploader“ mit kurzer Nutzerbeschreibung vereinfacht.
+Der Workflow fuer bereits fertig geschnittene MP4-Dateien wurde komfortabler: Statt eines leeren Pfadprompts zeigt der Wizard nun einen vorgeschlagenen Schnitt-/Exportordner an. Vorrang haben ein gemerkter `cut_mp4_folder`, danach `vmix_storage` und danach `recordings_base`. In vorhandenen Ordnern koennen Nutzer suchen, die neueste geschnittene MP4 verwenden, aus den neuesten MP4-Dateien auswaehlen, einen anderen Ordner oder eine Datei eingeben oder zur vorherigen Frage zurueckgehen. Geschnitten wirkende Dateien werden bevorzugt, und ein abweichender Schnittordner kann unter `%APPDATA%\PredigtUploader\config.toml` gemerkt werden.
 
 ## Was Version 1 bereits kann
 
@@ -75,6 +76,7 @@ Für normale Gemeindemitarbeiter gibt es jetzt ein einfaches Terminal-Hauptmenü
 - Beim Doppelklick-Start ein einfaches Hauptmenü anzeigen.
 - Einstellungen ohne manuelles Bearbeiten von `config.toml` in der Benutzer-Config speichern.
 - Jahresordner-Format im Menü zwischen `2026` und `2026 Video+Audio` umstellen.
+- Bei bereits fertig geschnittener MP4 einen vorgeschlagenen Schnitt-/Exportordner anzeigen, geschnitten wirkende Dateien bevorzugen und abweichende Ordner als `cut_mp4_folder` in der Benutzer-Config merken.
 
 ## Bewusst noch nicht enthalten
 
@@ -87,7 +89,7 @@ Für normale Gemeindemitarbeiter gibt es jetzt ein einfaches Terminal-Hauptmenü
 
 ## Nächster geplanter Schritt
 
-Release-ZIP `predigt-uploader-v0.1.6-local.zip` nach `docs/release-v1-5.md` neu erstellen, auf dem Gemeinderechner entpacken und den verbesserten Zielrechner-Workflow mit Rohaufnahme-Auswahl, Live-Suche, Export-Snapshot-Erkennung und optionaler Rohaufnahme-Archivierung testen.
+Release-ZIP `predigt-uploader-v0.1.6-local.zip` nach `docs/release-v1-5.md` neu erstellen, auf dem Gemeinderechner entpacken und den verbesserten Zielrechner-Workflow mit Auswahl einer bereits geschnittenen MP4, Rohaufnahme-Auswahl, Live-Suche, Export-Snapshot-Erkennung und optionaler Rohaufnahme-Archivierung testen.
 
 ## Sicherheits-Hinweis
 

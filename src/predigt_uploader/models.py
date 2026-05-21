@@ -20,6 +20,7 @@ class AppConfig:
     vmix_storage: Path
     recordings_base: Path
     mp3_base: Path
+    cut_mp4_folder: Path | None = None
     ffmpeg_path: str = "ffmpeg"
     losslesscut_path: str = ""
     predigt_template: str = "Predigt ({title}_{bible_reference})_{speaker}{extension}"

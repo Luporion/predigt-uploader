@@ -15,6 +15,7 @@ Suchreihenfolge:
 [paths]
 vmix_storage = "V:\\vMixStorage"
 recordings_base = "C:\\Users\\DEIN-NAME\\Desktop\\Aufnahmen"
+cut_mp4_folder = ""
 mp3_base = "V:\\Predigten\\Predigten"
 ffmpeg_path = "ffmpeg"
 losslesscut_path = ""
@@ -79,6 +80,19 @@ Alternativ koennen die neuesten Aufnahmen angezeigt, Dateinamen gesucht/gefilter
 Wenn `vmix_storage` fehlt oder nicht erreichbar ist, meldet der Wizard das verstaendlich und erlaubt eine manuelle Auswahl. Wird dabei ein Ordner eingegeben, verwendet der Wizard diesen Ordner nur fuer den aktuellen Lauf als temporaeren Rohaufnahme-Quellordner und zeigt danach wieder das normale Rohaufnahme-Menue mit neuester Aufnahme, neuesten Aufnahmen, Suche/Filter, manueller Eingabe und Abbruch.
 
 Wenn der Rohaufnahme-Ordner im Wizard geaendert wird, kann der Wizard ihn unter `%APPDATA%\PredigtUploader\config.toml` merken. Diese Benutzer-Config liegt nicht im Repository und nicht zwingend in der Release-ZIP.
+
+`cut_mp4_folder` ist der zuletzt gemerkte Ordner fuer bereits fertig geschnittene oder exportierte MP4-Dateien. Standard ist leer:
+
+```toml
+[paths]
+cut_mp4_folder = ""
+```
+
+Wenn Nutzer im Wizard bei „Hast du bereits eine fertig geschnittene MP4-Datei?“ mit Ja antworten, nutzt der Wizard als vorgeschlagenen Ordner zuerst `cut_mp4_folder`, danach `vmix_storage`, danach `recordings_base`. Im vorgeschlagenen Ordner gibt es ein Menue zum Suchen/Auswaehlen, zum Verwenden der neuesten geschnittenen MP4, zur Auswahl aus den neuesten MP4-Dateien, zur manuellen Eingabe und fuer „Zurueck“.
+
+Dateien mit `_geschnitten`, `geschnitten` oder einem fertigen Predigt-Dateinamen wie `Predigt (Titel_Bibelstelle)_Redner.mp4` werden bevorzugt angezeigt. Wenn keine eindeutig geschnittene Datei gefunden wird, zeigt der Wizard trotzdem MP4-Dateien an und weist darauf hin, dass bewusst die richtige Predigtdatei gewaehlt werden muss.
+
+Wenn im Wizard ein anderer Ordner fuer geschnittene MP4-Dateien eingegeben wird, kann dieser Ordner unter `%APPDATA%\PredigtUploader\config.toml` gemerkt werden. Eine direkt eingegebene Datei wird weiterhin darauf geprueft, ob sie existiert, eine Datei ist und die Endung `.mp4` hat.
 
 `recordings_base` ist der Ziel-Basisordner. Darunter legt der Wizard die Jahres- und Datumsordner an, zum Beispiel `2026\2026-05-24`.
 

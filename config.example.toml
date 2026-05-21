@@ -6,6 +6,7 @@
 # vmix_storage = "\\\\SERVER\\Freigabe\\vMixStorage"
 vmix_storage = "V:\\vMixStorage"
 recordings_base = "C:\\Users\\DEIN-NAME\\Desktop\\Aufnahmen"
+cut_mp4_folder = ""
 mp3_base = "V:\\Predigten\\Predigten"
 ffmpeg_path = "ffmpeg"
 losslesscut_path = ""

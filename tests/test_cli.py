@@ -16,6 +16,8 @@ from predigt_uploader.cli import (
     _ask_sermon_date,
     _choose_exported_mp4,
     _archive_raw_recording,
+    _cut_mp4_candidates_sorted,
+    _default_cut_mp4_folder,
     _ask_raw_recording,
     _ask_raw_archive_mode,
     _choose_mp4_from_list,
@@ -44,6 +46,7 @@ from predigt_uploader.cli import (
     _print_local_workflow_success,
     _print_missing_ffmpeg_message,
     _print_mp4_action_preview,
+    _select_existing_cut_mp4,
     _select_source_mp4,
     _select_recordings_base,
     _select_target_folder,
@@ -477,10 +480,91 @@ def test_select_exported_mp4_starts_detection_after_losslesscut_process_ends(mon
 def test_select_source_mp4_can_keep_existing_cut_file(monkeypatch, tmp_path):
     source = tmp_path / "schnitt.mp4"
     source.write_bytes(b"video")
-    _inputs(monkeypatch, ["", str(source)])
+    _inputs(monkeypatch, ["", "4", str(source)])
     log = WorkflowLog.start(config_path=None, base_dir=tmp_path)
 
     assert _select_source_mp4(_config(tmp_path), log) == source
+
+
+def test_existing_cut_mp4_default_folder_uses_vmix_storage(tmp_path):
+    config = _config(tmp_path)
+    config.vmix_storage.mkdir()
+
+    assert _default_cut_mp4_folder(config) == config.vmix_storage
+
+
+def test_existing_cut_mp4_default_folder_prefers_remembered_cut_folder(tmp_path):
+    cut_folder = tmp_path / "Schnitt"
+    cut_folder.mkdir()
+    config = AppConfig(
+        vmix_storage=tmp_path / "vmix",
+        recordings_base=tmp_path / "Aufnahmen",
+        mp3_base=tmp_path / "Predigten",
+        cut_mp4_folder=cut_folder,
+    )
+
+    assert _default_cut_mp4_folder(config) == cut_folder
+
+
+def test_existing_cut_mp4_prefers_cut_files(tmp_path):
+    folder = tmp_path / "vmix"
+    folder.mkdir()
+    plain = folder / "aufnahme.mp4"
+    final = folder / "Predigt (Titel_Johannes 3,16)_Max Muster.mp4"
+    cut = folder / "aufnahme_geschnitten.mp4"
+    for path in (plain, final, cut):
+        path.write_bytes(b"video")
+
+    assert _cut_mp4_candidates_sorted(folder)[:3] == (cut, final, plain)
+
+
+def test_existing_cut_mp4_manual_folder_can_be_remembered(monkeypatch, tmp_path):
+    appdata = tmp_path / "AppData"
+    (tmp_path / "vmix").mkdir()
+    manual_folder = tmp_path / "Schnitt"
+    manual_folder.mkdir()
+    selected = manual_folder / "predigt_geschnitten.mp4"
+    selected.write_bytes(b"video")
+    monkeypatch.setenv("APPDATA", str(appdata))
+    monkeypatch.setenv("PREDIGT_UPLOADER_TEXT_UI", "1")
+    _inputs(monkeypatch, ["4", str(manual_folder), "ja", ""])
+    log = WorkflowLog.start(config_path=None, base_dir=tmp_path)
+
+    assert _select_existing_cut_mp4(_config(tmp_path), log) == selected
+    config_text = (appdata / "PredigtUploader" / "config.toml").read_text(encoding="utf-8")
+    assert "cut_mp4_folder" in config_text
+    assert str(manual_folder).replace("\\", "\\\\") in config_text
+
+
+def test_existing_cut_mp4_direct_file_works(monkeypatch, tmp_path):
+    source = tmp_path / "direkt.mp4"
+    source.write_bytes(b"video")
+    (tmp_path / "vmix").mkdir()
+    monkeypatch.setenv("PREDIGT_UPLOADER_TEXT_UI", "1")
+    _inputs(monkeypatch, ["4", str(source)])
+
+    assert _select_existing_cut_mp4(_config(tmp_path)) == source
+
+
+def test_existing_cut_mp4_back_returns_to_previous_question_without_number_fallback(monkeypatch, tmp_path):
+    source = tmp_path / "vmix" / "predigt_geschnitten.mp4"
+    source.parent.mkdir()
+    source.write_bytes(b"video")
+    log = WorkflowLog.start(config_path=None, base_dir=tmp_path)
+    monkeypatch.setenv("PREDIGT_UPLOADER_TEXT_UI", "1")
+    _inputs(monkeypatch, ["", "5", "", "2", ""])
+
+    assert _select_source_mp4(_config(tmp_path), log) == source
+
+
+def test_existing_cut_mp4_text_mode_fallback_selects_from_menu(monkeypatch, tmp_path):
+    source = tmp_path / "vmix" / "Predigt (Titel_Text)_Max Muster.mp4"
+    source.parent.mkdir()
+    source.write_bytes(b"video")
+    monkeypatch.setenv("PREDIGT_UPLOADER_TEXT_UI", "1")
+    _inputs(monkeypatch, ["1", "", ""])
+
+    assert _select_existing_cut_mp4(_config(tmp_path)) == source
 
 
 def test_select_source_mp4_opens_losslesscut_and_uses_export(monkeypatch, tmp_path, capsys):
@@ -1168,6 +1252,7 @@ def test_run_wizard_stops_before_mp3_conversion_when_ffmpeg_is_missing(monkeypat
             "",
             "",
             "",
+            "4",
             str(source),
             "3",
             "2026-05-24",
@@ -1257,6 +1342,7 @@ def test_run_wizard_reports_conversion_failure_without_traceback(monkeypatch, tm
             "",
             "",
             "",
+            "4",
             str(source),
             "3",
             "2026-05-24",
@@ -1320,6 +1406,7 @@ def test_run_wizard_reports_empty_mp3_after_conversion(monkeypatch, tmp_path, ca
             "",
             "",
             "",
+            "4",
             str(source),
             "3",
             "2026-05-24",
@@ -1425,6 +1512,7 @@ def test_run_wizard_success_writes_summary_and_prints_final_state(monkeypatch, t
             "",
             "",
             "",
+            "4",
             str(source),
             "3",
             "2026-05-24",
@@ -1502,6 +1590,7 @@ def test_run_wizard_reports_summary_write_error(monkeypatch, tmp_path, capsys):
             "",
             "",
             "",
+            "4",
             str(source),
             "3",
             "2026-05-24",

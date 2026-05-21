@@ -15,6 +15,7 @@ vmix_storage = "X:\\\\vmix"
 recordings_base = "D:\\\\Aufnahmen"
 mp3_base = "Y:\\\\Predigten"
 ffmpeg_path = "C:\\\\tools\\\\ffmpeg.exe"
+cut_mp4_folder = "D:\\\\Schnitt"
 
 [workflow]
 copy_instead_of_move = false
@@ -29,6 +30,7 @@ year_folder_template = "{year} Video+Audio"
     config = load_config(config_path)
     assert str(config.vmix_storage) == "X:\\vmix"
     assert str(config.recordings_base) == "D:\\Aufnahmen"
+    assert str(config.cut_mp4_folder) == "D:\\Schnitt"
     assert config.ffmpeg_path == "C:\\tools\\ffmpeg.exe"
     assert config.copy_instead_of_move is False
     assert config.open_target_folder is False

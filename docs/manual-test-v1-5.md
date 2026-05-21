@@ -58,7 +58,7 @@ Im Textmodus muessen `zurück`, `z` und `back` ins vorherige Menue zurueckfuehre
 
 `recordings_base` ist der Ziel-Basisordner. Der Wizard fragt beim Start, ob ein abweichender Ziel-Basisordner künftig gemerkt werden soll. Gespeichert wird dann unter `%APPDATA%\PredigtUploader\config.toml`, nicht im Repository. Mit `year_folder_template = "{year} Video+Audio"` kann der Jahresordner zum Beispiel `2026 Video+Audio` heißen.
 
-`cut_mp4_folder` ist optional und kann leer bleiben. Wenn bereits eine fertig geschnittene MP4-Datei vorhanden ist, zeigt der Wizard einen vorgeschlagenen Ordner an. Vorrang hat der zuletzt gemerkte Schnitt-/Exportordner, danach `vmix_storage`, danach `recordings_base`. Dateien mit `_geschnitten`, `geschnitten` oder fertigem Predigt-Dateinamen werden bevorzugt. Wenn keine eindeutig geschnittene Datei gefunden wird, muss bewusst die richtige Predigtdatei ausgewählt werden.
+`cut_mp4_folder` ist optional und kann leer bleiben. Wenn bereits eine fertig geschnittene MP4-Datei vorhanden ist, zeigt der Wizard einen vorgeschlagenen Ordner an. Vorrang hat der zuletzt gemerkte Schnitt-/Exportordner, danach `vmix_storage`, danach `recordings_base`. Dateien mit `_geschnitten`, `geschnitten` oder fertigem Aufnahme-Dateinamen werden bevorzugt. Wenn keine eindeutig geschnittene Datei gefunden wird, muss bewusst die richtige MP4-Datei ausgewählt werden.
 
 Im Startmenü können normale Nutzer Einstellungen ändern, ohne `config.toml` von Hand zu bearbeiten:
 
@@ -104,7 +104,7 @@ Keine Zugangsdaten, Tokens oder privaten Passwörter in die Config schreiben.
 .\scripts\run-wizard.ps1
 ```
 
-2. Im Hauptmenü „Neue Predigt vorbereiten“ wählen. Enter nimmt die erste Option.
+2. Im Hauptmenü „Neue Aufnahme vorbereiten“ wählen. Enter nimmt die erste Option.
 3. Ziel-Basisordner bestätigen oder für den Testlauf ändern.
 4. Variante A: Bei der Frage nach einer fertig geschnittenen MP4 mit `ja` antworten. Erwartet wird kein leerer Pfadprompt, sondern ein sichtbarer vorgeschlagener Ordner. Im Menü müssen verfügbar sein: „In diesem Ordner suchen/auswählen“, „Neueste geschnittene MP4 verwenden“, „In den neuesten MP4-Dateien auswählen“, „Anderen Ordner oder Datei eingeben“ und „Zurück“. „Zurück“ soll wieder zur Ja/Nein-Frage führen.
 5. Für Variante A im vorgeschlagenen Ordner eine Datei mit `_geschnitten` oder `geschnitten` im Namen ablegen und prüfen, dass sie bevorzugt vorgeschlagen wird. Danach einen anderen Ordner eingeben und die Frage „Diesen Ordner künftig für geschnittene MP4-Dateien merken?“ mit Ja beantworten. Die Einstellung muss unter `%APPDATA%\PredigtUploader\config.toml` als `cut_mp4_folder` landen. Danach auch einmal eine direkte MP4-Datei eingeben; sie muss validiert und akzeptiert werden.
@@ -112,11 +112,11 @@ Keine Zugangsdaten, Tokens oder privaten Passwörter in die Config schreiben.
 7. Vorgeschlagene neueste Rohaufnahme aus `vmix_storage` verwenden, aus den neuesten Aufnahmen auswählen, suchen/filtern oder einen MP4-Pfad manuell eingeben. Wenn nur ein Ordner eingegeben wird, zeigt der Wizard dieselbe begrenzte Auswahl- und Suchlogik wie bei konfigurierten Ordnern.
    Wenn `vmix_storage` nicht erreichbar ist und ein Ordner manuell eingegeben wird, soll danach trotzdem das normale Rohaufnahme-Menü erscheinen. Dort müssen „Neueste Aufnahme verwenden“, „In den neuesten Aufnahmen auswählen“, „Suchen/filtern“, „Datei/Ordner manuell eingeben“ und „Abbrechen“ verfügbar sein.
 8. Der Wizard öffnet LosslessCut mit der Rohaufnahme. Ausgaben von LosslessCut sollen nicht in das Wizard-Terminal schreiben.
-9. In LosslessCut nur den Predigtbereich markieren.
-10. Nur die Predigt als MP4 exportieren.
-11. Chorlieder, Beiträge oder Ansagen nicht als Predigtdatei verwenden.
+9. In LosslessCut nur den gewünschten Aufnahmebereich markieren.
+10. Nur diesen Abschnitt als MP4 exportieren.
+11. Chorlieder, Beiträge oder Ansagen nicht versehentlich als Aufnahmedatei verwenden, wenn sie nicht dazugehören.
 12. Nach dem Export LosslessCut schließen oder zum Wizard zurückkehren und Enter drücken. Wenn der Wizard den gestarteten LosslessCut-Prozess beobachten kann, läuft er nach dem Schließen automatisch weiter.
-13. Wenn mehrere neue MP4-Dateien gefunden werden, bewusst die richtige Predigtdatei auswählen. Der Wizard vergleicht dafür einen MP4-Snapshot vor dem Export mit dem Zustand danach und priorisiert zusätzlich plausible LosslessCut-Dateinamen mit Bezug zur Rohaufnahme, zum Beispiel `_geschnitten_<Rohdateiname>...mp4`.
+13. Wenn mehrere neue MP4-Dateien gefunden werden, bewusst die richtige MP4-Datei auswählen. Der Wizard vergleicht dafür einen MP4-Snapshot vor dem Export mit dem Zustand danach und priorisiert zusätzlich plausible LosslessCut-Dateinamen mit Bezug zur Rohaufnahme, zum Beispiel `_geschnitten_<Rohdateiname>...mp4`.
 14. Wenn keine Datei gefunden wird, den exportierten MP4-Pfad manuell eingeben. Wenn ein Ordner wie `V:\vMixStorage` eingegeben wird, soll der Wizard zuerst neue Dateien seit Start des Assistenten zeigen. Sonst werden neueste/geschnittene Dateien bevorzugt angezeigt; Dateien mit `_geschnitten` oder typischem LosslessCut-Zeitbereich im Namen sollen oben stehen.
 15. Danach läuft der bekannte lokale Workflow weiter: Datum, Metadaten, Zielordner, MP4 übernehmen, MP3 erzeugen, Zusammenfassung, Log. Bei längeren Dateiaktionen zeigt der Wizard eine kurze Bitte-warten-Meldung.
 16. Nach erfolgreichem Lauf fragt der Wizard optional, ob die Rohaufnahme im Zielordner archiviert werden soll. Bei normal wirkenden Rohaufnahmen ist „Ja, Rohaufnahme in Zielordner verschieben“ vorausgewählt. Verschieben warnt vorher deutlich und erfordert eine zweite Bestätigung, weil die Datei aus `vmix_storage` entfernt wird. Wenn die bekannte Rohaufnahme bereits geschnitten wirkt, warnt der Wizard zusätzlich; dann bleibt „liegen lassen“ die sichere Vorauswahl.
@@ -163,7 +163,7 @@ Predigt (Titel_Hauptbibelstelle)_Redner.mp4
 
 Auswahl „Bibelstunde“:
 
-- kein Predigttitel als Pflichtfeld
+- kein Titel als Pflichtfeld
 - Hauptbibelstelle eingeben
 - Redner eingeben
 
@@ -215,7 +215,7 @@ pip install -e .[tui]
 python -m predigt_uploader tui
 ```
 
-Erwartet wird ein erster Prototyp mit Startmenü und Metadaten-Vorschau. Er muss den produktiven Wizard nicht vollständig ersetzen.
+Erwartet wird ein erster Prototyp mit Startmenü, Metadaten-Vorschau, MP4-/MP3-Dateiname, Zielordner-Vorschau und einer reinen Einstellungen-Ansicht. Er muss den produktiven Wizard nicht vollständig ersetzen.
 
 Wenn die finale MP4-Datei im Zielordner bereits existiert, überschreibt der Wizard sie nicht automatisch. Es gibt eine bewusste Auswahl:
 
@@ -252,5 +252,5 @@ Im Projektordner liegt zusätzlich eine Logdatei unter `logs/`.
 - Wenn keine neue MP4 gefunden wird: exportierten Pfad manuell eingeben.
 - Wenn versehentlich ein Ordner statt einer Datei eingegeben wurde: passende Datei aus der angezeigten Liste auswählen oder einen anderen Pfad eingeben.
 - Wenn gespeicherte Ordner falsch sind: `%APPDATA%\PredigtUploader\config.toml` prüfen oder im Wizard einen anderen Ordner wählen und erneut merken lassen.
-- Wenn mehrere MP4-Dateien gefunden werden: nur die Datei auswählen, die wirklich die Predigt enthält.
+- Wenn mehrere MP4-Dateien gefunden werden: nur die Datei auswählen, die wirklich die gewünschte Aufnahme enthält.
 - Bei technischen Details den Admin-Hinweis und die Logdatei prüfen.

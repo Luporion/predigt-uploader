@@ -193,11 +193,11 @@ Für normale Nutzer:
 PredigtUploader starten.cmd
 ```
 
-Diese Datei startet per Doppelklick ein einfaches Hauptmenü. Dort kann man eine neue Predigt vorbereiten, Einstellungen ändern, den Systemcheck-Hinweis anzeigen oder Logs öffnen. Sie setzt automatisch den Projektordner als Arbeitsverzeichnis und lässt das Fenster nach Ende oder Fehler offen.
+Diese Datei startet per Doppelklick ein einfaches Hauptmenü. Dort kann man eine neue Aufnahme vorbereiten, Einstellungen ändern, den Systemcheck-Hinweis anzeigen oder Logs öffnen. Sie setzt automatisch den Projektordner als Arbeitsverzeichnis und lässt das Fenster nach Ende oder Fehler offen.
 
 Wichtig: `Strg+C` bricht den laufenden Vorgang ab. Zum Zurückgehen im Wizard bitte die Option „Zurück“ verwenden. Beim Start per `.cmd` kann Windows nach `Strg+C` zusätzlich „Batchvorgang abbrechen (J/N)?“ anzeigen.
 
-Die normale Gemeinde-Nutzung bleibt über `PredigtUploader starten.cmd`. Eine experimentelle Textual-Oberfläche gibt es nur für Test und Weiterentwicklung. Sie wird nicht automatisch installiert und ersetzt den Wizard nicht. Für Entwickler:
+Die normale Gemeinde-Nutzung bleibt über `PredigtUploader starten.cmd`. Eine experimentelle Textual-Oberfläche gibt es nur für Test und Weiterentwicklung. Sie wird nicht automatisch installiert und ersetzt den Wizard nicht. Sie zeigt aktuell Startmenü, Metadaten-/Dateiname-Vorschau, Zielordner-Vorschau und eine reine Einstellungen-Ansicht. Für Entwickler:
 
 ```powershell
 pip install -e .[tui]

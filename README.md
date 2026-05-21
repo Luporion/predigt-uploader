@@ -9,7 +9,7 @@ Ziel: Der manuelle Ablauf mit vMix-Aufnahme, LosslessCut-Schnitt, MP3-Erzeugung,
 Version 1 automatisiert **noch nicht WordPress** und lädt **noch nicht zu Vimeo** hoch. Sie konzentriert sich auf den lokalen, fehleranfälligen Teil:
 
 1. Aufnahme oder geschnittene MP4 auswählen
-2. Predigtdaten abfragen
+2. Aufnahmedaten und Dienstart abfragen
 3. korrekten Dateinamen erzeugen
 4. Jahres- und Datumsordner prüfen/erstellen
 5. optional Besonderheit im Ordnernamen ergänzen
@@ -23,8 +23,8 @@ Phase 1.5 ergänzt vor dem lokalen Workflow einen einfachen Assistenten für den
 
 1. vMix-Rohaufnahme manuell angeben oder neueste MP4 aus `vmix_storage` vorschlagen lassen
 2. LosslessCut mit dieser Rohaufnahme öffnen
-3. Predigtbereich in LosslessCut manuell markieren und exportieren
-4. exportierte Predigt-MP4 automatisch suchen oder manuell angeben
+3. gewünschten Aufnahmebereich in LosslessCut manuell markieren und exportieren
+4. exportierte MP4 automatisch suchen oder manuell angeben
 5. danach den bestehenden lokalen Workflow aus Version 1 weiterführen
 
 LosslessCut bleibt ein externes Programm. Der PredigtUploader ist kein eigener Video-Editor und steuert den Schnitt nicht automatisch.
@@ -82,7 +82,7 @@ Kurzablauf in PowerShell:
 
 `setup-local.ps1` richtet `.venv` und die Python-Abhängigkeiten ein. `check-system.ps1` prüft Python, Wizard-Start, FFmpeg und optional den konfigurierten LosslessCut-Pfad. Der Doppelklick-Start öffnet zuerst ein einfaches Hauptmenü. Der Wizard arbeitet weiterhin nur lokal und lädt nichts zu Vimeo oder WordPress hoch. Abweichende Ordner und ein funktionierender LosslessCut-Pfad können auf Wunsch unter `%APPDATA%\PredigtUploader\config.toml` gemerkt werden.
 
-Der normale Terminal-Wizard bleibt der Standard für die Gemeinde-Nutzung. Eine experimentelle Textual-Oberfläche kann für Tests und Weiterentwicklung mit `python -m predigt_uploader tui` gestartet werden, wenn das optionale Extra `tui` installiert ist. Sie zeigt bisher nur Startmenü und Metadaten-Vorschau und ersetzt den produktiven Workflow nicht.
+Der normale Terminal-Wizard bleibt der Standard für die Gemeinde-Nutzung. Eine experimentelle Textual-Oberfläche kann für Tests und Weiterentwicklung mit `python -m predigt_uploader tui` gestartet werden, wenn das optionale Extra `tui` installiert ist. Sie zeigt bisher Startmenü, Metadaten-/Dateiname-Vorschau und eine reine Einstellungen-Ansicht. Sie ersetzt den produktiven Workflow nicht.
 
 Für Gemeindemitarbeiter gibt es im Projektordner zusätzlich anklickbare Windows-Startdateien:
 

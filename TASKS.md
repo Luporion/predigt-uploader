@@ -29,7 +29,7 @@
 - [x] Rohaufnahme alternativ per Pfad abfragen
 - [x] LosslessCut mit Rohaufnahme starten
 - [x] bei fehlendem LosslessCut-Pfad manuelle EXE-Eingabe erlauben
-- [x] Nutzerhinweise fuer manuellen Predigtschnitt anzeigen
+- [x] Nutzerhinweise fuer manuellen Aufnahmeschnitt anzeigen
 - [x] neue exportierte MP4-Dateien seit Startzeit suchen
 - [x] bei mehreren Exporten bewusste Auswahl erzwingen
 - [x] Terminal-Auswahl mit questionary und Text-Fallback einfuehren
@@ -75,6 +75,8 @@
 - [x] Freitag als Gebetsstunde vorauswaehlen
 - [x] zentrale Dateiname-Vorschau mit Platzhaltern ergaenzen
 - [x] optionale experimentelle Textual-Oberflaeche vorbereiten
+- [x] allgemeine Texte nach Dienstart-Einfuehrung auf Aufnahme/Veranstaltung bereinigen
+- [x] Textual-Prototyp mit MP4-/MP3-Vorschau, Zielordner und Einstellungen-Anzeige erweitern
 - [x] danach bestehenden lokalen Workflow weiterverwenden
 
 ## Phase 2: Windows-Nutzerfreundlichkeit

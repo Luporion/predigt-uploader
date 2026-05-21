@@ -17,11 +17,11 @@ Benötigte Programme/Websites:
 1. Sicherstellen, dass vMix nicht mehr aufnimmt.
 2. Aufnahme in `V:\vMixStorage` finden.
 3. Aufnahme in LosslessCut öffnen.
-4. Predigtbereich zuschneiden.
+4. Gewünschten Aufnahmebereich zuschneiden.
 5. Exportieren.
 6. Exportierte Datei in `V:\vMixStorage` finden.
 7. Datei umbenennen:
-   `Predigt (Predigttitel_Hauptbibelstelle)_Redner Vorname Nachname.mp4`
+   `Predigt (Titel_Hauptbibelstelle)_Redner Vorname Nachname.mp4`
 8. Jahres- und Datumsordner unter `C:\Users\micro\Desktop\Aufnahmen\YYYY\YYYY-MM-DD` erstellen.
 9. MP4 in den Ordner verschieben.
 10. MP4 mit VLC zu MP3 konvertieren.

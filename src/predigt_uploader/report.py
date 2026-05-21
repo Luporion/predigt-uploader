@@ -13,7 +13,7 @@ def build_summary_text(plan: ProcessingPlan) -> str:
             "PredigtUploader Zusammenfassung",
             "=============================",
             "",
-            f"Datum: {info.sermon_date.strftime('%d.%m.%Y')}",
+            f"Datum der Aufnahme: {info.sermon_date.strftime('%d.%m.%Y')}",
             f"Dienstart: {info.sermon_type}",
             f"Titel/Bezeichnung: {title}",
             f"Bibelstelle: {bible_reference}",
@@ -24,7 +24,7 @@ def build_summary_text(plan: ProcessingPlan) -> str:
             f"MP3-Dateiname: {plan.target_mp3.name}",
             "",
             "WordPress-Hinweise:",
-            "- Titel/Bezeichnung, Datum, Dienstart, Bibelstelle und Redner - soweit vorhanden - übertragen.",
+            "- Titel/Bezeichnung, Datum der Aufnahme, Dienstart, Bibelstelle und Redner - soweit vorhanden - übertragen.",
             "- MP3 in WordPress hochladen.",
             "- Vimeo-Embed-Code später manuell einfügen, bis Vimeo-Automation eingebaut ist.",
         ]

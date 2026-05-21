@@ -98,7 +98,7 @@ cut_mp4_folder = ""
 
 Wenn Nutzer im Wizard bei „Hast du bereits eine fertig geschnittene MP4-Datei?“ mit Ja antworten, nutzt der Wizard als vorgeschlagenen Ordner zuerst `cut_mp4_folder`, danach `vmix_storage`, danach `recordings_base`. Im vorgeschlagenen Ordner gibt es ein Menue zum Suchen/Auswaehlen, zum Verwenden der neuesten geschnittenen MP4, zur Auswahl aus den neuesten MP4-Dateien, zur manuellen Eingabe und fuer „Zurueck“.
 
-Dateien mit `_geschnitten`, `geschnitten` oder einem fertigen Predigt-Dateinamen wie `Predigt (Titel_Bibelstelle)_Redner.mp4` werden bevorzugt angezeigt. Wenn keine eindeutig geschnittene Datei gefunden wird, zeigt der Wizard trotzdem MP4-Dateien an und weist darauf hin, dass bewusst die richtige Predigtdatei gewaehlt werden muss.
+Dateien mit `_geschnitten`, `geschnitten` oder einem fertigen Aufnahme-Dateinamen wie `Predigt (Titel_Bibelstelle)_Redner.mp4` werden bevorzugt angezeigt. Wenn keine eindeutig geschnittene Datei gefunden wird, zeigt der Wizard trotzdem MP4-Dateien an und weist darauf hin, dass bewusst die richtige MP4-Datei gewaehlt werden muss.
 
 Wenn im Wizard ein anderer Ordner fuer geschnittene MP4-Dateien eingegeben wird, kann dieser Ordner unter `%APPDATA%\PredigtUploader\config.toml` gemerkt werden. Eine direkt eingegebene Datei wird weiterhin darauf geprueft, ob sie existiert, eine Datei ist und die Endung `.mp4` hat.
 

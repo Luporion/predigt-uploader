@@ -6,7 +6,7 @@ Version 1 ersetzt nicht LosslessCut und automatisiert nicht WordPress/Vimeo. Sie
 
 1. PredigtUploader starten.
 2. Geschnittene MP4 auswählen.
-3. Predigtdaten eingeben:
+3. Aufnahmedaten und Dienstart eingeben:
    - Datum
    - Titel
    - Hauptbibelstelle

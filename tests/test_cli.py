@@ -96,7 +96,7 @@ def _inputs(monkeypatch, values: list[str]) -> None:
 def test_ask_required_repeats_until_value(monkeypatch, capsys):
     _inputs(monkeypatch, ["", "  ", "Heiligkeit"])
 
-    assert _ask_required("Predigttitel") == "Heiligkeit"
+    assert _ask_required("Titel") == "Heiligkeit"
 
     output = capsys.readouterr().out
     assert "Dieses Feld darf nicht leer bleiben" in output
@@ -1524,7 +1524,7 @@ def test_build_summary_text_contains_required_fields_and_filenames(tmp_path):
 
     text = build_summary_text(plan)
 
-    assert "Datum: 24.05.2026" in text
+    assert "Datum der Aufnahme: 24.05.2026" in text
     assert "Dienstart: Predigt" in text
     assert "Titel/Bezeichnung: Heiligkeit" in text
     assert "Bibelstelle: Jesaja 6,1-3" in text

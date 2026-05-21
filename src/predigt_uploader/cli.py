@@ -286,7 +286,7 @@ def _file_modified_date(path: Path) -> date | None:
 
 def _ask_date() -> date:
     while True:
-        raw = _ask("Datum der Predigt (YYYY-MM-DD)", datetime.now().strftime("%Y-%m-%d"))
+        raw = _ask("Datum der Aufnahme (YYYY-MM-DD)", datetime.now().strftime("%Y-%m-%d"))
         try:
             return datetime.strptime(raw, "%Y-%m-%d").date()
         except ValueError:
@@ -317,7 +317,7 @@ def _ask_sermon_date(source_mp4: Path) -> date:
     options.append(MenuOption("Anderes Datum manuell eingeben", "manual"))
 
     print()
-    print("Datum der Predigt auswählen")
+    print("Datum der Aufnahme auswählen")
     print("Wenn das vorgeschlagene Datum nicht stimmt, wähle bitte ein anderes Datum.")
     selected = choose_from_options("Welches Datum soll verwendet werden?", options)
     if selected == "recording" and recording_date is not None:
@@ -640,7 +640,7 @@ def _newest_cut_mp4_candidate(folder: Path) -> Path | None:
 def _warn_if_no_clear_cut_mp4(candidates: tuple[Path, ...]) -> None:
     if any(_cut_mp4_sort_key(path)[0] < 3 for path in candidates):
         return
-    print("Ich habe keine eindeutig geschnittene Datei gefunden. Bitte bewusst die richtige Predigtdatei auswählen.")
+    print("Ich habe keine eindeutig geschnittene Datei gefunden. Bitte bewusst die richtige MP4-Datei auswählen.")
 
 
 def _choose_cut_mp4_from_folder(prompt: str, folder: Path, *, live_search: bool = False) -> Path | None:
@@ -715,8 +715,8 @@ def _select_existing_cut_mp4(config: AppConfig, log: WorkflowLog | None = None) 
                 print("In diesem Ordner wurde keine MP4-Datei gefunden. Bitte einen anderen Ordner oder eine Datei eingeben.")
                 continue
             if _cut_mp4_sort_key(newest)[0] >= 3:
-                print("Ich habe keine eindeutig geschnittene Datei gefunden. Bitte bewusst die richtige Predigtdatei auswählen.")
-                if not _ask_yes_no("Diese MP4 trotzdem als fertige Predigtdatei verwenden?", False):
+                print("Ich habe keine eindeutig geschnittene Datei gefunden. Bitte bewusst die richtige MP4-Datei auswählen.")
+                if not _ask_yes_no("Diese MP4 trotzdem als fertige Aufnahmedatei verwenden?", False):
                     continue
             return newest
         elif choice == "recent":
@@ -821,10 +821,10 @@ def _print_losslesscut_instructions() -> None:
     print()
     print("Bitte jetzt in LosslessCut schneiden")
     print("-----------------------------------")
-    print("- Markiere nur den Predigtbereich.")
-    print("- Exportiere nur die Predigt als MP4.")
-    print("- Chorlieder, Beiträge oder Ansagen nicht als Predigtdatei verwenden.")
-    print("- Exportiere die Predigt in LosslessCut.")
+    print("- Markiere nur den gewünschten Aufnahmebereich.")
+    print("- Exportiere nur diesen Abschnitt als MP4.")
+    print("- Chorlieder, Beiträge oder Ansagen nicht versehentlich auswählen, wenn sie nicht zur Aufnahme gehören.")
+    print("- Exportiere den Abschnitt in LosslessCut.")
     print("- Danach kannst du LosslessCut schließen oder hier Enter drücken.")
 
 
@@ -835,7 +835,7 @@ def _process_finished(process: subprocess.Popen[bytes] | None) -> bool:
 def _wait_for_losslesscut_or_enter(process: subprocess.Popen[bytes] | None) -> None:
     print()
     print("Warten auf LosslessCut-Export")
-    print("Exportiere die Predigt in LosslessCut. Danach kannst du LosslessCut schließen oder hier Enter drücken.")
+    print("Exportiere den gewünschten Abschnitt in LosslessCut. Danach kannst du LosslessCut schließen oder hier Enter drücken.")
     if process is None:
         _ask("Drücke Enter, sobald der Export fertig ist")
         return
@@ -989,24 +989,24 @@ def _choose_exported_mp4(candidates: tuple[Path, ...], raw_recording: Path | Non
     if len(candidates) == 1:
         candidate = candidates[0]
         print(f"Gefundene neue MP4: {candidate}")
-        if _ask_yes_no("Diese exportierte Predigtdatei verwenden?", True):
+        if _ask_yes_no("Diese exportierte MP4-Datei verwenden?", True):
             return candidate
 
     if len(candidates) > 1:
         print("Es wurden mehrere neue MP4-Dateien gefunden.")
-        print("Bitte wähle bewusst die Datei aus, die nur die Predigt enthält.")
+        print("Bitte wähle bewusst die Datei aus, die den gewünschten Abschnitt enthält.")
         return choose_from_options(
-            "Richtige Predigtdatei auswählen",
+            "Richtige MP4-Datei auswählen",
             [MenuOption(str(candidate), candidate) for candidate in candidates],
         )
 
     print("Es wurde keine passende neue MP4 automatisch ausgewählt.")
-    return _ask_mp4_path_or_limited_folder("Pfad zur exportierten Predigt-MP4 oder zu einem Ordner", folder_prompt="Exportierte Predigt-MP4 auswählen")
+    return _ask_mp4_path_or_limited_folder("Pfad zur exportierten MP4 oder zu einem Ordner", folder_prompt="Exportierte MP4 auswählen")
 
 
 def _ask_exported_mp4_manually(assistant_start: datetime) -> Path:
     while True:
-        raw = _ask_required("Pfad zur exportierten Predigt-MP4 oder zu einem Ordner")
+        raw = _ask_required("Pfad zur exportierten MP4 oder zu einem Ordner")
         path = _normalize_user_path(raw)
         if not path.exists():
             print("Dieser Pfad wurde nicht gefunden. Bitte den vollständigen Pfad eingeben.")
@@ -1023,7 +1023,7 @@ def _ask_exported_mp4_manually(assistant_start: datetime) -> Path:
         candidates = _manual_export_candidates(path, assistant_start)
         shown = _limit_file_list(candidates, RECENT_MP4_LIMIT)
         selected = _choose_mp4_from_list(
-            "Exportierte Predigt-MP4 auswählen",
+            "Exportierte MP4 auswählen",
             shown,
             overflow_count=max(0, len(candidates) - len(shown)),
         )
@@ -1040,7 +1040,7 @@ def _select_exported_mp4(
     losslesscut_process: subprocess.Popen[bytes] | None = None,
 ) -> Path:
     print()
-    print("Exportierte Predigt-MP4 übernehmen")
+    print("Exportierte MP4 übernehmen")
     print("Wenn der Export in LosslessCut fertig ist, sucht der Wizard nach neuen MP4-Dateien.")
     _wait_for_losslesscut_or_enter(losslesscut_process)
     folders = _export_search_folders(config, raw_recording)
@@ -1163,7 +1163,7 @@ def _ask_sermon_metadata(config: AppConfig, sermon_date: date) -> SermonInfo:
         title = _ask_required(service_type.title_label)
         _print_filename_preview(config, sermon_date, service_type, title, bible_reference, speaker)
     else:
-        print("Für diese Dienstart ist kein Predigttitel nötig.")
+        print("Für diese Dienstart ist kein Titel nötig.")
     if service_type.requires_bible_reference:
         bible_reference = _ask_required(service_type.bible_reference_label)
         _print_filename_preview(config, sermon_date, service_type, title, bible_reference, speaker)
@@ -1218,7 +1218,7 @@ def _select_target_folder(config: AppConfig, info: SermonInfo) -> tuple[Path, Se
         print("Für dieses Datum gibt es mehrere Ordner:")
         for index, candidate in enumerate(resolution.candidates, start=1):
             print(f"  {index}. {candidate.name}")
-        print("Bitte wähle bewusst den Ordner aus, in dem die Predigt gespeichert werden soll.")
+        print("Bitte wähle bewusst den Ordner aus, in dem die Aufnahme gespeichert werden soll.")
         return _choose_from_existing_folders(resolution.candidates), info
 
     if resolution.status == "single_existing":
@@ -2109,7 +2109,7 @@ def run_start_menu(args: argparse.Namespace) -> int:
         choice = choose_from_options(
             "Was möchtest du tun?",
             [
-                MenuOption("Neue Predigt vorbereiten", "wizard", ("predigt", "neu", "n")),
+                MenuOption("Neue Aufnahme vorbereiten", "wizard", ("aufnahme", "predigt", "neu", "n")),
                 MenuOption("Einstellungen ändern", "settings", ("einstellungen", "e")),
                 MenuOption("Systemcheck-Hinweis anzeigen", "systemcheck", ("systemcheck", "s")),
                 MenuOption("Letzte Logdatei öffnen oder Logordner öffnen", "logs", ("logs", "l")),

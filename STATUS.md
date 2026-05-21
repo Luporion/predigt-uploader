@@ -22,16 +22,16 @@ Eine zweite Nachbesserung behebt Bedien- und Erkennungsprobleme aus dem Praxiste
 Eine weitere Zielrechner-Korrektur behandelt fehlende `vmix_storage`-Ordner besser: Wenn Nutzer manuell einen Ordner eingeben, wird er für diesen Wizard-Lauf als temporärer Rohaufnahme-Quellordner verwendet und das normale Rohaufnahme-Menü inklusive Suche/Filter angezeigt. UNC-Pfade werden als normale Pfade akzeptiert und in der Config-Doku als robuster empfohlen.
 Die aktuelle Stabilisierung ergänzt eine eindeutigere Zurück-Logik ohne doppelte Fallback-Listen, besser lesbare `questionary`-Auswahlen, AppData-Benutzer-Config für gemerkte Ordner und LosslessCut-Pfad, ein konfigurierbares Jahresordner-Template sowie kurze Bitte-warten-Hinweise bei längeren Dateiaktionen. LosslessCut-Exporte werden zusätzlich anhand plausibler Dateinamen mit Bezug zur Rohaufnahme bevorzugt vorgeschlagen, aber weiterhin nicht blind übernommen.
 Die LosslessCut-Bedienung wurde weiter beruhigt: Ein manuell gewählter LosslessCut-Pfad wird vor dem Programmstart optional gemerkt, LosslessCut-Ausgaben werden vom Wizard-Terminal getrennt und der Wizard kann nach dem Export entweder durch Enter oder durch Schließen des gestarteten LosslessCut-Prozesses weiterlaufen. Bei der Rohaufnahme-Archivierung ist Verschieben für normale Rohaufnahmen die Vorauswahl; bei geschnitten wirkenden Dateien bleibt Liegenlassen die sichere Vorauswahl.
-Für normale Gemeindemitarbeiter gibt es jetzt ein einfaches Terminal-Hauptmenü. Darüber kann eine neue Predigt vorbereitet, Einstellungen geändert, ein Systemcheck-Hinweis angezeigt oder die letzte Logdatei geöffnet werden. Die Überschrift wurde auf „PredigtUploader“ mit kurzer Nutzerbeschreibung vereinfacht.
+Für normale Gemeindemitarbeiter gibt es jetzt ein einfaches Terminal-Hauptmenü. Darüber kann eine neue Aufnahme vorbereitet, Einstellungen geändert, ein Systemcheck-Hinweis angezeigt oder die letzte Logdatei geöffnet werden. Die Überschrift wurde auf „PredigtUploader“ mit kurzer Nutzerbeschreibung vereinfacht.
 Der Workflow fuer bereits fertig geschnittene MP4-Dateien wurde komfortabler: Statt eines leeren Pfadprompts zeigt der Wizard nun einen vorgeschlagenen Schnitt-/Exportordner an. Vorrang haben ein gemerkter `cut_mp4_folder`, danach `vmix_storage` und danach `recordings_base`. In vorhandenen Ordnern koennen Nutzer suchen, die neueste geschnittene MP4 verwenden, aus den neuesten MP4-Dateien auswaehlen, einen anderen Ordner oder eine Datei eingeben oder zur vorherigen Frage zurueckgehen. Geschnitten wirkende Dateien werden bevorzugt, und ein abweichender Schnittordner kann unter `%APPDATA%\PredigtUploader\config.toml` gemerkt werden.
 Die aktuelle Nachbesserung erweitert die fachliche Metadatenlogik: Nach dem Datum wird eine Dienstart wie Predigt, Bibelstunde, Vortrag, Lobpreis oder Sonstiges abgefragt. Je nach Dienstart werden nur die passenden Pflichtfelder abgefragt und die Dateinamen entsprechend gebildet. Metadaten-Hilfetexte nennen laienverstaendlich typische Quellen fuer Titel, Bibelstelle und Redner. Suchfelder zeigen eine sichtbare Zurueck-Hilfe und akzeptieren im Textmodus `zurück`, `z` und `back`. Der Starttext weist darauf hin, dass `Strg+C` abbricht und nicht als Zurueck-Funktion gedacht ist. Zusaetzliche Dienstarten koennen im Einstellungsmenue angelegt und unter `%APPDATA%\PredigtUploader\config.toml` gespeichert werden.
-Die Dienstart-Vorauswahl beruecksichtigt nun auch Freitag als Gebetsstunde. Fuer die Metadaten-Eingabe gibt es eine zentrale Dateiname-Vorschau mit sichtbaren Platzhaltern wie `[Titel]`, `[Bibelstelle]`, `[Redner]` und `[Leitung]`; der Terminal-Wizard zeigt diese Vorschau nach der Dienstartauswahl und nach fachlichen Eingaben kompakt an. Zusaetzlich ist Textual als optionale Abhaengigkeit vorbereitet: `python -m predigt_uploader tui` startet einen experimentellen Prototyp mit Startmenue und Live-Dateiname-Vorschau, wenn `.[tui]` installiert ist. Der normale Terminal-Wizard bleibt der Standard.
+Die Dienstart-Vorauswahl beruecksichtigt nun auch Freitag als Gebetsstunde. Fuer die Metadaten-Eingabe gibt es eine zentrale Dateiname-Vorschau mit sichtbaren Platzhaltern wie `[Titel]`, `[Bibelstelle]`, `[Redner]` und `[Leitung]`; der Terminal-Wizard zeigt diese Vorschau nach der Dienstartauswahl und nach fachlichen Eingaben kompakt an. Allgemeine Nutzertexte sprechen jetzt dort von Aufnahme oder Veranstaltung, wo nicht konkret die Dienstart Predigt gemeint ist. Zusaetzlich ist Textual als optionale Abhaengigkeit vorbereitet: `python -m predigt_uploader tui` startet einen experimentellen Prototyp mit Startmenue, Metadaten-/Dateiname-Vorschau, Zielordner-Vorschau und reiner Einstellungen-Ansicht, wenn `.[tui]` installiert ist. Der normale Terminal-Wizard bleibt der Standard.
 
 ## Was Version 1 bereits kann
 
 - Konfiguration mit Standardwerten und optionaler `config.toml` laden.
 - Angegebene Config-Dateien kontrolliert prüfen und verständliche Fehler bei fehlender, unlesbarer oder ungültiger Config anzeigen.
-- Predigtdaten im Terminal abfragen.
+- Aufnahmedaten und Dienstart im Terminal abfragen.
 - Leere Pflichtangaben erneut abfragen.
 - Pfad zu einer MP4-Datei prüfen.
 - Ziel-Dateinamen nach dem Predigtstandard erzeugen.
@@ -57,7 +57,7 @@ Die Dienstart-Vorauswahl beruecksichtigt nun auch Freitag als Gebetsstunde. Fuer
 - Über `scripts/setup-local.ps1` lokal eingerichtet und über `scripts/check-system.ps1` vor dem ersten Lauf geprüft werden.
 - Über anklickbare `.cmd`-Dateien im Projektstamm ohne direkte PowerShell-Eingabe eingerichtet, geprüft und gestartet werden.
 - Als einfache lokale ZIP-Auslieferung unter `dist/` vorbereitet werden.
-- Optional eine Rohaufnahme aus `vmix_storage` vorschlagen, in LosslessCut öffnen und nach dem manuellen Export die neue Predigt-MP4 übernehmen.
+- Optional eine Rohaufnahme aus `vmix_storage` vorschlagen, in LosslessCut öffnen und nach dem manuellen Export die neue MP4 übernehmen.
 - Große Rohaufnahme-Ordner über neueste Aufnahme, begrenzte neueste Liste, Suche/Filter oder manuelle Eingabe bedienen.
 - Bei Rohaufnahme-Vorschlägen echte vMix-Rohaufnahmen gegenüber geschnitten wirkenden Dateien bevorzugen und verdächtige Rohaufnahmen bestätigen lassen.
 - Bei fehlendem `vmix_storage` einen manuell eingegebenen Ordner als temporären Rohaufnahme-Quellordner mit vollständigem Rohaufnahme-Menü verwenden.
@@ -68,7 +68,7 @@ Die Dienstart-Vorauswahl beruecksichtigt nun auch Freitag als Gebetsstunde. Fuer
 - Bei fehlendem LosslessCut-Start einen manuellen Pfad zur `LosslessCut.exe` abfragen und erneut versuchen.
 - Ja/Nein- und Mehrfachauswahlen im Terminal über `questionary` nutzerfreundlicher anzeigen, mit Texteingabe-Fallback.
 - Bei Datei-Abfragen passende Dateien aus einem eingegebenen Ordner anzeigen und auswählen lassen.
-- Das Predigtdatum über eine Auswahl bestimmen und vMix-Dateinamen mit deutschen Monatsnamen auswerten.
+- Das Aufnahmedatum über eine Auswahl bestimmen und vMix-Dateinamen mit deutschen Monatsnamen auswerten.
 - Bei vorhandener Ziel-MP4 behalten, neuen Namen wählen, abbrechen oder nach zweiter Bestätigung überschreiben.
 - Abweichende Ziel-Basisordner, Rohaufnahme-Ordner und funktionierende LosslessCut-Pfade auf Wunsch unter `%APPDATA%\PredigtUploader\config.toml` merken.
 - Jahresordner über `year_folder_template` benennen, zum Beispiel `2026 Video+Audio`.
@@ -85,7 +85,7 @@ Die Dienstart-Vorauswahl beruecksichtigt nun auch Freitag als Gebetsstunde. Fuer
 - `Strg+C` als Abbruch erklären.
 - Freitag automatisch als Gebetsstunde vorschlagen.
 - Zentrale Dateiname-Vorschau mit Platzhaltern fuer Terminal-Wizard und kuenftige Oberflaechen bereitstellen.
-- Experimentellen Textual-Prototyp optional ueber `python -m predigt_uploader tui` starten.
+- Experimentellen Textual-Prototyp optional ueber `python -m predigt_uploader tui` starten, inklusive Metadaten-Vorschau, Zielordner-Vorschau und Einstellungen-Anzeige.
 
 ## Bewusst noch nicht enthalten
 
@@ -98,7 +98,7 @@ Die Dienstart-Vorauswahl beruecksichtigt nun auch Freitag als Gebetsstunde. Fuer
 
 ## Nächster geplanter Schritt
 
-Release-ZIP `predigt-uploader-v0.1.6-local.zip` nach `docs/release-v1-5.md` neu erstellen, auf dem Gemeinderechner entpacken und den verbesserten Zielrechner-Workflow mit Dienstarten inklusive Freitag-Gebetsstunde, Dateiname-Vorschau, Metadaten-Hilfetexten, Suchfeld-Zurueck, Auswahl einer bereits geschnittenen MP4, Rohaufnahme-Auswahl, Live-Suche, Export-Snapshot-Erkennung und optionaler Rohaufnahme-Archivierung testen.
+Release-ZIP `predigt-uploader-v0.1.6-local.zip` nach `docs/release-v1-5.md` neu erstellen, auf dem Gemeinderechner entpacken und den verbesserten Zielrechner-Workflow mit Dienstarten inklusive Freitag-Gebetsstunde, Dateiname-Vorschau, allgemeineren Aufnahmetexten, Metadaten-Hilfetexten, Suchfeld-Zurueck, Auswahl einer bereits geschnittenen MP4, Rohaufnahme-Auswahl, Live-Suche, Export-Snapshot-Erkennung und optionaler Rohaufnahme-Archivierung testen. Den experimentellen Textual-Prototyp nur als Zusatztest pruefen.
 
 ## Sicherheits-Hinweis
 

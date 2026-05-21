@@ -50,6 +50,7 @@ Voraussetzungen:
 - optional: FFmpeg im PATH oder später in der App-Konfiguration
 - optional: LosslessCut im PATH/App-Alias oder in `config.toml`
 - Python-Abhängigkeiten aus `pyproject.toml`, darunter `questionary`
+- optional für die experimentelle Textoberfläche: `pip install -e .[tui]`
 
 PowerShell:
 
@@ -63,6 +64,8 @@ pytest
 python -m predigt_uploader --help
 python -m predigt_uploader
 python -m predigt_uploader wizard
+# optionaler UI-Spike, noch kein Ersatz fuer den Wizard:
+python -m predigt_uploader tui
 ```
 
 ## Lokale Nutzung
@@ -78,6 +81,8 @@ Kurzablauf in PowerShell:
 ```
 
 `setup-local.ps1` richtet `.venv` und die Python-Abhängigkeiten ein. `check-system.ps1` prüft Python, Wizard-Start, FFmpeg und optional den konfigurierten LosslessCut-Pfad. Der Doppelklick-Start öffnet zuerst ein einfaches Hauptmenü. Der Wizard arbeitet weiterhin nur lokal und lädt nichts zu Vimeo oder WordPress hoch. Abweichende Ordner und ein funktionierender LosslessCut-Pfad können auf Wunsch unter `%APPDATA%\PredigtUploader\config.toml` gemerkt werden.
+
+Der normale Terminal-Wizard bleibt der Standard für die Gemeinde-Nutzung. Eine experimentelle Textual-Oberfläche kann für Tests und Weiterentwicklung mit `python -m predigt_uploader tui` gestartet werden, wenn das optionale Extra `tui` installiert ist. Sie zeigt bisher nur Startmenü und Metadaten-Vorschau und ersetzt den produktiven Workflow nicht.
 
 Für Gemeindemitarbeiter gibt es im Projektordner zusätzlich anklickbare Windows-Startdateien:
 

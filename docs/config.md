@@ -148,7 +148,7 @@ Eingebaute Dienstarten sind:
 - Seminar
 - Sonstiges
 
-Am Sonntag ist „Predigt“ vorausgewaehlt. Am Mittwoch ist „Bibelstunde“ vorausgewaehlt. Die Auswahl kann bewusst geaendert werden.
+Am Sonntag ist „Predigt“ vorausgewaehlt. Am Mittwoch ist „Bibelstunde“ vorausgewaehlt. Am Freitag ist „Gebetsstunde“ vorausgewaehlt. An anderen Tagen ist „Predigt“ vorausgewaehlt. Die Auswahl kann bewusst geaendert werden.
 
 Die Dateinamen werden je nach Dienstart gebildet:
 
@@ -163,6 +163,8 @@ Sonstiges (Titel)_Name.mp4
 ```
 
 Die MP3 erhaelt immer denselben Namen wie die MP4, nur mit `.mp3`.
+
+Während der Metadaten-Eingabe zeigt der Wizard eine kompakte Dateiname-Vorschau. Fehlende Angaben bleiben sichtbar, zum Beispiel `[Titel]`, `[Bibelstelle]`, `[Redner]` oder `[Leitung]`.
 
 Die bestehenden Templates fuer Predigt und Bibelstunde bleiben gueltig:
 

@@ -17,6 +17,9 @@ dependencies = [
 dev = [
   "pytest>=8",
 ]
+tui = [
+  "textual>=0.80",
+]
 
 [project.scripts]
 predigt-uploader = "predigt_uploader.cli:main"

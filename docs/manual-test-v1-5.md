@@ -134,9 +134,16 @@ Erwartete Standardauswahl:
 
 - Sonntag: Predigt
 - Mittwoch: Bibelstunde
+- Freitag: Gebetsstunde
 - sonst: Predigt
 
 Vor den Eingaben zu Titel, Bibelstelle und Redner muss ein Hinweis erscheinen, wo diese Angaben zu finden sind: Broadcast/Ablaufplan, Beamertechnik bzw. Präsentation, ChurchTools oder Prediger.
+
+Nach der Dienstartauswahl und nach jeder fachlichen Eingabe muss eine kurze Dateiname-Vorschau erscheinen, zum Beispiel:
+
+```text
+Aktueller Dateiname: Predigt (Lehre statt Leere_[Bibelstelle])_[Redner].mp4
+```
 
 ### Predigt-Test
 
@@ -198,6 +205,17 @@ Die MP3-Datei muss jeweils denselben Namen wie die MP4 bekommen, nur mit `.mp3`.
 ### Strg+C-Test
 
 `Strg+C` bricht den Vorgang ab und ist nicht die Zurueck-Funktion. Beim Doppelklick-Start ueber `.cmd` kann Windows danach „Batchvorgang abbrechen (J/N)?“ anzeigen. Zum Zurueckgehen im Wizard immer „Zurück“ verwenden.
+
+### Experimentelle Textual-Oberfläche
+
+Der normale Wizard bleibt Standard. Für Entwicklungstests kann optional installiert werden:
+
+```powershell
+pip install -e .[tui]
+python -m predigt_uploader tui
+```
+
+Erwartet wird ein erster Prototyp mit Startmenü und Metadaten-Vorschau. Er muss den produktiven Wizard nicht vollständig ersetzen.
 
 Wenn die finale MP4-Datei im Zielordner bereits existiert, überschreibt der Wizard sie nicht automatisch. Es gibt eine bewusste Auswahl:
 

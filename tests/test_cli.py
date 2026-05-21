@@ -910,6 +910,25 @@ def test_service_type_default_is_bibelstunde_on_wednesday(monkeypatch, tmp_path)
     assert captured["default"] == 1
 
 
+def test_service_type_defaults_by_weekday(monkeypatch, tmp_path):
+    selected_names = []
+
+    def fake_choose(_prompt, options, default_index=0):
+        selected = options[default_index].value
+        selected_names.append(selected.name)
+        return selected
+
+    monkeypatch.setattr("predigt_uploader.cli.choose_from_options", fake_choose)
+    config = _config(tmp_path)
+
+    _ask_service_type(config, date(2026, 5, 24))
+    _ask_service_type(config, date(2026, 5, 20))
+    _ask_service_type(config, date(2026, 5, 22))
+    _ask_service_type(config, date(2026, 5, 21))
+
+    assert selected_names == ["Predigt", "Bibelstunde", "Gebetsstunde", "Predigt"]
+
+
 def test_ask_sermon_metadata_prints_help_and_keeps_required_fields(monkeypatch, tmp_path, capsys):
     _inputs(monkeypatch, ["", "Heiligkeit", "Jesaja 6,1-3", "Eduard Wiebe", "n"])
 
@@ -920,6 +939,17 @@ def test_ask_sermon_metadata_prints_help_and_keeps_required_fields(monkeypatch, 
     assert info.bible_reference == "Jesaja 6,1-3"
     assert info.speaker == "Eduard Wiebe"
     assert METADATA_HELP_TEXT in capsys.readouterr().out
+
+
+def test_ask_sermon_metadata_prints_filename_preview_after_inputs(monkeypatch, tmp_path, capsys):
+    _inputs(monkeypatch, ["", "Lehre statt Leere", "Jesaja 6,1-3", "Eduard Wiebe", "n"])
+
+    _ask_sermon_metadata(_config(tmp_path), date(2026, 5, 24))
+
+    output = capsys.readouterr().out
+    assert "Aktueller Dateiname: Predigt ([Titel]_[Bibelstelle])_[Redner].mp4" in output
+    assert "Aktueller Dateiname: Predigt (Lehre statt Leere_[Bibelstelle])_[Redner].mp4" in output
+    assert "Aktueller Dateiname: Predigt (Lehre statt Leere_Jesaja 6,1-3)_Eduard Wiebe.mp4" in output
 
 
 def test_ask_sermon_metadata_bibelstunde_does_not_require_title(monkeypatch, tmp_path):

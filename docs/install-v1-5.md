@@ -197,6 +197,15 @@ Diese Datei startet per Doppelklick ein einfaches Hauptmenü. Dort kann man eine
 
 Wichtig: `Strg+C` bricht den laufenden Vorgang ab. Zum Zurückgehen im Wizard bitte die Option „Zurück“ verwenden. Beim Start per `.cmd` kann Windows nach `Strg+C` zusätzlich „Batchvorgang abbrechen (J/N)?“ anzeigen.
 
+Die normale Gemeinde-Nutzung bleibt über `PredigtUploader starten.cmd`. Eine experimentelle Textual-Oberfläche gibt es nur für Test und Weiterentwicklung. Sie wird nicht automatisch installiert und ersetzt den Wizard nicht. Für Entwickler:
+
+```powershell
+pip install -e .[tui]
+python -m predigt_uploader tui
+```
+
+Wenn Textual fehlt, meldet das Programm verständlich, dass die neue Oberfläche nicht installiert ist und der normale Wizard verwendet werden soll.
+
 Alternativ in PowerShell:
 
 ```powershell
@@ -207,7 +216,7 @@ Der Wizard führt durch den lokalen Ablauf:
 
 1. Ziel-Basisordner prüfen
 2. fertige MP4 über den vorgeschlagenen Schnitt-/Exportordner wählen oder LosslessCut-Schnitt-Assistent starten
-3. Datum, Dienstart und passende Metadaten abfragen
+3. Datum, Dienstart und passende Metadaten abfragen; dabei zeigt der Wizard eine kompakte Dateiname-Vorschau
 4. MP4 in den Zielordner übernehmen
 5. MP3 per FFmpeg erzeugen
 6. Zusammenfassung und Logdatei schreiben

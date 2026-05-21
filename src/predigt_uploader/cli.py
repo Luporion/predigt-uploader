@@ -13,7 +13,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from .config import ConfigLoadError, default_service_types, describe_config_source, load_config, save_user_config_values, user_config_path
-from .filename import build_media_filename, sanitize_filename_part, service_type_config_for
+from .filename import build_filename_preview, build_media_filename, sanitize_filename_part, service_type_config_for
 from .folders import ensure_folder, resolve_folder
 from .models import AppConfig, ProcessingPlan, SermonInfo, ServiceTypeConfig
 from .mp3 import Mp3ConversionError, convert_mp4_to_mp3, ffmpeg_available
@@ -1114,7 +1114,12 @@ def _service_types_for(config: AppConfig) -> tuple[ServiceTypeConfig, ...]:
 
 
 def _service_type_default_index(service_types: tuple[ServiceTypeConfig, ...], sermon_date: date) -> int:
-    preferred = "Bibelstunde" if sermon_date.weekday() == 2 else "Predigt"
+    weekday_defaults = {
+        2: "Bibelstunde",
+        4: "Gebetsstunde",
+        6: "Predigt",
+    }
+    preferred = weekday_defaults.get(sermon_date.weekday(), "Predigt")
     for index, service_type in enumerate(service_types):
         if service_type.name.casefold() == preferred.casefold():
             return index
@@ -1131,8 +1136,23 @@ def _ask_service_type(config: AppConfig, sermon_date: date) -> ServiceTypeConfig
     )
 
 
+def _print_filename_preview(config: AppConfig, sermon_date: date, service_type: ServiceTypeConfig, title: str, bible_reference: str, speaker: str) -> None:
+    preview = build_filename_preview(
+        SermonInfo(
+            sermon_date=sermon_date,
+            title=title,
+            bible_reference=bible_reference,
+            speaker=speaker,
+            sermon_type=service_type.name,
+        ),
+        config,
+    )
+    print(f"Aktueller Dateiname: {preview.mp4}")
+
+
 def _ask_sermon_metadata(config: AppConfig, sermon_date: date) -> SermonInfo:
     service_type = _ask_service_type(config, sermon_date)
+    _print_filename_preview(config, sermon_date, service_type, "", "", "")
     _print_metadata_help()
 
     title = ""
@@ -1141,14 +1161,21 @@ def _ask_sermon_metadata(config: AppConfig, sermon_date: date) -> SermonInfo:
 
     if service_type.requires_title:
         title = _ask_required(service_type.title_label)
+        _print_filename_preview(config, sermon_date, service_type, title, bible_reference, speaker)
+    else:
+        print("Für diese Dienstart ist kein Predigttitel nötig.")
     if service_type.requires_bible_reference:
         bible_reference = _ask_required(service_type.bible_reference_label)
+        _print_filename_preview(config, sermon_date, service_type, title, bible_reference, speaker)
     elif service_type.optional_bible_reference and _ask_yes_no("Gibt es eine Bibelstelle, die in die Zusammenfassung soll?", False):
         bible_reference = _ask_optional_text(service_type.bible_reference_label)
+        _print_filename_preview(config, sermon_date, service_type, title, bible_reference, speaker)
     if service_type.requires_speaker:
         speaker = _ask_required(service_type.speaker_label)
+        _print_filename_preview(config, sermon_date, service_type, title, bible_reference, speaker)
     elif service_type.optional_speaker and _ask_yes_no(f"{service_type.speaker_label} angeben?", False):
         speaker = _ask_optional_text(service_type.speaker_label)
+        _print_filename_preview(config, sermon_date, service_type, title, bible_reference, speaker)
 
     folder_note = _ask_optional_folder_note()
     return SermonInfo(
@@ -2109,9 +2136,18 @@ def run_start_menu(args: argparse.Namespace) -> int:
         return 0
 
 
+def run_tui_command(args: argparse.Namespace) -> int:
+    try:
+        from .tui_app import run_tui
+        return run_tui(config_path=args.config)
+    except ImportError:
+        print("Die neue Oberfläche ist nicht installiert. Bitte setup ausführen oder den normalen Wizard verwenden.")
+        return 7
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="predigt-uploader")
-    parser.add_argument("command", nargs="?", default="menu", choices=["menu", "wizard"])
+    parser.add_argument("command", nargs="?", default="menu", choices=["menu", "wizard", "tui", "textual"])
     parser.add_argument("--config", help="Pfad zu config.toml")
     return parser
 
@@ -2124,6 +2160,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_start_menu(args)
         if args.command == "wizard":
             return run_wizard(args)
+        if args.command in {"tui", "textual"}:
+            return run_tui_command(args)
         parser.print_help()
         return 1
     except (KeyboardInterrupt, UserAbortError):

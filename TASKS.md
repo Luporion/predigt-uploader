@@ -72,6 +72,9 @@
 - [x] Metadaten-Hilfetexte, Suchfeld-Zurueck und Strg+C-Abbruchhinweis ergaenzen
 - [x] Dienstarten mit passenden Pflichtfeldern und Dateinamen einfuehren
 - [x] zusaetzliche Dienstarten im Einstellungsmenue in APPDATA-config.toml speichern
+- [x] Freitag als Gebetsstunde vorauswaehlen
+- [x] zentrale Dateiname-Vorschau mit Platzhaltern ergaenzen
+- [x] optionale experimentelle Textual-Oberflaeche vorbereiten
 - [x] danach bestehenden lokalen Workflow weiterverwenden
 
 ## Phase 2: Windows-Nutzerfreundlichkeit

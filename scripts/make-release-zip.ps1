@@ -22,7 +22,7 @@ $ReleaseItems = @(
     "PredigtUploader starten.cmd",
     "PredigtUploader einrichten.cmd",
     "PredigtUploader Systemcheck.cmd",
-    "Tests ausführen.cmd"
+    "Tests ausfuehren.cmd"
 )
 
 $ExcludedNames = @(

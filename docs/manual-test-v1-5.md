@@ -215,7 +215,7 @@ pip install -e .[tui]
 python -m predigt_uploader tui
 ```
 
-Erwartet wird ein erster Prototyp mit Startmenü, Metadaten-Vorschau, MP4-/MP3-Dateiname, Zielordner-Vorschau und einer reinen Einstellungen-Ansicht. Er muss den produktiven Wizard nicht vollständig ersetzen.
+Erwartet wird ein erster Prototyp mit Startmenü, Metadaten-Vorschau, MP4-/MP3-Dateiname, Zielordner-Vorschau, einer reinen MP4-Dateiübersicht und einer reinen Einstellungen-Ansicht. Er muss den produktiven Wizard nicht vollständig ersetzen. Die MP4-Dateiübersicht darf nur Orientierung bieten; die bewusste Auswahl und Verarbeitung laufen weiterhin im normalen Wizard.
 
 Wenn die finale MP4-Datei im Zielordner bereits existiert, überschreibt der Wizard sie nicht automatisch. Es gibt eine bewusste Auswahl:
 

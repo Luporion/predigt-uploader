@@ -1,12 +1,19 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
-from .config import default_config, default_service_types, load_config
+from .config import default_service_types, load_config
 from .filename import build_filename_preview
 from .folders import suggest_folder
 from .models import AppConfig, SermonInfo, ServiceTypeConfig
+
+TUI_MP4_PREVIEW_LIMIT = 5
+
+
+def load_tui_config(config_path: str | None = None) -> AppConfig:
+    explicit_config = Path(config_path) if config_path else None
+    return load_config(explicit_config)
 
 
 def build_tui_preview_text(info: SermonInfo, config: AppConfig) -> str:
@@ -30,6 +37,46 @@ def build_tui_start_status_text(config: AppConfig) -> str:
             f"Rohaufnahme-Ordner: {config.vmix_storage}",
         ]
     )
+
+
+def build_tui_file_candidates_lines(config: AppConfig, *, limit: int = TUI_MP4_PREVIEW_LIMIT) -> tuple[str, ...]:
+    lines: list[str] = ["MP4-Dateien zur Orientierung"]
+    if config.cut_mp4_folder is None:
+        lines.append("Schnitt-/Exportordner: noch nicht gemerkt")
+    else:
+        lines.extend(_build_tui_folder_file_lines("Schnitt-/Exportordner", config.cut_mp4_folder, limit=limit))
+    lines.append("")
+    lines.extend(_build_tui_folder_file_lines("Rohaufnahme-Ordner", config.vmix_storage, limit=limit))
+    return tuple(lines)
+
+
+def _build_tui_folder_file_lines(label: str, folder: Path, *, limit: int) -> tuple[str, ...]:
+    lines = [f"{label}: {folder}"]
+    if not folder.exists():
+        return tuple(lines + ["Ordner wurde nicht gefunden."])
+    if not folder.is_dir():
+        return tuple(lines + ["Pfad ist kein Ordner."])
+
+    files = _newest_mp4_files(folder, limit=limit)
+    if not files:
+        return tuple(lines + ["Keine MP4-Dateien gefunden."])
+    lines.extend(_format_tui_file_line(path) for path in files)
+    return tuple(lines)
+
+
+def _newest_mp4_files(folder: Path, *, limit: int) -> tuple[Path, ...]:
+    files = [path for path in folder.glob("*.mp4") if path.is_file()]
+    return tuple(sorted(files, key=lambda path: path.stat().st_mtime, reverse=True)[:limit])
+
+
+def _format_tui_file_line(path: Path) -> str:
+    try:
+        stat = path.stat()
+    except OSError:
+        return f"- {path.name}"
+    changed = datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M")
+    size_mb = stat.st_size / (1024 * 1024)
+    return f"- {path.name} | geaendert: {changed} | Groesse: {size_mb:.1f} MB"
 
 
 def build_tui_settings_lines(config: AppConfig) -> tuple[str, ...]:
@@ -75,8 +122,7 @@ def run_tui(config_path: str | None = None) -> int:
     except ImportError as exc:
         raise ImportError("Textual ist nicht installiert.") from exc
 
-    explicit_config = Path(config_path) if config_path else None
-    config = load_config(explicit_config) if explicit_config else default_config()
+    config = load_tui_config(config_path)
 
     class StartScreen(Screen[None]):
         def compose(self) -> ComposeResult:
@@ -85,6 +131,7 @@ def run_tui(config_path: str | None = None) -> int:
             with Horizontal():
                 with Vertical(id="start_actions"):
                     yield Button("Neue Aufnahme vorbereiten", id="new", variant="primary")
+                    yield Button("MP4-Dateien ansehen", id="files")
                     yield Button("Einstellungen", id="settings")
                     yield Button("Systemcheck-Hinweis", id="systemcheck")
                     yield Button("Beenden", id="quit")
@@ -95,6 +142,8 @@ def run_tui(config_path: str | None = None) -> int:
         def on_button_pressed(self, event: Button.Pressed) -> None:
             if event.button.id == "new":
                 self.app.push_screen(MetadataPreviewScreen(config))
+            elif event.button.id == "files":
+                self.app.push_screen(FileCandidatesScreen(config))
             elif event.button.id == "settings":
                 self.app.push_screen(SettingsScreen(config))
             elif event.button.id == "systemcheck":
@@ -177,6 +226,27 @@ def run_tui(config_path: str | None = None) -> int:
             self.query_one("#speaker_input", Input).disabled = (
                 not service_type.requires_speaker and not service_type.optional_speaker
             )
+
+    class FileCandidatesScreen(Screen[None]):
+        def __init__(self, app_config: AppConfig) -> None:
+            super().__init__()
+            self.app_config = app_config
+
+        def compose(self) -> ComposeResult:
+            yield Header(show_clock=False)
+            yield Static("MP4-Dateien", id="screen_title")
+            yield Static(
+                "Nur Anzeige im Prototyp. Die Auswahl und Verarbeitung laufen weiterhin im normalen Wizard.",
+                id="screen_note",
+            )
+            for line in build_tui_file_candidates_lines(self.app_config):
+                yield Static(line)
+            yield Button("Zurück", id="back")
+            yield Footer()
+
+        def on_button_pressed(self, event: Button.Pressed) -> None:
+            if event.button.id == "back":
+                self.app.pop_screen()
 
     class SettingsScreen(Screen[None]):
         def __init__(self, app_config: AppConfig) -> None:

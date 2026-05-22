@@ -951,6 +951,7 @@ def _find_mp4_exports_after_snapshot(
     raw_recording: Path | None = None,
 ) -> tuple[Path, ...]:
     start_timestamp = assistant_start.timestamp()
+    broad_user_folders = {Path.home() / "Downloads", Path.home() / "Desktop"}
     found: list[Path] = []
     for folder in folders:
         if not folder.exists() or not folder.is_dir():
@@ -966,9 +967,14 @@ def _find_mp4_exports_after_snapshot(
             is_new_path = old is None
             changed_file = old is not None and (old.size != stat.st_size or old.modified_at != stat.st_mtime or old.created_at != stat.st_ctime)
             created_after_start = stat.st_ctime >= start_timestamp
+            modified_after_start = stat.st_mtime >= start_timestamp
+            is_in_broad_user_folder = path.parent in broad_user_folders
             plausible_name = _looks_like_losslesscut_export(path)
             raw_named_export = _looks_like_raw_named_export(path, raw_recording)
-            if is_new_path or created_after_start or raw_named_export or (changed_file and plausible_name):
+            if (
+                is_new_path
+                and (created_after_start or modified_after_start or not is_in_broad_user_folder)
+            ) or raw_named_export or (changed_file and plausible_name):
                 found.append(path)
     return _prioritize_export_candidates(tuple(found), raw_recording)
 
@@ -2140,6 +2146,9 @@ def run_tui_command(args: argparse.Namespace) -> int:
     try:
         from .tui_app import run_tui
         return run_tui(config_path=args.config)
+    except ConfigLoadError as exc:
+        _print_config_load_error(exc)
+        return 6
     except ImportError:
         print("Die neue Oberfläche ist nicht installiert. Bitte setup ausführen oder den normalen Wizard verwenden.")
         return 7

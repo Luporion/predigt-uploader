@@ -197,7 +197,7 @@ Diese Datei startet per Doppelklick ein einfaches Hauptmenü. Dort kann man eine
 
 Wichtig: `Strg+C` bricht den laufenden Vorgang ab. Zum Zurückgehen im Wizard bitte die Option „Zurück“ verwenden. Beim Start per `.cmd` kann Windows nach `Strg+C` zusätzlich „Batchvorgang abbrechen (J/N)?“ anzeigen.
 
-Die normale Gemeinde-Nutzung bleibt über `PredigtUploader starten.cmd`. Eine experimentelle Textual-Oberfläche gibt es nur für Test und Weiterentwicklung. Sie wird nicht automatisch installiert und ersetzt den Wizard nicht. Sie zeigt aktuell Startmenü, Metadaten-/Dateiname-Vorschau, Zielordner-Vorschau und eine reine Einstellungen-Ansicht. Für Entwickler:
+Die normale Gemeinde-Nutzung bleibt über `PredigtUploader starten.cmd`. Eine experimentelle Textual-Oberfläche gibt es nur für Test und Weiterentwicklung. Sie wird nicht automatisch installiert und ersetzt den Wizard nicht. Sie zeigt aktuell Startmenü, Metadaten-/Dateiname-Vorschau, Zielordner-Vorschau, eine reine MP4-Dateiübersicht und eine reine Einstellungen-Ansicht. Für Entwickler:
 
 ```powershell
 pip install -e .[tui]

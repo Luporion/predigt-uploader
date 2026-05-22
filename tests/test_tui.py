@@ -5,13 +5,18 @@ from predigt_uploader import cli
 from predigt_uploader.config import ConfigLoadError
 from predigt_uploader.models import AppConfig, SermonInfo
 from predigt_uploader.tui_app import (
+    build_tui_metadata_info,
     build_tui_file_candidates_lines,
     build_tui_field_labels,
     build_tui_preview_text,
     build_tui_settings_lines,
     build_tui_start_status_text,
+    build_tui_validation_text,
+    default_tui_service_type_name,
     load_tui_config,
     service_type_by_name,
+    service_types_for_tui,
+    validate_tui_metadata,
 )
 
 
@@ -85,6 +90,25 @@ def test_tui_preview_text_shows_mp4_mp3_and_target_folder(tmp_path):
     assert "MP4-Dateiname: Predigt (Lehre statt Leere_Johannes 3,16)_Max Muster.mp4" in text
     assert "MP3-Dateiname: Predigt (Lehre statt Leere_Johannes 3,16)_Max Muster.mp3" in text
     assert f"Zielordner: {tmp_path / 'Aufnahmen' / '2026' / '2026-05-24'}" in text
+
+
+def test_tui_preview_text_uses_folder_note(tmp_path):
+    config = AppConfig(
+        vmix_storage=tmp_path / "vmix",
+        recordings_base=tmp_path / "Aufnahmen",
+        mp3_base=tmp_path / "Predigten",
+    )
+    info = SermonInfo(
+        sermon_date=date(2026, 5, 24),
+        title="Lehre statt Leere",
+        bible_reference="Johannes 3,16",
+        speaker="Max Muster",
+        folder_note="Taufe",
+    )
+
+    text = build_tui_preview_text(info, config)
+
+    assert f"Zielordner: {tmp_path / 'Aufnahmen' / '2026' / '2026-05-24 - Taufe'}" in text
 
 
 def test_tui_preview_keeps_placeholders_for_missing_fields(tmp_path):
@@ -174,6 +198,125 @@ def test_tui_field_labels_mark_unneeded_and_optional_fields(tmp_path):
     assert bibelstunde_labels["bible"] == "Hauptbibelstelle"
     assert bibelstunde_labels["speaker"] == "Redner / Leitung"
     assert lobpreis_labels["speaker"] == "Leitung (optional)"
+
+
+def test_tui_service_type_defaults_follow_weekday(tmp_path):
+    config = AppConfig(
+        vmix_storage=tmp_path / "vmix",
+        recordings_base=tmp_path / "Aufnahmen",
+        mp3_base=tmp_path / "Predigten",
+    )
+
+    assert default_tui_service_type_name(config, date(2026, 5, 24)) == "Predigt"
+    assert default_tui_service_type_name(config, date(2026, 5, 20)) == "Bibelstunde"
+    assert default_tui_service_type_name(config, date(2026, 5, 22)) == "Gebetsstunde"
+    assert default_tui_service_type_name(config, date(2026, 5, 21)) == "Predigt"
+
+
+def test_tui_service_types_include_configured_custom_types(tmp_path):
+    from predigt_uploader.models import ServiceTypeConfig
+
+    config = AppConfig(
+        vmix_storage=tmp_path / "vmix",
+        recordings_base=tmp_path / "Aufnahmen",
+        mp3_base=tmp_path / "Predigten",
+        custom_service_types=(
+            ServiceTypeConfig("Andacht", True, True, False, "Andacht ({title}_{bible_reference}){extension}"),
+        ),
+    )
+
+    names = [service_type.name for service_type in service_types_for_tui(config)]
+
+    assert "Predigt" in names
+    assert "Andacht" in names
+    assert service_type_by_name(config, "andacht").name == "Andacht"
+
+
+def test_tui_metadata_info_builds_sermon_info_with_folder_note(tmp_path):
+    config = AppConfig(
+        vmix_storage=tmp_path / "vmix",
+        recordings_base=tmp_path / "Aufnahmen",
+        mp3_base=tmp_path / "Predigten",
+    )
+
+    info = build_tui_metadata_info(
+        config=config,
+        date_text="2026-05-24",
+        service_type_name="Predigt",
+        title="Lehre statt Leere",
+        bible_reference="Johannes 3,16",
+        speaker="Max Muster",
+        folder_note="Taufe",
+    )
+
+    assert info.sermon_date == date(2026, 5, 24)
+    assert info.sermon_type == "Predigt"
+    assert info.folder_note == "Taufe"
+
+
+def test_tui_metadata_validation_requires_only_fields_for_service_type(tmp_path):
+    config = AppConfig(
+        vmix_storage=tmp_path / "vmix",
+        recordings_base=tmp_path / "Aufnahmen",
+        mp3_base=tmp_path / "Predigten",
+    )
+    predigt = build_tui_metadata_info(
+        config=config,
+        date_text="2026-05-24",
+        service_type_name="Predigt",
+        title="",
+        bible_reference="",
+        speaker="",
+        folder_note="",
+    )
+    bibelstunde = build_tui_metadata_info(
+        config=config,
+        date_text="2026-05-20",
+        service_type_name="Bibelstunde",
+        title="",
+        bible_reference="Johannes 3,16",
+        speaker="Max Muster",
+        folder_note="",
+    )
+    gebetsstunde = build_tui_metadata_info(
+        config=config,
+        date_text="2026-05-22",
+        service_type_name="Gebetsstunde",
+        title="Gebet und Dank",
+        bible_reference="",
+        speaker="",
+        folder_note="",
+    )
+
+    assert validate_tui_metadata(predigt, config, date_text="2026-05-24") == (
+        "Titel fehlt.",
+        "Hauptbibelstelle fehlt.",
+        "Redner fehlt.",
+    )
+    assert validate_tui_metadata(bibelstunde, config, date_text="2026-05-20") == ()
+    assert validate_tui_metadata(gebetsstunde, config, date_text="2026-05-22") == ()
+
+
+def test_tui_metadata_validation_reports_invalid_date(tmp_path):
+    config = AppConfig(
+        vmix_storage=tmp_path / "vmix",
+        recordings_base=tmp_path / "Aufnahmen",
+        mp3_base=tmp_path / "Predigten",
+    )
+    info = build_tui_metadata_info(
+        config=config,
+        date_text="24.05.2026",
+        service_type_name="Bibelstunde",
+        title="",
+        bible_reference="Johannes 3,16",
+        speaker="Max Muster",
+        folder_note="",
+    )
+
+    messages = validate_tui_metadata(info, config, date_text="24.05.2026")
+
+    assert messages == ("Datum bitte im Format YYYY-MM-DD eingeben.",)
+    assert "Bitte pruefen:" in build_tui_validation_text(messages)
 
 
 def test_tui_settings_lines_show_local_paths_and_workflow_defaults(tmp_path):

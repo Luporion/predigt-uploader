@@ -165,7 +165,7 @@ def test_release_zip_script_documents_included_and_excluded_paths() -> None:
     release_name = re.search(r'\$ReleaseName\s*=\s*"([^"]+)"', content)
     assert release_name is not None
     assert release_name.group(1).startswith("predigt-uploader-v$Version-")
-    assert release_name.group(1).endswith("textual-preview")
+    assert release_name.group(1).endswith("textual-metadata-preview")
     assert "dist" in content
     assert "Compress-Archive" in content
     assert '"src"' in content

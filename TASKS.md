@@ -77,6 +77,7 @@
 - [x] optionale experimentelle Textual-Oberflaeche vorbereiten
 - [x] allgemeine Texte nach Dienstart-Einfuehrung auf Aufnahme/Veranstaltung bereinigen
 - [x] Textual-Prototyp mit MP4-/MP3-Vorschau, Zielordner und Einstellungen-Anzeige erweitern
+- [x] Textual-Prototyp lesbarer beschriften und Start-/Hinweisbereiche verbessern
 - [x] danach bestehenden lokalen Workflow weiterverwenden
 
 ## Phase 2: Windows-Nutzerfreundlichkeit

@@ -6,7 +6,7 @@ from pathlib import Path
 from .config import default_config, default_service_types, load_config
 from .filename import build_filename_preview
 from .folders import suggest_folder
-from .models import AppConfig, SermonInfo
+from .models import AppConfig, SermonInfo, ServiceTypeConfig
 
 
 def build_tui_preview_text(info: SermonInfo, config: AppConfig) -> str:
@@ -14,9 +14,20 @@ def build_tui_preview_text(info: SermonInfo, config: AppConfig) -> str:
     target_folder = suggest_folder(config, info)
     return "\n".join(
         [
-            f"MP4: {preview.mp4}",
-            f"MP3: {preview.mp3}",
+            f"MP4-Dateiname: {preview.mp4}",
+            f"MP3-Dateiname: {preview.mp3}",
             f"Zielordner: {target_folder}",
+        ]
+    )
+
+
+def build_tui_start_status_text(config: AppConfig) -> str:
+    return "\n".join(
+        [
+            "Experimentelle Oberfläche",
+            "Produktiver Workflow: normaler Wizard",
+            f"Ziel-Basisordner: {config.recordings_base}",
+            f"Rohaufnahme-Ordner: {config.vmix_storage}",
         ]
     )
 
@@ -30,6 +41,29 @@ def build_tui_settings_lines(config: AppConfig) -> tuple[str, ...]:
         f"Jahresordner-Format: {config.year_folder_template}",
         f"Rohaufnahme-Aufräumen: {config.raw_archive_mode}",
     )
+
+
+def service_type_by_name(config: AppConfig, name: str) -> ServiceTypeConfig:
+    for service_type in default_service_types(config):
+        if service_type.name == name:
+            return service_type
+    return default_service_types(config)[0]
+
+
+def build_tui_field_labels(service_type: ServiceTypeConfig) -> dict[str, str]:
+    title_suffix = "" if service_type.requires_title else " (nicht nötig)"
+    bible_suffix = "" if service_type.requires_bible_reference else " (optional)"
+    speaker_suffix = "" if service_type.requires_speaker else " (optional)"
+    if not service_type.optional_bible_reference and not service_type.requires_bible_reference:
+        bible_suffix = " (nicht nötig)"
+    speaker_label = service_type.speaker_label
+    if speaker_label.casefold() == "redner":
+        speaker_label = "Redner / Leitung"
+    return {
+        "title": f"{service_type.title_label}{title_suffix}",
+        "bible": f"{service_type.bible_reference_label}{bible_suffix}",
+        "speaker": f"{speaker_label}{speaker_suffix}",
+    }
 
 
 def run_tui(config_path: str | None = None) -> int:
@@ -48,11 +82,14 @@ def run_tui(config_path: str | None = None) -> int:
         def compose(self) -> ComposeResult:
             yield Header(show_clock=False)
             yield Static("PredigtUploader", id="title")
-            yield Static("Experimentelle Textoberfläche. Der normale Wizard bleibt Standard.")
-            yield Button("Neue Aufnahme vorbereiten", id="new", variant="primary")
-            yield Button("Einstellungen", id="settings")
-            yield Button("Systemcheck-Hinweis", id="systemcheck")
-            yield Button("Beenden", id="quit")
+            with Horizontal():
+                with Vertical(id="start_actions"):
+                    yield Button("Neue Aufnahme vorbereiten", id="new", variant="primary")
+                    yield Button("Einstellungen", id="settings")
+                    yield Button("Systemcheck-Hinweis", id="systemcheck")
+                    yield Button("Beenden", id="quit")
+                with Vertical(id="status_box"):
+                    yield Static(build_tui_start_status_text(config), id="start_status")
             yield Footer()
 
         def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -81,15 +118,22 @@ def run_tui(config_path: str | None = None) -> int:
                 with Vertical(id="form"):
                     yield Label("Dienstart")
                     yield Select(service_names, value="Predigt", id="service_type")
-                    yield Label("Datum der Aufnahme")
+                    yield Label("Datum")
                     yield Input(value=date.today().isoformat(), placeholder="YYYY-MM-DD", id="sermon_date")
+                    yield Label("Titel", id="title_label")
                     yield Input(placeholder="Titel oder Thema", id="title_input")
+                    yield Label("Hauptbibelstelle", id="bible_label")
                     yield Input(placeholder="Bibelstelle", id="bible_input")
+                    yield Label("Redner / Leitung", id="speaker_label")
                     yield Input(placeholder="Redner oder Leitung", id="speaker_input")
+                    yield Static(
+                        "Der vollständige Workflow läuft weiterhin im normalen Wizard.",
+                        id="workflow_note",
+                    )
                     yield Button("Zurück", id="back")
                     yield Button("Weiter", id="next", variant="primary")
                 with Vertical(id="preview_box"):
-                    yield Label("Live-Dateiname", id="preview_heading")
+                    yield Label("Live-Vorschau", id="preview_heading")
                     yield Static("", id="filename_preview")
             yield Footer()
 
@@ -105,13 +149,13 @@ def run_tui(config_path: str | None = None) -> int:
         def on_button_pressed(self, event: Button.Pressed) -> None:
             if event.button.id == "back":
                 self.app.pop_screen()
-            elif event.button.id == "next":
-                self.notify("Der vollständige Workflow läuft weiterhin im normalen Wizard.")
 
         def _update_preview(self) -> None:
             preview_widget = self.query_one("#filename_preview", Static)
             sermon_date = _parse_date(self.query_one("#sermon_date", Input).value)
             service_type = str(self.query_one("#service_type", Select).value or "Predigt")
+            service_config = service_type_by_name(self.app_config, service_type)
+            self._update_field_state(service_config)
             info = SermonInfo(
                 sermon_date=sermon_date,
                 title=self.query_one("#title_input", Input).value,
@@ -120,6 +164,19 @@ def run_tui(config_path: str | None = None) -> int:
                 sermon_type=service_type,
             )
             preview_widget.update(build_tui_preview_text(info, self.app_config))
+
+        def _update_field_state(self, service_type: ServiceTypeConfig) -> None:
+            labels = build_tui_field_labels(service_type)
+            self.query_one("#title_label", Label).update(labels["title"])
+            self.query_one("#bible_label", Label).update(labels["bible"])
+            self.query_one("#speaker_label", Label).update(labels["speaker"])
+            self.query_one("#title_input", Input).disabled = not service_type.requires_title
+            self.query_one("#bible_input", Input).disabled = (
+                not service_type.requires_bible_reference and not service_type.optional_bible_reference
+            )
+            self.query_one("#speaker_input", Input).disabled = (
+                not service_type.requires_speaker and not service_type.optional_speaker
+            )
 
     class SettingsScreen(Screen[None]):
         def __init__(self, app_config: AppConfig) -> None:
@@ -158,6 +215,15 @@ def run_tui(config_path: str | None = None) -> int:
         #screen_note {
             margin-bottom: 1;
         }
+        #start_actions {
+            width: 1fr;
+            padding-right: 2;
+        }
+        #status_box {
+            width: 1fr;
+            border: solid $accent;
+            padding: 1;
+        }
         #form {
             width: 1fr;
             padding-right: 2;
@@ -169,6 +235,11 @@ def run_tui(config_path: str | None = None) -> int:
         }
         #preview_heading {
             text-style: bold;
+            margin-bottom: 1;
+        }
+        #workflow_note {
+            border: solid $accent;
+            padding: 1;
             margin-bottom: 1;
         }
         Input, Select, Button {

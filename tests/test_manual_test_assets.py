@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 
@@ -132,7 +133,10 @@ def test_release_zip_script_documents_included_and_excluded_paths() -> None:
 
     content = script.read_text(encoding="utf-8")
 
-    assert "predigt-uploader-v$Version-local" in content
+    release_name = re.search(r'\$ReleaseName\s*=\s*"([^"]+)"', content)
+    assert release_name is not None
+    assert release_name.group(1).startswith("predigt-uploader-v$Version-")
+    assert release_name.group(1).endswith("textual-preview")
     assert "dist" in content
     assert "Compress-Archive" in content
     assert '"src"' in content
@@ -152,6 +156,7 @@ def test_release_zip_script_documents_included_and_excluded_paths() -> None:
     assert '"build"' in content
     assert '"__pycache__"' in content
     assert '".pytest_cache"' in content
+    assert '".pytest-tmp"' in content
     assert '"config.toml"' in content
     assert '"*.egg-info"' in content
     assert '"*.pyc"' in content

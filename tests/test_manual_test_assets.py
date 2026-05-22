@@ -32,6 +32,33 @@ def test_run_wizard_script_checks_venv_and_starts_cli_wizard() -> None:
     assert "-m predigt_uploader @args" in content
 
 
+def test_pytest_config_does_not_pin_machine_local_temp_paths() -> None:
+    config = PROJECT_ROOT / "pyproject.toml"
+
+    content = config.read_text(encoding="utf-8")
+
+    assert 'addopts = "-q"' in content
+    assert "--basetemp=.pytest-tmp" not in content
+    assert "--basetemp=.pytest-tmp/run" not in content
+    assert 'cache_dir = ".pytest-tmp/cache"' not in content
+
+
+def test_test_script_uses_portable_temp_and_cache_folders() -> None:
+    script = PROJECT_ROOT / "scripts" / "test.ps1"
+
+    content = script.read_text(encoding="utf-8")
+
+    assert script.exists()
+    assert "[Console]::OutputEncoding" in content
+    assert "$env:LOCALAPPDATA" in content
+    assert "PredigtUploader\\pytest" in content
+    assert "$env:TEMP" in content
+    assert "PredigtUploader-pytest" in content
+    assert "--basetemp" in content
+    assert "cache_dir=" in content
+    assert "-m pytest" in content
+
+
 def test_local_setup_script_prepares_venv_and_installs_package() -> None:
     script = PROJECT_ROOT / "scripts" / "setup-local.ps1"
 
@@ -71,6 +98,7 @@ def test_windows_starter_scripts_avoid_umlauts_in_console_text() -> None:
         PROJECT_ROOT / "PredigtUploader starten.cmd",
         PROJECT_ROOT / "PredigtUploader einrichten.cmd",
         PROJECT_ROOT / "PredigtUploader Systemcheck.cmd",
+        PROJECT_ROOT / "Tests ausführen.cmd",
     ]
 
     for path in script_paths:
@@ -100,6 +128,7 @@ def test_clickable_cmd_launchers_exist_and_call_expected_scripts() -> None:
         "PredigtUploader starten.cmd": "scripts\\run-wizard.ps1",
         "PredigtUploader einrichten.cmd": "scripts\\setup-local.ps1",
         "PredigtUploader Systemcheck.cmd": "scripts\\check-system.ps1",
+        "Tests ausführen.cmd": "scripts\\test.ps1",
     }
 
     for filename, expected_script in launchers.items():
@@ -149,6 +178,7 @@ def test_release_zip_script_documents_included_and_excluded_paths() -> None:
     assert '"PredigtUploader starten.cmd"' in content
     assert '"PredigtUploader einrichten.cmd"' in content
     assert '"PredigtUploader Systemcheck.cmd"' in content
+    assert '"Tests ausführen.cmd"' in content
     assert '".git"' in content
     assert '".venv"' in content
     assert '"logs"' in content
@@ -157,6 +187,8 @@ def test_release_zip_script_documents_included_and_excluded_paths() -> None:
     assert '"__pycache__"' in content
     assert '".pytest_cache"' in content
     assert '".pytest-tmp"' in content
+    assert '"test-extract"' in content
+    assert '"Windows PowerShell.txt"' in content
     assert '"config.toml"' in content
     assert '"*.egg-info"' in content
     assert '"*.pyc"' in content

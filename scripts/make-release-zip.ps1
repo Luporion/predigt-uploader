@@ -21,7 +21,8 @@ $ReleaseItems = @(
     "config.example.toml",
     "PredigtUploader starten.cmd",
     "PredigtUploader einrichten.cmd",
-    "PredigtUploader Systemcheck.cmd"
+    "PredigtUploader Systemcheck.cmd",
+    "Tests ausführen.cmd"
 )
 
 $ExcludedNames = @(
@@ -32,6 +33,9 @@ $ExcludedNames = @(
     "build",
     "__pycache__",
     ".pytest_cache",
+    ".pytest-tmp",
+    "test-extract",
+    "Windows PowerShell.txt",
     "config.toml"
 )
 

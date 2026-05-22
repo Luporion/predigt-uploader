@@ -1,5 +1,6 @@
 # Python
 __pycache__/
+*.pyc
 *.py[cod]
 *.pyo
 .pytest_cache/
@@ -19,6 +20,7 @@ config.toml
 *.log
 logs/
 reports/*.zip
+test-extract/
 
 # Build outputs
 dist/

@@ -3,8 +3,8 @@ $ErrorActionPreference = "Stop"
 [Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)
 $OutputEncoding = [Console]::OutputEncoding
 
-$Version = "0.1.7"
-$ReleaseName = "predigt-uploader-v$Version-textual-preview"
+$Version = "0.1.8"
+$ReleaseName = "predigt-uploader-v$Version-textual-metadata-preview"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Resolve-Path (Join-Path $ScriptDir "..")
 $DistDir = Join-Path $ProjectRoot "dist"

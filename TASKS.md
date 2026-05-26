@@ -80,6 +80,7 @@
 - [x] Textual-Prototyp lesbarer beschriften und Start-/Hinweisbereiche verbessern
 - [x] Textual-Prototyp um reine MP4-Dateiuebersicht fuer Schnitt- und Rohaufnahmeordner erweitern
 - [x] Textual-Metadaten-Erfassung mit Dienstart-Defaults, Pflichtfeldpruefung und Ordner-Besonderheit ausbauen
+- [x] Textual-Startablauf mit Quelle-Auswahl, MP4-Filterliste und Preview-Uebergabeobjekt vorbereiten
 - [x] danach bestehenden lokalen Workflow weiterverwenden
 
 ## Phase 2: Windows-Nutzerfreundlichkeit

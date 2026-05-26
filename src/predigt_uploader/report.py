@@ -1,6 +1,12 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from .models import ProcessingPlan
+
+
+def summary_file_path(target_folder: Path) -> Path:
+    return target_folder / "predigt-zusammenfassung.txt"
 
 
 def build_summary_text(plan: ProcessingPlan) -> str:
@@ -33,5 +39,5 @@ def build_summary_text(plan: ProcessingPlan) -> str:
 
 def write_summary_file(plan: ProcessingPlan) -> None:
     target_folder = plan.target_mp4.parent
-    summary_path = target_folder / "predigt-zusammenfassung.txt"
+    summary_path = summary_file_path(target_folder)
     summary_path.write_text(build_summary_text(plan), encoding="utf-8")

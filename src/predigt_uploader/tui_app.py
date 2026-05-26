@@ -1,14 +1,48 @@
 from __future__ import annotations
 
+import re
+from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 
 from .config import default_service_types, load_config
-from .filename import build_filename_preview, service_type_config_for
+from .filename import build_filename_preview, build_media_filename, service_type_config_for
 from .folders import suggest_folder
-from .models import AppConfig, SermonInfo, ServiceTypeConfig
+from .models import AppConfig, ProcessingPlan, SermonInfo, ServiceTypeConfig
+from .report import summary_file_path
 
 TUI_MP4_PREVIEW_LIMIT = 5
+TUI_FILE_CHOICE_LIMIT = 10
+
+
+@dataclass(frozen=True)
+class TuiDateOption:
+    label: str
+    value: date
+    kind: str
+
+
+@dataclass(frozen=True)
+class TuiPreparation:
+    source_mp4: Path | None
+    raw_recording: Path | None
+    already_cut: bool
+    info: SermonInfo
+    target_folder: Path
+    target_mp4: Path
+    target_mp3: Path
+    summary_path: Path
+
+    @property
+    def plan(self) -> ProcessingPlan | None:
+        if self.source_mp4 is None:
+            return None
+        return ProcessingPlan(
+            source_mp4=self.source_mp4,
+            target_mp4=self.target_mp4,
+            target_mp3=self.target_mp3,
+            info=self.info,
+        )
 
 
 def load_tui_config(config_path: str | None = None) -> AppConfig:
@@ -16,14 +50,82 @@ def load_tui_config(config_path: str | None = None) -> AppConfig:
     return load_config(explicit_config)
 
 
+GERMAN_MONTHS = {
+    "januar": 1,
+    "jan": 1,
+    "februar": 2,
+    "feb": 2,
+    "maerz": 3,
+    "mrz": 3,
+    "april": 4,
+    "apr": 4,
+    "mai": 5,
+    "juni": 6,
+    "jun": 6,
+    "juli": 7,
+    "jul": 7,
+    "august": 8,
+    "aug": 8,
+    "september": 9,
+    "sep": 9,
+    "sept": 9,
+    "oktober": 10,
+    "okt": 10,
+    "november": 11,
+    "nov": 11,
+    "dezember": 12,
+    "dez": 12,
+}
+
+
 def build_tui_preview_text(info: SermonInfo, config: AppConfig) -> str:
     preview = build_filename_preview(info, config)
     target_folder = suggest_folder(config, info)
+    summary_path = summary_file_path(target_folder)
     return "\n".join(
         [
             f"Zielordner: {target_folder}",
             f"MP4-Dateiname: {preview.mp4}",
             f"MP3-Dateiname: {preview.mp3}",
+            f"Zusammenfassung: {summary_path}",
+        ]
+    )
+
+
+def build_tui_preparation(
+    *,
+    config: AppConfig,
+    source_mp4: Path | None,
+    raw_recording: Path | None,
+    already_cut: bool,
+    info: SermonInfo,
+) -> TuiPreparation:
+    target_folder = suggest_folder(config, info)
+    target_mp4 = target_folder / build_media_filename(info, config, ".mp4")
+    target_mp3 = target_folder / build_media_filename(info, config, ".mp3")
+    return TuiPreparation(
+        source_mp4=source_mp4,
+        raw_recording=raw_recording,
+        already_cut=already_cut,
+        info=info,
+        target_folder=target_folder,
+        target_mp4=target_mp4,
+        target_mp3=target_mp3,
+        summary_path=summary_file_path(target_folder),
+    )
+
+
+def build_tui_preparation_text(preparation: TuiPreparation) -> str:
+    source_text = str(preparation.source_mp4) if preparation.source_mp4 is not None else "noch nicht ausgewaehlt"
+    raw_text = str(preparation.raw_recording) if preparation.raw_recording is not None else "-"
+    return "\n".join(
+        [
+            f"Quell-MP4: {source_text}",
+            f"Rohaufnahme: {raw_text}",
+            f"Zielordner: {preparation.target_folder}",
+            f"Finale MP4: {preparation.target_mp4.name}",
+            f"Finale MP3: {preparation.target_mp3.name}",
+            f"Zusammenfassung: {preparation.summary_path}",
         ]
     )
 
@@ -77,6 +179,87 @@ def _format_tui_file_line(path: Path) -> str:
     changed = datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M")
     size_mb = stat.st_size / (1024 * 1024)
     return f"- {path.name} | geaendert: {changed} | Groesse: {size_mb:.1f} MB"
+
+
+def tui_cut_mp4_folder(config: AppConfig) -> Path:
+    return config.cut_mp4_folder or config.vmix_storage
+
+
+def newest_tui_mp4_candidates(
+    folder: Path,
+    *,
+    search_text: str = "",
+    limit: int = TUI_FILE_CHOICE_LIMIT,
+) -> tuple[Path, ...]:
+    if not folder.exists() or not folder.is_dir():
+        return ()
+    normalized = search_text.strip().casefold()
+    files = [path for path in folder.glob("*.mp4") if path.is_file()]
+    if normalized:
+        files = [path for path in files if normalized in path.name.casefold()]
+    return tuple(sorted(files, key=lambda path: path.stat().st_mtime, reverse=True)[:limit])
+
+
+def build_tui_file_choice_lines(
+    folder: Path,
+    *,
+    search_text: str = "",
+    limit: int = TUI_FILE_CHOICE_LIMIT,
+) -> tuple[str, ...]:
+    candidates = newest_tui_mp4_candidates(folder, search_text=search_text, limit=limit)
+    if not folder.exists():
+        return (f"Ordner wurde nicht gefunden: {folder}",)
+    if not folder.is_dir():
+        return (f"Pfad ist kein Ordner: {folder}",)
+    if not candidates:
+        return ("Keine passenden MP4-Dateien gefunden.",)
+    return tuple(_format_tui_file_line(path) for path in candidates)
+
+
+def detect_tui_recording_date_from_filename(path: Path) -> date | None:
+    match = re.search(r"\b(\d{1,2})\s+([A-Za-zÄÖÜäöüß]+)\s+(\d{4})\b", path.stem)
+    if match is None:
+        return None
+    day = int(match.group(1))
+    month_name = match.group(2).casefold().replace("ä", "ae")
+    month = GERMAN_MONTHS.get(month_name)
+    if month is None:
+        return None
+    try:
+        return date(int(match.group(3)), month, day)
+    except ValueError:
+        return None
+
+
+def tui_file_modified_date(path: Path) -> date | None:
+    try:
+        return datetime.fromtimestamp(path.stat().st_mtime).date()
+    except OSError:
+        return None
+
+
+def build_tui_date_options(source_mp4: Path | None, today: date | None = None) -> tuple[TuiDateOption, ...]:
+    current = today or date.today()
+    options = [TuiDateOption(f"Heutiges Datum: {current.isoformat()}", current, "today")]
+    if source_mp4 is not None:
+        filename_date = detect_tui_recording_date_from_filename(source_mp4)
+        if filename_date is not None:
+            options.append(TuiDateOption(f"Aufnahmedatum aus Dateiname: {filename_date.isoformat()}", filename_date, "filename"))
+        else:
+            modified_date = tui_file_modified_date(source_mp4)
+            if modified_date is not None:
+                options.append(TuiDateOption(f"Dateidatum der MP4: {modified_date.isoformat()}", modified_date, "filedate"))
+    options.append(TuiDateOption("Benutzerdefiniertes Datum", current, "custom"))
+    return tuple(options)
+
+
+def date_from_tui_option(kind: str, options: tuple[TuiDateOption, ...], custom_text: str) -> date:
+    if kind == "custom":
+        return parse_tui_date_or_today(custom_text)
+    for option in options:
+        if option.kind == kind:
+            return option.value
+    return options[0].value
 
 
 def build_tui_settings_lines(config: AppConfig) -> tuple[str, ...]:
@@ -214,7 +397,7 @@ def run_tui(config_path: str | None = None) -> int:
 
         def on_button_pressed(self, event: Button.Pressed) -> None:
             if event.button.id == "new":
-                self.app.push_screen(MetadataPreviewScreen(config))
+                self.app.push_screen(SourceChoiceScreen(config))
             elif event.button.id == "files":
                 self.app.push_screen(FileCandidatesScreen(config))
             elif event.button.id == "settings":
@@ -224,15 +407,135 @@ def run_tui(config_path: str | None = None) -> int:
             elif event.button.id == "quit":
                 self.app.exit()
 
-    class MetadataPreviewScreen(Screen[None]):
+    class SourceChoiceScreen(Screen[None]):
         def __init__(self, app_config: AppConfig) -> None:
             super().__init__()
             self.app_config = app_config
 
         def compose(self) -> ComposeResult:
+            yield Header(show_clock=False)
+            yield Static("Neue Aufnahme vorbereiten", id="screen_title")
+            yield Static(
+                "Textual sammelt Quelle und Metadaten. Die Verarbeitung laeuft weiterhin im normalen Wizard.",
+                id="screen_note",
+            )
+            yield Button("Ja, fertig geschnittene MP4 auswaehlen", id="cut", variant="primary")
+            yield Button("Nein, Rohaufnahme auswaehlen", id="raw")
+            yield Button("Abbrechen", id="cancel")
+            yield Footer()
+
+        def on_button_pressed(self, event: Button.Pressed) -> None:
+            if event.button.id == "cut":
+                self.app.push_screen(FileSelectionScreen(self.app_config, already_cut=True))
+            elif event.button.id == "raw":
+                self.app.push_screen(FileSelectionScreen(self.app_config, already_cut=False))
+            elif event.button.id == "cancel":
+                self.app.pop_screen()
+
+    class FileSelectionScreen(Screen[None]):
+        def __init__(self, app_config: AppConfig, *, already_cut: bool) -> None:
+            super().__init__()
+            self.app_config = app_config
+            self.already_cut = already_cut
+
+        @property
+        def source_folder(self) -> Path:
+            if self.already_cut:
+                return tui_cut_mp4_folder(self.app_config)
+            return self.app_config.vmix_storage
+
+        def compose(self) -> ComposeResult:
+            yield Header(show_clock=False)
+            title = "Geschnittene MP4 auswaehlen" if self.already_cut else "Rohaufnahme auswaehlen"
+            yield Static(title, id="screen_title")
+            if self.already_cut:
+                note = "Waehle die bereits geschnittene MP4. Es wird noch nichts kopiert oder verschoben."
+            else:
+                note = "Waehle die Rohaufnahme. Danach bitte weiterhin im normalen Wizard oder in LosslessCut schneiden."
+            yield Static(note, id="screen_note")
+            yield Static(f"Ordner: {self.source_folder}", id="source_folder")
+            yield Input(placeholder="Dateiname filtern", id="file_search")
+            yield Static("", id="file_list")
+            for index in range(TUI_FILE_CHOICE_LIMIT):
+                yield Button("", id=f"file_{index}")
+            yield Button("Zurueck", id="back")
+            yield Button("Abbrechen", id="cancel")
+            yield Footer()
+
+        def on_mount(self) -> None:
+            self._update_file_buttons()
+
+        def on_input_changed(self, _event: Input.Changed) -> None:
+            self._update_file_buttons()
+
+        def on_button_pressed(self, event: Button.Pressed) -> None:
+            if event.button.id == "back":
+                self.app.pop_screen()
+                return
+            if event.button.id == "cancel":
+                self.app.pop_screen()
+                self.app.pop_screen()
+                return
+            if event.button.id and event.button.id.startswith("file_"):
+                index = int(event.button.id.removeprefix("file_"))
+                candidates = self._candidates()
+                if index >= len(candidates):
+                    return
+                selected = candidates[index]
+                raw_recording = None if self.already_cut else selected
+                self.app.push_screen(
+                    MetadataPreviewScreen(
+                        self.app_config,
+                        source_mp4=selected,
+                        raw_recording=raw_recording,
+                        already_cut=self.already_cut,
+                    )
+                )
+
+        def _candidates(self) -> tuple[Path, ...]:
+            return newest_tui_mp4_candidates(
+                self.source_folder,
+                search_text=self.query_one("#file_search", Input).value,
+                limit=TUI_FILE_CHOICE_LIMIT,
+            )
+
+        def _update_file_buttons(self) -> None:
+            candidates = self._candidates()
+            lines = build_tui_file_choice_lines(
+                self.source_folder,
+                search_text=self.query_one("#file_search", Input).value,
+                limit=TUI_FILE_CHOICE_LIMIT,
+            )
+            self.query_one("#file_list", Static).update("\n".join(lines))
+            for index in range(TUI_FILE_CHOICE_LIMIT):
+                button = self.query_one(f"#file_{index}", Button)
+                if index < len(candidates):
+                    button.label = candidates[index].name
+                    button.disabled = False
+                else:
+                    button.label = "-"
+                    button.disabled = True
+
+    class MetadataPreviewScreen(Screen[None]):
+        def __init__(
+            self,
+            app_config: AppConfig,
+            *,
+            source_mp4: Path | None = None,
+            raw_recording: Path | None = None,
+            already_cut: bool = True,
+        ) -> None:
+            super().__init__()
+            self.app_config = app_config
+            self.source_mp4 = source_mp4
+            self.raw_recording = raw_recording
+            self.already_cut = already_cut
+
+        def compose(self) -> ComposeResult:
             today = date.today()
+            date_options = build_tui_date_options(self.source_mp4, today)
             service_names = [(service.name, service.name) for service in service_types_for_tui(self.app_config)]
-            default_service = default_tui_service_type_name(self.app_config, today)
+            default_service = default_tui_service_type_name(self.app_config, date_options[0].value)
             yield Static("Metadaten erfassen", id="screen_title")
             yield Static(
                 "Experiment: Diese Oberfläche speichert noch nichts und ersetzt den normalen Wizard nicht.",
@@ -243,7 +546,8 @@ def run_tui(config_path: str | None = None) -> int:
                     yield Label("Dienstart")
                     yield Select(service_names, value=default_service, id="service_type")
                     yield Label("Datum")
-                    yield Input(value=today.isoformat(), placeholder="YYYY-MM-DD", id="sermon_date")
+                    yield Select([(option.label, option.kind) for option in date_options], value=date_options[0].kind, id="date_choice")
+                    yield Input(value=date_options[0].value.isoformat(), placeholder="YYYY-MM-DD", id="sermon_date")
                     yield Label("Titel", id="title_label")
                     yield Input(placeholder="Titel oder Thema", id="title_input")
                     yield Label("Hauptbibelstelle", id="bible_label")
@@ -262,6 +566,7 @@ def run_tui(config_path: str | None = None) -> int:
                     yield Label("Live-Vorschau", id="preview_heading")
                     yield Static("", id="filename_preview")
                     yield Static("", id="validation_status")
+                    yield Static("", id="source_status")
             yield Footer()
 
         def on_mount(self) -> None:
@@ -286,35 +591,57 @@ def run_tui(config_path: str | None = None) -> int:
         def _update_preview(self) -> None:
             preview_widget = self.query_one("#filename_preview", Static)
             validation_widget = self.query_one("#validation_status", Static)
+            source_widget = self.query_one("#source_status", Static)
             service_type = str(self.query_one("#service_type", Select).value or default_tui_service_type_name(self.app_config, date.today()))
             service_config = service_type_by_name(self.app_config, service_type)
             self._update_field_state(service_config)
-            info = build_tui_metadata_info(
+            info = self._current_info()
+            preparation = build_tui_preparation(
                 config=self.app_config,
-                date_text=self.query_one("#sermon_date", Input).value,
+                source_mp4=self.source_mp4,
+                raw_recording=self.raw_recording,
+                already_cut=self.already_cut,
+                info=info,
+            )
+            preview_widget.update(build_tui_preparation_text(preparation))
+            validation_widget.update(build_tui_validation_text(self._validation_messages(info)))
+            source_widget.update(self._source_hint())
+
+        def _validation_messages(self, info: SermonInfo | None = None) -> tuple[str, ...]:
+            date_text = self._validation_date_text()
+            if info is None:
+                info = self._current_info()
+            return validate_tui_metadata(info, self.app_config, date_text=date_text)
+
+        def _current_info(self) -> SermonInfo:
+            service_type = str(self.query_one("#service_type", Select).value or default_tui_service_type_name(self.app_config, date.today()))
+            return build_tui_metadata_info(
+                config=self.app_config,
+                date_text=self._selected_date().isoformat(),
                 service_type_name=service_type,
                 title=self.query_one("#title_input", Input).value,
                 bible_reference=self.query_one("#bible_input", Input).value,
                 speaker=self.query_one("#speaker_input", Input).value,
                 folder_note=self.query_one("#folder_note_input", Input).value,
             )
-            preview_widget.update(build_tui_preview_text(info, self.app_config))
-            validation_widget.update(build_tui_validation_text(self._validation_messages(info)))
 
-        def _validation_messages(self, info: SermonInfo | None = None) -> tuple[str, ...]:
-            date_text = self.query_one("#sermon_date", Input).value
-            if info is None:
-                service_type = str(self.query_one("#service_type", Select).value or default_tui_service_type_name(self.app_config, date.today()))
-                info = build_tui_metadata_info(
-                    config=self.app_config,
-                    date_text=date_text,
-                    service_type_name=service_type,
-                    title=self.query_one("#title_input", Input).value,
-                    bible_reference=self.query_one("#bible_input", Input).value,
-                    speaker=self.query_one("#speaker_input", Input).value,
-                    folder_note=self.query_one("#folder_note_input", Input).value,
-                )
-            return validate_tui_metadata(info, self.app_config, date_text=date_text)
+        def _selected_date(self) -> date:
+            options = build_tui_date_options(self.source_mp4)
+            kind = str(self.query_one("#date_choice", Select).value or "today")
+            return date_from_tui_option(kind, options, self.query_one("#sermon_date", Input).value)
+
+        def _validation_date_text(self) -> str:
+            kind = str(self.query_one("#date_choice", Select).value or "today")
+            if kind == "custom":
+                return self.query_one("#sermon_date", Input).value
+            return self._selected_date().isoformat()
+
+        def _source_hint(self) -> str:
+            if self.source_mp4 is None:
+                return "Quelle: noch nicht ausgewaehlt"
+            if self.already_cut:
+                return f"Quelle: geschnittene MP4\n{self.source_mp4}"
+            return "Quelle: Rohaufnahme\nBitte den Schnitt weiterhin bewusst mit LosslessCut/normalem Wizard abschliessen."
 
         def _update_field_state(self, service_type: ServiceTypeConfig) -> None:
             labels = build_tui_field_labels(service_type)

@@ -5,17 +5,24 @@ from predigt_uploader import cli
 from predigt_uploader.config import ConfigLoadError
 from predigt_uploader.models import AppConfig, SermonInfo
 from predigt_uploader.tui_app import (
+    build_tui_date_options,
+    build_tui_file_choice_lines,
     build_tui_metadata_info,
     build_tui_file_candidates_lines,
+    build_tui_preparation,
+    build_tui_preparation_text,
     build_tui_field_labels,
     build_tui_preview_text,
     build_tui_settings_lines,
     build_tui_start_status_text,
     build_tui_validation_text,
     default_tui_service_type_name,
+    detect_tui_recording_date_from_filename,
+    newest_tui_mp4_candidates,
     load_tui_config,
     service_type_by_name,
     service_types_for_tui,
+    tui_cut_mp4_folder,
     validate_tui_metadata,
 )
 
@@ -184,6 +191,37 @@ def test_tui_file_candidates_explain_missing_cut_folder(tmp_path):
     assert "Schnitt-/Exportordner: noch nicht gemerkt" in lines
 
 
+def test_tui_file_choice_filters_newest_mp4_files(tmp_path):
+    folder = tmp_path / "vmix"
+    folder.mkdir()
+    older = folder / "Gottesdienst alt.mp4"
+    newer = folder / "Gottesdienst neu.mp4"
+    other = folder / "Seminar.mp4"
+    older.write_bytes(b"older")
+    newer.write_bytes(b"newer")
+    other.write_bytes(b"other")
+
+    candidates = newest_tui_mp4_candidates(folder, search_text="Gottesdienst", limit=5)
+    lines = build_tui_file_choice_lines(folder, search_text="Gottesdienst", limit=5)
+
+    assert newer in candidates
+    assert older in candidates
+    assert other not in candidates
+    assert any("Gottesdienst neu.mp4" in line for line in lines)
+
+
+def test_tui_cut_folder_prefers_remembered_cut_folder(tmp_path):
+    cut_folder = tmp_path / "schnitt"
+    config = AppConfig(
+        vmix_storage=tmp_path / "vmix",
+        recordings_base=tmp_path / "Aufnahmen",
+        mp3_base=tmp_path / "Predigten",
+        cut_mp4_folder=cut_folder,
+    )
+
+    assert tui_cut_mp4_folder(config) == cut_folder
+
+
 def test_tui_field_labels_mark_unneeded_and_optional_fields(tmp_path):
     config = AppConfig(
         vmix_storage=tmp_path / "vmix",
@@ -252,6 +290,52 @@ def test_tui_metadata_info_builds_sermon_info_with_folder_note(tmp_path):
     assert info.sermon_date == date(2026, 5, 24)
     assert info.sermon_type == "Predigt"
     assert info.folder_note == "Taufe"
+
+
+def test_tui_date_options_use_recording_date_from_filename(tmp_path):
+    source = tmp_path / "Gottesdienst - 10 Mai 2026 - 09-55-08.mp4"
+    source.write_bytes(b"video")
+
+    options = build_tui_date_options(source, today=date(2026, 5, 26))
+
+    assert detect_tui_recording_date_from_filename(source) == date(2026, 5, 10)
+    assert [option.kind for option in options] == ["today", "filename", "custom"]
+    assert options[1].value == date(2026, 5, 10)
+
+
+def test_tui_preparation_uses_shared_filename_folder_and_summary_helpers(tmp_path):
+    source = tmp_path / "quelle.mp4"
+    source.write_bytes(b"video")
+    config = AppConfig(
+        vmix_storage=tmp_path / "vmix",
+        recordings_base=tmp_path / "Aufnahmen",
+        mp3_base=tmp_path / "Predigten",
+    )
+    info = build_tui_metadata_info(
+        config=config,
+        date_text="2026-05-24",
+        service_type_name="Predigt",
+        title="Lehre statt Leere",
+        bible_reference="Johannes 3,16",
+        speaker="Max Muster",
+        folder_note="Taufe",
+    )
+
+    preparation = build_tui_preparation(
+        config=config,
+        source_mp4=source,
+        raw_recording=None,
+        already_cut=True,
+        info=info,
+    )
+    text = build_tui_preparation_text(preparation)
+
+    assert preparation.target_folder == tmp_path / "Aufnahmen" / "2026" / "2026-05-24 - Taufe"
+    assert preparation.target_mp4.name == "Predigt (Lehre statt Leere_Johannes 3,16)_Max Muster.mp4"
+    assert preparation.target_mp3.name == "Predigt (Lehre statt Leere_Johannes 3,16)_Max Muster.mp3"
+    assert preparation.summary_path == preparation.target_folder / "predigt-zusammenfassung.txt"
+    assert preparation.plan is not None
+    assert "Zusammenfassung:" in text
 
 
 def test_tui_metadata_validation_requires_only_fields_for_service_type(tmp_path):

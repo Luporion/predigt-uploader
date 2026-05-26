@@ -15,7 +15,7 @@ Die Umbenennung des anklickbaren Test-Launchers auf den Windows-robusten Dateina
 ## Was wurde umgesetzt?
 
 - Alle konkreten Dateipfad-Referenzen auf die Umlautvariante wurden durch `Tests ausfuehren.cmd` ersetzt.
-- Der Release-ZIP-Build kopiert nun `Tests ausfuehren.cmd`.
+- Der Launcher wurde im Repo auf `Tests ausfuehren.cmd` umbenannt. Das Nutzer-Release enthaelt spaeter bewusst nur die drei Gemeinde-Launcher.
 - Die Asset-Tests erwarten den ASCII-Dateinamen in Script-Liste, Launcher-Dict und Release-Assertions.
 - Status und bestehender Dev-Log nennen den konkreten Dateinamen ebenfalls ASCII-sicher.
 
@@ -32,4 +32,4 @@ Die Umbenennung des anklickbaren Test-Launchers auf den Windows-robusten Dateina
 
 ## Nächster sinnvoller Schritt
 
-Das erzeugte Release-ZIP auf dem Zielrechner entpacken und den Launcher `Tests ausfuehren.cmd` per Doppelklick testen.
+Das erzeugte Release-ZIP auf dem Zielrechner entpacken und pruefen, dass nur die drei Gemeinde-Launcher sichtbar sind.

@@ -178,7 +178,7 @@ def test_release_zip_script_documents_included_and_excluded_paths() -> None:
     assert '"PredigtUploader starten.cmd"' in content
     assert '"PredigtUploader einrichten.cmd"' in content
     assert '"PredigtUploader Systemcheck.cmd"' in content
-    assert '"Tests ausfuehren.cmd"' in content
+    assert '"Tests ausfuehren.cmd"' not in content
     assert '".git"' in content
     assert '".venv"' in content
     assert '"logs"' in content

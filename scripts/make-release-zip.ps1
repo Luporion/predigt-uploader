@@ -21,8 +21,7 @@ $ReleaseItems = @(
     "config.example.toml",
     "PredigtUploader starten.cmd",
     "PredigtUploader einrichten.cmd",
-    "PredigtUploader Systemcheck.cmd",
-    "Tests ausfuehren.cmd"
+    "PredigtUploader Systemcheck.cmd"
 )
 
 $ExcludedNames = @(

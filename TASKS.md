@@ -81,6 +81,8 @@
 - [x] Textual-Prototyp um reine MP4-Dateiuebersicht fuer Schnitt- und Rohaufnahmeordner erweitern
 - [x] Textual-Metadaten-Erfassung mit Dienstart-Defaults, Pflichtfeldpruefung und Ordner-Besonderheit ausbauen
 - [x] Textual-Startablauf mit Quelle-Auswahl, MP4-Filterliste und Preview-Uebergabeobjekt vorbereiten
+- [x] Textual-Dateiauswahl als wiederverwendbare MP4-Tabelle fuer geschnittene Dateien und Rohaufnahmen verbessern
+- [x] Textual-Metadatenvalidierung direkt an den Eingabefeldern sichtbar machen
 - [x] danach bestehenden lokalen Workflow weiterverwenden
 
 ## Phase 2: Windows-Nutzerfreundlichkeit

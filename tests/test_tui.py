@@ -9,6 +9,9 @@ from predigt_uploader.tui_app import (
     build_tui_file_choice_lines,
     build_tui_metadata_info,
     build_tui_file_candidates_lines,
+    build_tui_mp4_file_rows,
+    build_tui_mp4_selection_actions,
+    build_tui_mp4_selection_config,
     build_tui_preparation,
     build_tui_preparation_text,
     build_tui_field_labels,
@@ -18,7 +21,9 @@ from predigt_uploader.tui_app import (
     build_tui_validation_text,
     default_tui_service_type_name,
     detect_tui_recording_date_from_filename,
+    missing_tui_metadata_fields,
     newest_tui_mp4_candidates,
+    newest_tui_mp4_candidate,
     load_tui_config,
     service_type_by_name,
     service_types_for_tui,
@@ -207,7 +212,43 @@ def test_tui_file_choice_filters_newest_mp4_files(tmp_path):
     assert newer in candidates
     assert older in candidates
     assert other not in candidates
+    assert newest_tui_mp4_candidate(folder) in {newer, other}
     assert any("Gottesdienst neu.mp4" in line for line in lines)
+
+
+def test_tui_mp4_selection_config_supports_cut_and_raw_modes(tmp_path):
+    cut_folder = tmp_path / "schnitt"
+    raw_folder = tmp_path / "vmix"
+    config = AppConfig(
+        vmix_storage=raw_folder,
+        recordings_base=tmp_path / "Aufnahmen",
+        mp3_base=tmp_path / "Predigten",
+        cut_mp4_folder=cut_folder,
+    )
+
+    cut = build_tui_mp4_selection_config(config, mode="cut")
+    raw = build_tui_mp4_selection_config(config, mode="raw")
+
+    assert cut.start_folder == cut_folder
+    assert raw.start_folder == raw_folder
+    assert cut.allow_search is True
+    assert raw.allow_manual_input is True
+    assert build_tui_mp4_selection_actions(raw) == ("newest", "recent", "search", "manual", "back", "cancel")
+
+
+def test_tui_mp4_file_rows_show_filename_date_and_size(tmp_path):
+    folder = tmp_path / "vmix"
+    folder.mkdir()
+    video = folder / "Gottesdienst neu.mp4"
+    video.write_bytes(b"x" * 1024 * 1024)
+
+    rows = build_tui_mp4_file_rows(folder)
+
+    assert len(rows) == 1
+    assert rows[0].path == video
+    assert rows[0].filename == "Gottesdienst neu.mp4"
+    assert rows[0].modified
+    assert rows[0].size == "1.0 MB"
 
 
 def test_tui_cut_folder_prefers_remembered_cut_folder(tmp_path):
@@ -236,6 +277,23 @@ def test_tui_field_labels_mark_unneeded_and_optional_fields(tmp_path):
     assert bibelstunde_labels["bible"] == "Hauptbibelstelle"
     assert bibelstunde_labels["speaker"] == "Redner / Leitung"
     assert lobpreis_labels["speaker"] == "Leitung (optional)"
+
+
+def test_tui_field_labels_mark_missing_required_fields(tmp_path):
+    config = AppConfig(
+        vmix_storage=tmp_path / "vmix",
+        recordings_base=tmp_path / "Aufnahmen",
+        mp3_base=tmp_path / "Predigten",
+    )
+
+    labels = build_tui_field_labels(
+        service_type_by_name(config, "Predigt"),
+        missing_fields=("title", "bible", "speaker"),
+    )
+
+    assert labels["title"] == "Titel - FEHLT"
+    assert labels["bible"] == "Hauptbibelstelle - FEHLT"
+    assert labels["speaker"] == "Redner / Leitung - FEHLT"
 
 
 def test_tui_service_type_defaults_follow_weekday(tmp_path):
@@ -377,7 +435,9 @@ def test_tui_metadata_validation_requires_only_fields_for_service_type(tmp_path)
         "Hauptbibelstelle fehlt.",
         "Redner fehlt.",
     )
+    assert missing_tui_metadata_fields(predigt, config, date_text="2026-05-24") == ("title", "bible", "speaker")
     assert validate_tui_metadata(bibelstunde, config, date_text="2026-05-20") == ()
+    assert missing_tui_metadata_fields(bibelstunde, config, date_text="2026-05-20") == ()
     assert validate_tui_metadata(gebetsstunde, config, date_text="2026-05-22") == ()
 
 
@@ -400,7 +460,8 @@ def test_tui_metadata_validation_reports_invalid_date(tmp_path):
     messages = validate_tui_metadata(info, config, date_text="24.05.2026")
 
     assert messages == ("Datum bitte im Format YYYY-MM-DD eingeben.",)
-    assert "Bitte pruefen:" in build_tui_validation_text(messages)
+    assert missing_tui_metadata_fields(info, config, date_text="24.05.2026") == ("date",)
+    assert "Bitte ergaenzen:" in build_tui_validation_text(messages)
 
 
 def test_tui_settings_lines_show_local_paths_and_workflow_defaults(tmp_path):

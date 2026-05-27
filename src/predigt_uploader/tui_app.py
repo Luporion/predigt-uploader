@@ -23,6 +23,25 @@ class TuiDateOption:
 
 
 @dataclass(frozen=True)
+class TuiMp4SelectionConfig:
+    mode: str
+    start_folder: Path
+    title: str
+    note: str
+    suggest_newest: bool = True
+    allow_search: bool = True
+    allow_manual_input: bool = True
+
+
+@dataclass(frozen=True)
+class TuiMp4FileRow:
+    path: Path
+    filename: str
+    modified: str
+    size: str
+
+
+@dataclass(frozen=True)
 class TuiPreparation:
     source_mp4: Path | None
     raw_recording: Path | None
@@ -185,6 +204,43 @@ def tui_cut_mp4_folder(config: AppConfig) -> Path:
     return config.cut_mp4_folder or config.vmix_storage
 
 
+def build_tui_mp4_selection_config(config: AppConfig, *, mode: str) -> TuiMp4SelectionConfig:
+    if mode == "cut":
+        return TuiMp4SelectionConfig(
+            mode="cut",
+            start_folder=tui_cut_mp4_folder(config),
+            title="Geschnittene MP4 auswaehlen",
+            note="Waehle die bereits geschnittene MP4. Es wird noch nichts kopiert oder verschoben.",
+            suggest_newest=True,
+            allow_search=True,
+            allow_manual_input=True,
+        )
+    if mode == "raw":
+        return TuiMp4SelectionConfig(
+            mode="raw",
+            start_folder=config.vmix_storage,
+            title="Rohaufnahme auswaehlen",
+            note="Waehle die Rohaufnahme. Der Schnitt bleibt weiterhin ein bewusster Schritt mit LosslessCut.",
+            suggest_newest=True,
+            allow_search=True,
+            allow_manual_input=True,
+        )
+    raise ValueError(f"Unbekannter MP4-Auswahlmodus: {mode}")
+
+
+def build_tui_mp4_selection_actions(selection: TuiMp4SelectionConfig) -> tuple[str, ...]:
+    actions: list[str] = []
+    if selection.suggest_newest:
+        actions.append("newest")
+    actions.append("recent")
+    if selection.allow_search:
+        actions.append("search")
+    if selection.allow_manual_input:
+        actions.append("manual")
+    actions.extend(("back", "cancel"))
+    return tuple(actions)
+
+
 def newest_tui_mp4_candidates(
     folder: Path,
     *,
@@ -198,6 +254,32 @@ def newest_tui_mp4_candidates(
     if normalized:
         files = [path for path in files if normalized in path.name.casefold()]
     return tuple(sorted(files, key=lambda path: path.stat().st_mtime, reverse=True)[:limit])
+
+
+def newest_tui_mp4_candidate(folder: Path) -> Path | None:
+    candidates = newest_tui_mp4_candidates(folder, limit=1)
+    if not candidates:
+        return None
+    return candidates[0]
+
+
+def build_tui_mp4_file_rows(
+    folder: Path,
+    *,
+    search_text: str = "",
+    limit: int = TUI_FILE_CHOICE_LIMIT,
+) -> tuple[TuiMp4FileRow, ...]:
+    return tuple(_build_tui_mp4_file_row(path) for path in newest_tui_mp4_candidates(folder, search_text=search_text, limit=limit))
+
+
+def _build_tui_mp4_file_row(path: Path) -> TuiMp4FileRow:
+    try:
+        stat = path.stat()
+    except OSError:
+        return TuiMp4FileRow(path=path, filename=path.name, modified="unbekannt", size="unbekannt")
+    changed = datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M")
+    size_mb = stat.st_size / (1024 * 1024)
+    return TuiMp4FileRow(path=path, filename=path.name, modified=changed, size=f"{size_mb:.1f} MB")
 
 
 def build_tui_file_choice_lines(
@@ -347,13 +429,28 @@ def validate_tui_metadata(info: SermonInfo, config: AppConfig, *, date_text: str
     return tuple(messages)
 
 
+def missing_tui_metadata_fields(info: SermonInfo, config: AppConfig, *, date_text: str | None = None) -> tuple[str, ...]:
+    fields: list[str] = []
+    if date_text is not None and parse_tui_date(date_text) is None:
+        fields.append("date")
+
+    service_type = service_type_config_for(config, info.sermon_type)
+    if service_type.requires_title and not info.title.strip():
+        fields.append("title")
+    if service_type.requires_bible_reference and not info.bible_reference.strip():
+        fields.append("bible")
+    if service_type.requires_speaker and not info.speaker.strip():
+        fields.append("speaker")
+    return tuple(fields)
+
+
 def build_tui_validation_text(messages: tuple[str, ...]) -> str:
     if not messages:
         return "Metadaten vollstaendig. Der vollstaendige Workflow laeuft weiterhin im normalen Wizard."
-    return "Bitte pruefen:\n" + "\n".join(f"- {message}" for message in messages)
+    return "Bitte ergaenzen:\n" + "\n".join(f"- {message}" for message in messages)
 
 
-def build_tui_field_labels(service_type: ServiceTypeConfig) -> dict[str, str]:
+def build_tui_field_labels(service_type: ServiceTypeConfig, *, missing_fields: tuple[str, ...] = ()) -> dict[str, str]:
     title_suffix = "" if service_type.requires_title else " (nicht nötig)"
     bible_suffix = "" if service_type.requires_bible_reference else " (optional)"
     speaker_suffix = "" if service_type.requires_speaker else " (optional)"
@@ -362,10 +459,16 @@ def build_tui_field_labels(service_type: ServiceTypeConfig) -> dict[str, str]:
     speaker_label = service_type.speaker_label
     if speaker_label.casefold() == "redner":
         speaker_label = "Redner / Leitung"
+
+    def mark_missing(key: str, label: str) -> str:
+        if key in missing_fields:
+            return f"{label} - FEHLT"
+        return label
+
     return {
-        "title": f"{service_type.title_label}{title_suffix}",
-        "bible": f"{service_type.bible_reference_label}{bible_suffix}",
-        "speaker": f"{speaker_label}{speaker_suffix}",
+        "title": mark_missing("title", f"{service_type.title_label}{title_suffix}"),
+        "bible": mark_missing("bible", f"{service_type.bible_reference_label}{bible_suffix}"),
+        "speaker": mark_missing("speaker", f"{speaker_label}{speaker_suffix}"),
     }
 
 
@@ -374,7 +477,7 @@ def run_tui(config_path: str | None = None) -> int:
         from textual.app import App, ComposeResult
         from textual.containers import Horizontal, Vertical
         from textual.screen import Screen
-        from textual.widgets import Button, Footer, Header, Input, Label, Select, Static
+        from textual.widgets import Button, DataTable, Footer, Header, Input, Label, Select, Static
     except ImportError as exc:
         raise ImportError("Textual ist nicht installiert.") from exc
 
@@ -437,36 +540,49 @@ def run_tui(config_path: str | None = None) -> int:
             super().__init__()
             self.app_config = app_config
             self.already_cut = already_cut
+            mode = "cut" if already_cut else "raw"
+            self.selection = build_tui_mp4_selection_config(app_config, mode=mode)
+            self.current_folder = self.selection.start_folder
+            self._visible_candidates: tuple[Path, ...] = ()
 
         @property
         def source_folder(self) -> Path:
-            if self.already_cut:
-                return tui_cut_mp4_folder(self.app_config)
-            return self.app_config.vmix_storage
+            return self.current_folder
 
         def compose(self) -> ComposeResult:
             yield Header(show_clock=False)
-            title = "Geschnittene MP4 auswaehlen" if self.already_cut else "Rohaufnahme auswaehlen"
-            yield Static(title, id="screen_title")
-            if self.already_cut:
-                note = "Waehle die bereits geschnittene MP4. Es wird noch nichts kopiert oder verschoben."
-            else:
-                note = "Waehle die Rohaufnahme. Danach bitte weiterhin im normalen Wizard oder in LosslessCut schneiden."
-            yield Static(note, id="screen_note")
+            yield Static(self.selection.title, id="screen_title")
+            yield Static(self.selection.note, id="screen_note")
             yield Static(f"Ordner: {self.source_folder}", id="source_folder")
-            yield Input(placeholder="Dateiname filtern", id="file_search")
-            yield Static("", id="file_list")
-            for index in range(TUI_FILE_CHOICE_LIMIT):
-                yield Button("", id=f"file_{index}")
-            yield Button("Zurueck", id="back")
-            yield Button("Abbrechen", id="cancel")
+            with Horizontal(id="file_actions"):
+                if self.selection.suggest_newest:
+                    newest_label = "Neueste geschnittene MP4 verwenden" if self.already_cut else "Neueste Aufnahme verwenden"
+                    yield Button(newest_label, id="newest", variant="primary")
+                yield Button("Ausgewaehlte Datei verwenden", id="select")
+                yield Button("Zurueck", id="back")
+                yield Button("Abbrechen", id="cancel")
+            if self.selection.allow_search:
+                yield Input(placeholder="Dateiname suchen oder filtern", id="file_search")
+            yield Static("Neueste MP4-Dateien", id="file_table_heading")
+            yield DataTable(id="file_table")
+            yield Static("", id="file_status")
+            if self.selection.allow_manual_input:
+                yield Input(placeholder="Datei oder Ordner manuell eingeben", id="manual_path")
+                yield Button("Manuellen Pfad verwenden", id="manual")
             yield Footer()
 
         def on_mount(self) -> None:
-            self._update_file_buttons()
+            table = self.query_one("#file_table", DataTable)
+            table.cursor_type = "row"
+            table.zebra_stripes = True
+            table.add_columns("Dateiname", "Geaendert", "Groesse")
+            self._update_file_table()
 
         def on_input_changed(self, _event: Input.Changed) -> None:
-            self._update_file_buttons()
+            self._update_file_table()
+
+        def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+            self._choose_file_by_row_key(event.row_key.value)
 
         def on_button_pressed(self, event: Button.Pressed) -> None:
             if event.button.id == "back":
@@ -476,45 +592,80 @@ def run_tui(config_path: str | None = None) -> int:
                 self.app.pop_screen()
                 self.app.pop_screen()
                 return
-            if event.button.id and event.button.id.startswith("file_"):
-                index = int(event.button.id.removeprefix("file_"))
-                candidates = self._candidates()
-                if index >= len(candidates):
+            if event.button.id == "newest":
+                selected = newest_tui_mp4_candidate(self.source_folder)
+                if selected is None:
+                    self.notify("Keine MP4-Datei im aktuellen Ordner gefunden.")
                     return
-                selected = candidates[index]
-                raw_recording = None if self.already_cut else selected
-                self.app.push_screen(
-                    MetadataPreviewScreen(
-                        self.app_config,
-                        source_mp4=selected,
-                        raw_recording=raw_recording,
-                        already_cut=self.already_cut,
-                    )
-                )
+                self._open_metadata(selected)
+                return
+            if event.button.id == "select":
+                table = self.query_one("#file_table", DataTable)
+                if not self._visible_candidates or table.cursor_row >= len(self._visible_candidates):
+                    self.notify("Bitte zuerst eine MP4-Datei in der Liste auswaehlen.")
+                    return
+                self._open_metadata(self._visible_candidates[table.cursor_row])
+                return
+            if event.button.id == "manual":
+                self._use_manual_path()
 
         def _candidates(self) -> tuple[Path, ...]:
             return newest_tui_mp4_candidates(
                 self.source_folder,
-                search_text=self.query_one("#file_search", Input).value,
+                search_text=self._search_text(),
                 limit=TUI_FILE_CHOICE_LIMIT,
             )
 
-        def _update_file_buttons(self) -> None:
-            candidates = self._candidates()
-            lines = build_tui_file_choice_lines(
-                self.source_folder,
-                search_text=self.query_one("#file_search", Input).value,
-                limit=TUI_FILE_CHOICE_LIMIT,
+        def _search_text(self) -> str:
+            if not self.selection.allow_search:
+                return ""
+            return self.query_one("#file_search", Input).value
+
+        def _update_file_table(self) -> None:
+            table = self.query_one("#file_table", DataTable)
+            rows = build_tui_mp4_file_rows(self.source_folder, search_text=self._search_text(), limit=TUI_FILE_CHOICE_LIMIT)
+            self._visible_candidates = tuple(row.path for row in rows)
+            table.clear()
+            for index, row in enumerate(rows):
+                table.add_row(row.filename, row.modified, row.size, key=str(index))
+            status = self.query_one("#file_status", Static)
+            status.update("\n".join(build_tui_file_choice_lines(self.source_folder, search_text=self._search_text(), limit=TUI_FILE_CHOICE_LIMIT)))
+            self.query_one("#source_folder", Static).update(f"Ordner: {self.source_folder}")
+
+        def _choose_file_by_row_key(self, row_key: object) -> None:
+            try:
+                index = int(str(row_key))
+            except ValueError:
+                return
+            if index < len(self._visible_candidates):
+                self._open_metadata(self._visible_candidates[index])
+
+        def _use_manual_path(self) -> None:
+            path_text = self.query_one("#manual_path", Input).value.strip()
+            if not path_text:
+                self.notify("Bitte eine MP4-Datei oder einen Ordner eingeben.")
+                return
+            path = Path(path_text).expanduser()
+            if path.is_file() and path.suffix.casefold() == ".mp4":
+                self._open_metadata(path)
+                return
+            if path.is_dir():
+                self.current_folder = path
+                self._update_file_table()
+                self.notify("Ordner wurde fuer diese Auswahl uebernommen.")
+                return
+            self.notify("Der eingegebene Pfad ist keine MP4-Datei und kein vorhandener Ordner.")
+
+        def _open_metadata(self, selected: Path) -> None:
+            raw_recording = None if self.already_cut else selected
+            self.app.push_screen(
+                MetadataPreviewScreen(
+                    self.app_config,
+                    source_mp4=selected,
+                    raw_recording=raw_recording,
+                    already_cut=self.already_cut,
+                )
             )
-            self.query_one("#file_list", Static).update("\n".join(lines))
-            for index in range(TUI_FILE_CHOICE_LIMIT):
-                button = self.query_one(f"#file_{index}", Button)
-                if index < len(candidates):
-                    button.label = candidates[index].name
-                    button.disabled = False
-                else:
-                    button.label = "-"
-                    button.disabled = True
 
     class MetadataPreviewScreen(Screen[None]):
         def __init__(
@@ -545,7 +696,7 @@ def run_tui(config_path: str | None = None) -> int:
                 with Vertical(id="form"):
                     yield Label("Dienstart")
                     yield Select(service_names, value=default_service, id="service_type")
-                    yield Label("Datum")
+                    yield Label("Datum", id="date_label")
                     yield Select([(option.label, option.kind) for option in date_options], value=date_options[0].kind, id="date_choice")
                     yield Input(value=date_options[0].value.isoformat(), placeholder="YYYY-MM-DD", id="sermon_date")
                     yield Label("Titel", id="title_label")
@@ -560,7 +711,8 @@ def run_tui(config_path: str | None = None) -> int:
                         "Der vollständige Workflow läuft weiterhin im normalen Wizard.",
                         id="workflow_note",
                     )
-                    yield Button("Zurück", id="back")
+                    yield Button("Zurueck", id="back")
+                    yield Button("Abbrechen", id="cancel")
                     yield Button("Metadaten pruefen", id="next", variant="primary")
                 with Vertical(id="preview_box"):
                     yield Label("Live-Vorschau", id="preview_heading")
@@ -581,6 +733,8 @@ def run_tui(config_path: str | None = None) -> int:
         def on_button_pressed(self, event: Button.Pressed) -> None:
             if event.button.id == "back":
                 self.app.pop_screen()
+            elif event.button.id == "cancel":
+                self._return_to_start()
             elif event.button.id == "next":
                 messages = self._validation_messages()
                 if messages:
@@ -594,8 +748,11 @@ def run_tui(config_path: str | None = None) -> int:
             source_widget = self.query_one("#source_status", Static)
             service_type = str(self.query_one("#service_type", Select).value or default_tui_service_type_name(self.app_config, date.today()))
             service_config = service_type_by_name(self.app_config, service_type)
-            self._update_field_state(service_config)
             info = self._current_info()
+            date_text = self._validation_date_text()
+            messages = validate_tui_metadata(info, self.app_config, date_text=date_text)
+            missing_fields = missing_tui_metadata_fields(info, self.app_config, date_text=date_text)
+            self._update_field_state(service_config, missing_fields)
             preparation = build_tui_preparation(
                 config=self.app_config,
                 source_mp4=self.source_mp4,
@@ -604,8 +761,9 @@ def run_tui(config_path: str | None = None) -> int:
                 info=info,
             )
             preview_widget.update(build_tui_preparation_text(preparation))
-            validation_widget.update(build_tui_validation_text(self._validation_messages(info)))
+            validation_widget.update(build_tui_validation_text(messages))
             source_widget.update(self._source_hint())
+            self.query_one("#next", Button).disabled = bool(messages)
 
         def _validation_messages(self, info: SermonInfo | None = None) -> tuple[str, ...]:
             date_text = self._validation_date_text()
@@ -643,8 +801,10 @@ def run_tui(config_path: str | None = None) -> int:
                 return f"Quelle: geschnittene MP4\n{self.source_mp4}"
             return "Quelle: Rohaufnahme\nBitte den Schnitt weiterhin bewusst mit LosslessCut/normalem Wizard abschliessen."
 
-        def _update_field_state(self, service_type: ServiceTypeConfig) -> None:
-            labels = build_tui_field_labels(service_type)
+        def _update_field_state(self, service_type: ServiceTypeConfig, missing_fields: tuple[str, ...]) -> None:
+            labels = build_tui_field_labels(service_type, missing_fields=missing_fields)
+            date_label = "Datum - FEHLT" if "date" in missing_fields else "Datum"
+            self.query_one("#date_label", Label).update(date_label)
             self.query_one("#title_label", Label).update(labels["title"])
             self.query_one("#bible_label", Label).update(labels["bible"])
             self.query_one("#speaker_label", Label).update(labels["speaker"])
@@ -655,6 +815,13 @@ def run_tui(config_path: str | None = None) -> int:
             self.query_one("#speaker_input", Input).disabled = (
                 not service_type.requires_speaker and not service_type.optional_speaker
             )
+
+        def _return_to_start(self) -> None:
+            for _ in range(3):
+                try:
+                    self.app.pop_screen()
+                except Exception:
+                    return
 
     class FileCandidatesScreen(Screen[None]):
         def __init__(self, app_config: AppConfig) -> None:

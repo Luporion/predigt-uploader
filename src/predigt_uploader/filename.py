@@ -35,6 +35,7 @@ def build_media_filename(info: SermonInfo, config: AppConfig, extension: str) ->
     speaker = sanitize_filename_part(info.speaker)
     service_type = sanitize_filename_part(info.sermon_type)
     speaker_suffix = f"_{speaker}" if speaker else ""
+    title_bible_reference = _combine_title_bible_reference(title, bible_reference)
 
     service_config = service_type_config_for(config, info.sermon_type)
     template = service_config.template
@@ -42,6 +43,7 @@ def build_media_filename(info: SermonInfo, config: AppConfig, extension: str) ->
     filename = template.format(
         title=title,
         bible_reference=bible_reference,
+        title_bible_reference=title_bible_reference,
         speaker=speaker,
         speaker_suffix=speaker_suffix,
         service_type=service_type,
@@ -63,16 +65,21 @@ def _build_media_filename_with_placeholders(info: SermonInfo, config: AppConfig,
         extension = f".{extension}"
 
     service_config = service_type_config_for(config, info.sermon_type)
-    title = _preview_value(info.title, "[Titel]")
+    if service_config.optional_title and not sanitize_filename_part(info.title):
+        title = ""
+    else:
+        title = _preview_value(info.title, "[Titel]")
     bible_reference = _preview_value(info.bible_reference, "[Bibelstelle]")
     speaker_placeholder = "[Leitung]" if service_config.speaker_label.casefold() == "leitung" else "[Redner]"
     speaker = _preview_value(info.speaker, speaker_placeholder)
     service_type = sanitize_filename_part(info.sermon_type)
     speaker_suffix = f"_{speaker}"
+    title_bible_reference = _combine_title_bible_reference(title, bible_reference)
 
     filename = service_config.template.format(
         title=title,
         bible_reference=bible_reference,
+        title_bible_reference=title_bible_reference,
         speaker=speaker,
         speaker_suffix=speaker_suffix,
         service_type=service_type,
@@ -84,6 +91,12 @@ def _build_media_filename_with_placeholders(info: SermonInfo, config: AppConfig,
 def _preview_value(value: str, placeholder: str) -> str:
     cleaned = sanitize_filename_part(value)
     return cleaned if cleaned else placeholder
+
+
+def _combine_title_bible_reference(title: str, bible_reference: str) -> str:
+    if title and bible_reference:
+        return f"{title}_{bible_reference}"
+    return title or bible_reference
 
 
 def service_type_config_for(config: AppConfig, name: str) -> ServiceTypeConfig:

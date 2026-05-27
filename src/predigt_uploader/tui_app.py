@@ -160,6 +160,17 @@ def build_tui_start_status_text(config: AppConfig) -> str:
     )
 
 
+def build_tui_start_safety_text() -> str:
+    return "\n".join(
+        [
+            "Wurde die Aufnahme in vMix beendet?",
+            "Wurde der Stream in vMix beendet?",
+            "",
+            "Wenn der Stream nicht beendet wird, verbraucht der Streaminganbieter weiter Datenvolumen/Kosten.",
+        ]
+    )
+
+
 def build_tui_file_candidates_lines(config: AppConfig, *, limit: int = TUI_MP4_PREVIEW_LIMIT) -> tuple[str, ...]:
     lines: list[str] = ["MP4-Dateien zur Orientierung"]
     if config.cut_mp4_folder is None:
@@ -451,7 +462,12 @@ def build_tui_validation_text(messages: tuple[str, ...]) -> str:
 
 
 def build_tui_field_labels(service_type: ServiceTypeConfig, *, missing_fields: tuple[str, ...] = ()) -> dict[str, str]:
-    title_suffix = "" if service_type.requires_title else " (nicht nötig)"
+    if service_type.requires_title:
+        title_suffix = ""
+    elif service_type.optional_title:
+        title_suffix = " (optional)"
+    else:
+        title_suffix = " (nicht nötig)"
     bible_suffix = "" if service_type.requires_bible_reference else " (optional)"
     speaker_suffix = "" if service_type.requires_speaker else " (optional)"
     if not service_type.optional_bible_reference and not service_type.requires_bible_reference:
@@ -500,7 +516,7 @@ def run_tui(config_path: str | None = None) -> int:
 
         def on_button_pressed(self, event: Button.Pressed) -> None:
             if event.button.id == "new":
-                self.app.push_screen(SourceChoiceScreen(config))
+                self.app.push_screen(StartSafetyScreen(config))
             elif event.button.id == "files":
                 self.app.push_screen(FileCandidatesScreen(config))
             elif event.button.id == "settings":
@@ -509,6 +525,25 @@ def run_tui(config_path: str | None = None) -> int:
                 self.notify("Bitte PredigtUploader Systemcheck.cmd ausführen.")
             elif event.button.id == "quit":
                 self.app.exit()
+
+    class StartSafetyScreen(Screen[None]):
+        def __init__(self, app_config: AppConfig) -> None:
+            super().__init__()
+            self.app_config = app_config
+
+        def compose(self) -> ComposeResult:
+            yield Header(show_clock=False)
+            yield Static("Vor dem Start kurz pruefen", id="screen_title")
+            yield Static(build_tui_start_safety_text(), id="screen_note")
+            yield Button("Ja, Aufnahme und Stream sind beendet", id="confirm", variant="primary")
+            yield Button("Nein, ich pruefe das erst", id="cancel")
+            yield Footer()
+
+        def on_button_pressed(self, event: Button.Pressed) -> None:
+            if event.button.id == "confirm":
+                self.app.push_screen(SourceChoiceScreen(self.app_config))
+            elif event.button.id == "cancel":
+                self.app.pop_screen()
 
     class SourceChoiceScreen(Screen[None]):
         def __init__(self, app_config: AppConfig) -> None:
@@ -565,7 +600,6 @@ def run_tui(config_path: str | None = None) -> int:
                 yield Input(placeholder="Dateiname suchen oder filtern", id="file_search")
             yield Static("Neueste MP4-Dateien", id="file_table_heading")
             yield DataTable(id="file_table")
-            yield Static("", id="file_status")
             if self.selection.allow_manual_input:
                 yield Input(placeholder="Datei oder Ordner manuell eingeben", id="manual_path")
                 yield Button("Manuellen Pfad verwenden", id="manual")
@@ -577,6 +611,7 @@ def run_tui(config_path: str | None = None) -> int:
             table.zebra_stripes = True
             table.add_columns("Dateiname", "Geaendert", "Groesse")
             self._update_file_table()
+            table.focus()
 
         def on_input_changed(self, _event: Input.Changed) -> None:
             self._update_file_table()
@@ -628,8 +663,6 @@ def run_tui(config_path: str | None = None) -> int:
             table.clear()
             for index, row in enumerate(rows):
                 table.add_row(row.filename, row.modified, row.size, key=str(index))
-            status = self.query_one("#file_status", Static)
-            status.update("\n".join(build_tui_file_choice_lines(self.source_folder, search_text=self._search_text(), limit=TUI_FILE_CHOICE_LIMIT)))
             self.query_one("#source_folder", Static).update(f"Ordner: {self.source_folder}")
 
         def _choose_file_by_row_key(self, row_key: object) -> None:
@@ -808,7 +841,7 @@ def run_tui(config_path: str | None = None) -> int:
             self.query_one("#title_label", Label).update(labels["title"])
             self.query_one("#bible_label", Label).update(labels["bible"])
             self.query_one("#speaker_label", Label).update(labels["speaker"])
-            self.query_one("#title_input", Input).disabled = not service_type.requires_title
+            self.query_one("#title_input", Input).disabled = not service_type.requires_title and not service_type.optional_title
             self.query_one("#bible_input", Input).disabled = (
                 not service_type.requires_bible_reference and not service_type.optional_bible_reference
             )
@@ -906,6 +939,14 @@ def run_tui(config_path: str | None = None) -> int:
         #workflow_note {
             border: solid $accent;
             padding: 1;
+            margin-bottom: 1;
+        }
+        #file_actions {
+            height: auto;
+            margin-bottom: 1;
+        }
+        #file_table {
+            height: 12;
             margin-bottom: 1;
         }
         Input, Select, Button {

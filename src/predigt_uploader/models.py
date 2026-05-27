@@ -15,6 +15,7 @@ class ServiceTypeConfig:
     title_label: str = "Titel"
     bible_reference_label: str = "Hauptbibelstelle"
     speaker_label: str = "Redner"
+    optional_title: bool = False
     optional_bible_reference: bool = False
     optional_speaker: bool = False
 
@@ -38,7 +39,7 @@ class AppConfig:
     ffmpeg_path: str = "ffmpeg"
     losslesscut_path: str = ""
     predigt_template: str = "Predigt ({title}_{bible_reference})_{speaker}{extension}"
-    bibelstunde_template: str = "Bibelstunde ({bible_reference})_{speaker}{extension}"
+    bibelstunde_template: str = "Bibelstunde ({title_bible_reference})_{speaker}{extension}"
     vortrag_template: str = "Vortrag ({title})_{speaker}{extension}"
     lobpreis_template: str = "Lobpreis ({title}){speaker_suffix}{extension}"
     sonstiges_template: str = "{service_type} ({title}){speaker_suffix}{extension}"

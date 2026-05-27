@@ -38,6 +38,18 @@ def test_build_bibelstunde_filename_without_title(tmp_path: Path):
     assert build_media_filename(info, _config(tmp_path), ".mp4") == "Bibelstunde (Johannes 3,16)_Max Muster.mp4"
 
 
+def test_build_bibelstunde_filename_with_optional_title(tmp_path: Path):
+    info = SermonInfo(
+        sermon_date=date(2026, 5, 20),
+        title="Römerbrief",
+        bible_reference="Römer 8",
+        speaker="Max Muster",
+        sermon_type="Bibelstunde",
+    )
+
+    assert build_media_filename(info, _config(tmp_path), ".mp4") == "Bibelstunde (Römerbrief_Römer 8)_Max Muster.mp4"
+
+
 def test_build_vortrag_and_lobpreis_filenames(tmp_path: Path):
     vortrag = SermonInfo(date(2026, 5, 22), "Mission heute", "", "Max Muster", sermon_type="Vortrag")
     lobpreis = SermonInfo(date(2026, 5, 22), "Anbetungsabend", "", "Team", sermon_type="Lobpreis")
@@ -67,6 +79,22 @@ def test_filename_preview_updates_with_partial_fields(tmp_path: Path):
     preview = build_filename_preview(info, _config(tmp_path))
 
     assert preview.mp4 == "Predigt (Lehre statt Leere_[Bibelstelle])_[Redner].mp4"
+
+
+def test_bibelstunde_preview_uses_optional_title_when_present(tmp_path: Path):
+    info = SermonInfo(date(2026, 5, 20), "Römerbrief", "Römer 8", "Max Muster", sermon_type="Bibelstunde")
+
+    preview = build_filename_preview(info, _config(tmp_path))
+
+    assert preview.mp4 == "Bibelstunde (Römerbrief_Römer 8)_Max Muster.mp4"
+
+
+def test_bibelstunde_preview_omits_optional_title_placeholder_when_empty(tmp_path: Path):
+    info = SermonInfo(date(2026, 5, 20), "", "", "", sermon_type="Bibelstunde")
+
+    preview = build_filename_preview(info, _config(tmp_path))
+
+    assert preview.mp4 == "Bibelstunde ([Bibelstelle])_[Redner].mp4"
 
 
 def test_filename_preview_matches_final_filename_when_complete(tmp_path: Path):

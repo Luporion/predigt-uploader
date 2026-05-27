@@ -17,6 +17,7 @@ from predigt_uploader.tui_app import (
     build_tui_field_labels,
     build_tui_preview_text,
     build_tui_settings_lines,
+    build_tui_start_safety_text,
     build_tui_start_status_text,
     build_tui_validation_text,
     default_tui_service_type_name,
@@ -158,6 +159,14 @@ def test_tui_start_status_shows_experiment_and_configured_folders(tmp_path):
     assert f"Rohaufnahme-Ordner: {tmp_path / 'vmix'}" in text
 
 
+def test_tui_start_safety_text_warns_before_workflow():
+    text = build_tui_start_safety_text()
+
+    assert "Wurde die Aufnahme in vMix beendet?" in text
+    assert "Wurde der Stream in vMix beendet?" in text
+    assert "Datenvolumen/Kosten" in text
+
+
 def test_tui_file_candidates_show_cut_and_raw_mp4_files(tmp_path):
     cut_folder = tmp_path / "schnitt"
     raw_folder = tmp_path / "vmix"
@@ -205,6 +214,11 @@ def test_tui_file_choice_filters_newest_mp4_files(tmp_path):
     older.write_bytes(b"older")
     newer.write_bytes(b"newer")
     other.write_bytes(b"other")
+    import os
+
+    os.utime(older, (1, 1))
+    os.utime(newer, (2, 2))
+    os.utime(other, (3, 3))
 
     candidates = newest_tui_mp4_candidates(folder, search_text="Gottesdienst", limit=5)
     lines = build_tui_file_choice_lines(folder, search_text="Gottesdienst", limit=5)
@@ -212,7 +226,7 @@ def test_tui_file_choice_filters_newest_mp4_files(tmp_path):
     assert newer in candidates
     assert older in candidates
     assert other not in candidates
-    assert newest_tui_mp4_candidate(folder) in {newer, other}
+    assert newest_tui_mp4_candidate(folder) == other
     assert any("Gottesdienst neu.mp4" in line for line in lines)
 
 
@@ -273,7 +287,7 @@ def test_tui_field_labels_mark_unneeded_and_optional_fields(tmp_path):
     bibelstunde_labels = build_tui_field_labels(service_type_by_name(config, "Bibelstunde"))
     lobpreis_labels = build_tui_field_labels(service_type_by_name(config, "Lobpreis"))
 
-    assert bibelstunde_labels["title"] == "Titel (nicht nötig)"
+    assert bibelstunde_labels["title"] == "Titel / Themenreihe (optional)"
     assert bibelstunde_labels["bible"] == "Hauptbibelstelle"
     assert bibelstunde_labels["speaker"] == "Redner / Leitung"
     assert lobpreis_labels["speaker"] == "Leitung (optional)"

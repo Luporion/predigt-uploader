@@ -24,6 +24,7 @@ from predigt_uploader.cli import (
     _ask_raw_recording,
     _ask_raw_archive_mode,
     _choose_mp4_from_list,
+    _confirm_recording_and_stream_finished,
     _confirm_raw_recording_if_suspicious,
     _detect_recording_date_from_filename,
     _find_mp4_exports_after_snapshot,
@@ -953,13 +954,24 @@ def test_ask_sermon_metadata_prints_filename_preview_after_inputs(monkeypatch, t
 
 
 def test_ask_sermon_metadata_bibelstunde_does_not_require_title(monkeypatch, tmp_path):
-    _inputs(monkeypatch, ["", "Johannes 3,16", "Max Muster", "n"])
+    _inputs(monkeypatch, ["", "", "Johannes 3,16", "Max Muster", "n"])
 
     info = _ask_sermon_metadata(_config(tmp_path), date(2026, 5, 20))
 
     assert info.sermon_type == "Bibelstunde"
     assert info.title == ""
     assert info.bible_reference == "Johannes 3,16"
+    assert info.speaker == "Max Muster"
+
+
+def test_ask_sermon_metadata_bibelstunde_accepts_optional_title(monkeypatch, tmp_path):
+    _inputs(monkeypatch, ["", "Römerbrief", "Römer 8", "Max Muster", "n"])
+
+    info = _ask_sermon_metadata(_config(tmp_path), date(2026, 5, 20))
+
+    assert info.sermon_type == "Bibelstunde"
+    assert info.title == "Römerbrief"
+    assert info.bible_reference == "Römer 8"
     assert info.speaker == "Max Muster"
 
 
@@ -1247,14 +1259,36 @@ def test_year_folder_template_label_for_video_audio():
     assert "2026 Video+Audio" in _year_folder_template_label("{year} Video+Audio")
 
 
+def test_recording_stream_confirmation_warns_about_streaming_costs(monkeypatch, capsys):
+    _inputs(monkeypatch, ["nein"])
+
+    assert _confirm_recording_and_stream_finished() is False
+
+    output = capsys.readouterr().out
+    assert "Wurde die Aufnahme in vMix beendet?" in output
+    assert "Wurde der Stream in vMix beendet?" in output
+    assert "Datenvolumen/Kosten" in output
+
+
 def test_start_menu_starts_wizard(monkeypatch, tmp_path):
     calls = []
     args = type("Args", (), {"config": None})()
     monkeypatch.setattr("predigt_uploader.cli.run_wizard", lambda passed_args: calls.append(passed_args) or 0)
-    _inputs(monkeypatch, [""])
+    _inputs(monkeypatch, ["", "ja"])
 
     assert run_start_menu(args) == 0
     assert calls == [args]
+
+
+def test_start_menu_returns_to_menu_when_stream_not_confirmed(monkeypatch, tmp_path, capsys):
+    calls = []
+    args = type("Args", (), {"config": None})()
+    monkeypatch.setattr("predigt_uploader.cli.run_wizard", lambda passed_args: calls.append(passed_args) or 0)
+    _inputs(monkeypatch, ["", "nein", "5"])
+
+    assert run_start_menu(args) == 0
+    assert calls == []
+    assert "bitte zuerst Aufnahme und Stream in vMix pruefen" in capsys.readouterr().out
 
 
 def test_settings_menu_saves_year_folder_template(monkeypatch, tmp_path):

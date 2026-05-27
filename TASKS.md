@@ -83,6 +83,9 @@
 - [x] Textual-Startablauf mit Quelle-Auswahl, MP4-Filterliste und Preview-Uebergabeobjekt vorbereiten
 - [x] Textual-Dateiauswahl als wiederverwendbare MP4-Tabelle fuer geschnittene Dateien und Rohaufnahmen verbessern
 - [x] Textual-Metadatenvalidierung direkt an den Eingabefeldern sichtbar machen
+- [x] Doppelte Textausgabe unter der Textual-MP4-Tabelle entfernen
+- [x] Start-Hinweis fuer beendete vMix-Aufnahme und beendeten Stream ergaenzen
+- [x] Bibelstunde mit optionaler Themenreihe im gemeinsamen Dateinamen unterstuetzen
 - [x] danach bestehenden lokalen Workflow weiterverwenden
 
 ## Phase 2: Windows-Nutzerfreundlichkeit

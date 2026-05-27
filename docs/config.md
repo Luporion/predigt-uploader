@@ -23,7 +23,7 @@ losslesscut_path = ""
 [naming]
 year_folder_template = "{year}"
 predigt_template = "Predigt ({title}_{bible_reference})_{speaker}{extension}"
-bibelstunde_template = "Bibelstunde ({bible_reference})_{speaker}{extension}"
+bibelstunde_template = "Bibelstunde ({title_bible_reference})_{speaker}{extension}"
 vortrag_template = "Vortrag ({title})_{speaker}{extension}"
 lobpreis_template = "Lobpreis ({title}){speaker_suffix}{extension}"
 sonstiges_template = "{service_type} ({title}){speaker_suffix}{extension}"
@@ -155,6 +155,7 @@ Die Dateinamen werden je nach Dienstart gebildet:
 ```text
 Predigt (Titel_Hauptbibelstelle)_Redner.mp4
 Bibelstunde (Hauptbibelstelle)_Redner.mp4
+Bibelstunde (Titel_Hauptbibelstelle)_Redner.mp4
 Vortrag (Titel)_Redner.mp4
 Lobpreis (Titel).mp4
 Lobpreis (Titel)_Leitung.mp4
@@ -171,7 +172,7 @@ Die bestehenden Templates fuer Predigt und Bibelstunde bleiben gueltig:
 ```toml
 [naming]
 predigt_template = "Predigt ({title}_{bible_reference})_{speaker}{extension}"
-bibelstunde_template = "Bibelstunde ({bible_reference})_{speaker}{extension}"
+bibelstunde_template = "Bibelstunde ({title_bible_reference})_{speaker}{extension}"
 vortrag_template = "Vortrag ({title})_{speaker}{extension}"
 lobpreis_template = "Lobpreis ({title}){speaker_suffix}{extension}"
 sonstiges_template = "{service_type} ({title}){speaker_suffix}{extension}"
@@ -182,6 +183,7 @@ Verfuegbare Platzhalter:
 - `{service_type}` fuer die Dienstart
 - `{title}` fuer Titel, Thema oder Bezeichnung
 - `{bible_reference}` fuer die Bibelstelle
+- `{title_bible_reference}` fuer Bibelstunde: mit Titel `Titel_Bibelstelle`, ohne Titel nur `Bibelstelle`
 - `{speaker}` fuer Redner, Leitung oder Name
 - `{speaker_suffix}` fuer einen optionalen Zusatz wie `_Max Muster`
 - `{extension}` fuer `.mp4` oder `.mp3`

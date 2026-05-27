@@ -144,7 +144,7 @@ losslesscut_path = ""
 [naming]
 year_folder_template = "{year}"
 predigt_template = "Predigt ({title}_{bible_reference})_{speaker}{extension}"
-bibelstunde_template = "Bibelstunde ({bible_reference})_{speaker}{extension}"
+bibelstunde_template = "Bibelstunde ({title_bible_reference})_{speaker}{extension}"
 vortrag_template = "Vortrag ({title})_{speaker}{extension}"
 lobpreis_template = "Lobpreis ({title}){speaker_suffix}{extension}"
 sonstiges_template = "{service_type} ({title}){speaker_suffix}{extension}"

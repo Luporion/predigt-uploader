@@ -1168,6 +1168,9 @@ def _ask_sermon_metadata(config: AppConfig, sermon_date: date) -> SermonInfo:
     if service_type.requires_title:
         title = _ask_required(service_type.title_label)
         _print_filename_preview(config, sermon_date, service_type, title, bible_reference, speaker)
+    elif service_type.optional_title:
+        title = _ask_optional_text(f"{service_type.title_label} (optional, Enter fuer ohne)")
+        _print_filename_preview(config, sermon_date, service_type, title, bible_reference, speaker)
     else:
         print("Für diese Dienstart ist kein Titel nötig.")
     if service_type.requires_bible_reference:
@@ -1964,6 +1967,16 @@ def _print_app_header() -> None:
     print()
 
 
+def _confirm_recording_and_stream_finished() -> bool:
+    print()
+    print("Vor dem Start kurz pruefen")
+    print("--------------------------")
+    print("Wurde die Aufnahme in vMix beendet?")
+    print("Wurde der Stream in vMix beendet?")
+    print("Wenn der Stream nicht beendet wird, verbraucht der Streaminganbieter weiter Datenvolumen/Kosten.")
+    return _ask_yes_no("Ja, Aufnahme und Stream sind beendet?", False)
+
+
 def run_wizard(args: argparse.Namespace) -> int:
     explicit_config = Path(args.config) if args.config else None
     log = WorkflowLog.start(config_path=describe_config_source(explicit_config))
@@ -2123,6 +2136,10 @@ def run_start_menu(args: argparse.Namespace) -> int:
             ],
         )
         if choice == "wizard":
+            if not _confirm_recording_and_stream_finished():
+                print("Okay, bitte zuerst Aufnahme und Stream in vMix pruefen.")
+                print()
+                continue
             return run_wizard(args)
         if choice == "settings":
             result = _run_settings_menu(args)

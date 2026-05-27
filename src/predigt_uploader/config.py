@@ -26,7 +26,7 @@ def default_config() -> AppConfig:
 def default_service_types(config: AppConfig) -> tuple[ServiceTypeConfig, ...]:
     return (
         ServiceTypeConfig("Predigt", True, True, True, config.predigt_template),
-        ServiceTypeConfig("Bibelstunde", False, True, True, config.bibelstunde_template),
+        ServiceTypeConfig("Bibelstunde", False, True, True, config.bibelstunde_template, title_label="Titel / Themenreihe", optional_title=True),
         ServiceTypeConfig("Vortrag", True, False, True, config.vortrag_template, optional_bible_reference=True),
         ServiceTypeConfig("Lobpreis", True, False, False, config.lobpreis_template, title_label="Titel oder Thema", speaker_label="Leitung", optional_speaker=True),
         ServiceTypeConfig("Gebetsstunde", True, False, False, config.sonstiges_template, title_label="Titel oder Thema", optional_speaker=True),

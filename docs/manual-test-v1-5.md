@@ -23,7 +23,7 @@ losslesscut_path = ""
 [naming]
 year_folder_template = "{year}"
 predigt_template = "Predigt ({title}_{bible_reference})_{speaker}{extension}"
-bibelstunde_template = "Bibelstunde ({bible_reference})_{speaker}{extension}"
+bibelstunde_template = "Bibelstunde ({title_bible_reference})_{speaker}{extension}"
 vortrag_template = "Vortrag ({title})_{speaker}{extension}"
 lobpreis_template = "Lobpreis ({title}){speaker_suffix}{extension}"
 sonstiges_template = "{service_type} ({title}){speaker_suffix}{extension}"
@@ -163,7 +163,7 @@ Predigt (Titel_Hauptbibelstelle)_Redner.mp4
 
 Auswahl „Bibelstunde“:
 
-- kein Titel als Pflichtfeld
+- Titel/Themenreihe optional leer lassen oder testweise ausfuellen
 - Hauptbibelstelle eingeben
 - Redner eingeben
 
@@ -171,6 +171,7 @@ Erwarteter Dateiname:
 
 ```text
 Bibelstunde (Hauptbibelstelle)_Redner.mp4
+Bibelstunde (Titel_Hauptbibelstelle)_Redner.mp4
 ```
 
 ### Vortrag/Lobpreis/Sonstiges-Test

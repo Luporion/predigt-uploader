@@ -29,6 +29,7 @@ Die Dienstart-Vorauswahl beruecksichtigt nun auch Freitag als Gebetsstunde. Fuer
 Der Textual-Prototyp hat nun einen gefuehrten Startablauf fuer neue Aufnahmen: Nutzer waehlen zwischen bereits geschnittener MP4 und Rohaufnahme, sehen eine filterbare Liste der neuesten MP4-Dateien aus dem passenden Ordner und landen danach in der Metadaten-Erfassung. Aus Quelle und Metadaten wird ein reines Preview-Uebergabeobjekt mit Zielordner, finaler MP4, finaler MP3 und Zusammenfassungspfad erstellt. Dateiuebernahme, LosslessCut, FFmpeg und Rohaufnahme-Aufraeumen bleiben weiterhin beim normalen Wizard.
 Die Textual-Dateiauswahl nutzt nun fuer geschnittene MP4 und Rohaufnahme dieselbe Auswahl-Logik mit neuester Datei, Such-/Filterliste und manueller Datei- oder Ordner-Eingabe. MP4-Dateien werden als Tabelle mit Dateiname, Aenderungsdatum und Groesse angezeigt; Zurueck und Abbrechen bleiben getrennte Aktionen. Fehlende Metadaten-Pflichtfelder werden direkt an den Eingabefeldern markiert und die Vorschau zeigt einen klaren Bitte-ergaenzen-Hinweis.
 Die Textual-Dateiauswahl zeigt die MP4-Ergebnisse nur noch in der Tabelle, nicht zusaetzlich als Textliste. Vor dem Textual-Startablauf fragt ein Sicherheitshinweis ab, ob Aufnahme und Stream in vMix beendet wurden. Im normalen Hauptmenue erscheint derselbe Hinweis vor dem produktiven Wizard-Start. Fuer Bibelstunden ist Titel/Themenreihe optional; wenn er eingetragen wird, erscheint er im gemeinsamen Dateinamen vor der Bibelstelle.
+Der Textual-Startcheck ist nun eine eigene grosse Sicherheitsseite: "Nein, erst in vMix pruefen" steht links und erhaelt den Standardfokus, "Ja, Aufnahme und Stream sind beendet" fuehrt erst danach in die Dateiauswahl. Der Warnhinweis zu weiterlaufendem Stream und Datenvolumen/Kosten ist deutlich gerahmt.
 Für robuste Testläufe auf unterschiedlichen Windows-Rechnern gibt es `scripts/test.ps1` und die anklickbare Datei `Tests ausfuehren.cmd`. Das Script nutzt bevorzugt `%LOCALAPPDATA%\PredigtUploader\pytest` für temporäre Testdaten und Pytest-Cache, fällt bei Berechtigungsproblemen auf `%TEMP%\PredigtUploader-pytest` zurück und lässt `pyproject.toml` frei von rechnerabhängigen Temp-Pfaden.
 Das Release-ZIP bleibt ein Nutzerpaket: Sichtbar im Paket sind die drei Gemeinde-Launcher fuer Einrichten, Systemcheck und Starten; der Test-Launcher wird nicht als Top-Level-Datei ausgeliefert.
 
@@ -95,6 +96,7 @@ Das Release-ZIP bleibt ein Nutzerpaket: Sichtbar im Paket sind die drei Gemeinde
 - In Textual MP4-Dateien tabellarisch auswaehlen, suchen/filtern, die neueste Datei verwenden oder Datei/Ordner manuell eingeben.
 - In Textual fehlende Metadaten-Pflichtfelder direkt am Eingabefeld markieren und rechts gesammelt als Bitte-ergaenzen-Hinweis anzeigen.
 - Vor neuen Aufnahmen in Textual und im normalen Hauptmenue bewusst bestaetigen lassen, dass vMix-Aufnahme und Stream beendet sind.
+- Den Textual-Startcheck als prominente Sicherheitsseite mit Standardfokus auf "Nein" anzeigen.
 - Bibelstunden optional mit Titel/Themenreihe im Dateinamen bilden, ohne Titel weiterhin nur mit Bibelstelle.
 - Tests ueber `scripts/test.ps1` oder `Tests ausfuehren.cmd` mit lokalen, beschreibbaren Temp- und Cache-Ordnern ausfuehren.
 
@@ -109,7 +111,7 @@ Das Release-ZIP bleibt ein Nutzerpaket: Sichtbar im Paket sind die drei Gemeinde
 
 ## Nächster geplanter Schritt
 
-Den experimentellen Textual-Prototyp auf dem Zielrechner als Zusatztest pruefen: Startmenue, vMix-Aufnahme-/Stream-Hinweis, tabellarische MP4-Auswahl ohne doppelte Textliste, Mausrad-/Tastaturbedienung, optionale Bibelstunden-Themenreihe, Zurueck/Abbrechen und sichtbare Metadaten-Pflichtfeldmarkierung. Der normale Wizard bleibt der produktive Workflow.
+Den experimentellen Textual-Prototyp auf dem Zielrechner als Zusatztest pruefen: Startmenue, prominenter vMix-Aufnahme-/Stream-Hinweis mit Standardfokus auf "Nein", tabellarische MP4-Auswahl ohne doppelte Textliste, Mausrad-/Tastaturbedienung, optionale Bibelstunden-Themenreihe, Zurueck/Abbrechen und sichtbare Metadaten-Pflichtfeldmarkierung. Der normale Wizard bleibt der produktive Workflow.
 
 ## Sicherheits-Hinweis
 

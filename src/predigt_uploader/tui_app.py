@@ -13,6 +13,16 @@ from .report import summary_file_path
 
 TUI_MP4_PREVIEW_LIMIT = 5
 TUI_FILE_CHOICE_LIMIT = 10
+TUI_START_SAFETY_TITLE = "WICHTIGER CHECK VOR DEM START"
+TUI_START_SAFETY_QUESTIONS = (
+    "Ist die Aufnahme in vMix beendet?",
+    "Ist der Stream in vMix beendet?",
+)
+TUI_START_SAFETY_WARNING = (
+    "Wenn der Stream weiterlaeuft, verbraucht der Streaminganbieter weiter Datenvolumen/Kosten."
+)
+TUI_START_SAFETY_CANCEL_LABEL = "Nein, erst in vMix pruefen"
+TUI_START_SAFETY_CONFIRM_LABEL = "Ja, Aufnahme und Stream sind beendet"
 
 
 @dataclass(frozen=True)
@@ -163,12 +173,17 @@ def build_tui_start_status_text(config: AppConfig) -> str:
 def build_tui_start_safety_text() -> str:
     return "\n".join(
         [
-            "Wurde die Aufnahme in vMix beendet?",
-            "Wurde der Stream in vMix beendet?",
+            *TUI_START_SAFETY_QUESTIONS,
             "",
-            "Wenn der Stream nicht beendet wird, verbraucht der Streaminganbieter weiter Datenvolumen/Kosten.",
+            f"[!] {TUI_START_SAFETY_WARNING}",
         ]
     )
+
+
+def tui_start_safety_route(action_id: str | None) -> str:
+    if action_id == "confirm":
+        return "source"
+    return "start"
 
 
 def build_tui_file_candidates_lines(config: AppConfig, *, limit: int = TUI_MP4_PREVIEW_LIMIT) -> tuple[str, ...]:
@@ -533,16 +548,23 @@ def run_tui(config_path: str | None = None) -> int:
 
         def compose(self) -> ComposeResult:
             yield Header(show_clock=False)
-            yield Static("Vor dem Start kurz pruefen", id="screen_title")
-            yield Static(build_tui_start_safety_text(), id="screen_note")
-            yield Button("Ja, Aufnahme und Stream sind beendet", id="confirm", variant="primary")
-            yield Button("Nein, ich pruefe das erst", id="cancel")
+            with Vertical(id="safety_page"):
+                yield Static(TUI_START_SAFETY_TITLE, id="safety_title")
+                yield Static("\n".join(TUI_START_SAFETY_QUESTIONS), id="safety_questions")
+                yield Static(f"[!] {TUI_START_SAFETY_WARNING}", id="safety_warning")
+                with Horizontal(id="safety_actions"):
+                    yield Button(TUI_START_SAFETY_CANCEL_LABEL, id="cancel", variant="error")
+                    yield Button(TUI_START_SAFETY_CONFIRM_LABEL, id="confirm", variant="primary")
             yield Footer()
 
+        def on_mount(self) -> None:
+            self.query_one("#cancel", Button).focus()
+
         def on_button_pressed(self, event: Button.Pressed) -> None:
-            if event.button.id == "confirm":
+            route = tui_start_safety_route(event.button.id)
+            if route == "source":
                 self.app.push_screen(SourceChoiceScreen(self.app_config))
-            elif event.button.id == "cancel":
+            else:
                 self.app.pop_screen()
 
     class SourceChoiceScreen(Screen[None]):
@@ -940,6 +962,41 @@ def run_tui(config_path: str | None = None) -> int:
             border: solid $accent;
             padding: 1;
             margin-bottom: 1;
+        }
+        #safety_page {
+            align: center middle;
+            height: 1fr;
+        }
+        #safety_title {
+            text-style: bold;
+            text-align: center;
+            width: 100%;
+            border: heavy $error;
+            padding: 1 2;
+            margin-bottom: 1;
+        }
+        #safety_questions {
+            text-style: bold;
+            text-align: center;
+            width: 100%;
+            border: solid $warning;
+            padding: 1 2;
+            margin-bottom: 1;
+        }
+        #safety_warning {
+            text-align: center;
+            width: 100%;
+            border: heavy $warning;
+            padding: 1 2;
+            margin-bottom: 2;
+        }
+        #safety_actions {
+            align-horizontal: center;
+            height: auto;
+        }
+        #safety_actions Button {
+            width: 34;
+            margin: 0 1 1 1;
         }
         #file_actions {
             height: auto;

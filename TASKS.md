@@ -85,6 +85,7 @@
 - [x] Textual-Metadatenvalidierung direkt an den Eingabefeldern sichtbar machen
 - [x] Doppelte Textausgabe unter der Textual-MP4-Tabelle entfernen
 - [x] Start-Hinweis fuer beendete vMix-Aufnahme und beendeten Stream ergaenzen
+- [x] Textual-Start-Hinweis als prominente Sicherheitsseite mit Nein-Standardfokus darstellen
 - [x] Bibelstunde mit optionaler Themenreihe im gemeinsamen Dateinamen unterstuetzen
 - [x] danach bestehenden lokalen Workflow weiterverwenden
 

@@ -29,6 +29,7 @@ from predigt_uploader.tui_app import (
     service_type_by_name,
     service_types_for_tui,
     tui_cut_mp4_folder,
+    tui_start_safety_route,
     validate_tui_metadata,
 )
 
@@ -162,9 +163,16 @@ def test_tui_start_status_shows_experiment_and_configured_folders(tmp_path):
 def test_tui_start_safety_text_warns_before_workflow():
     text = build_tui_start_safety_text()
 
-    assert "Wurde die Aufnahme in vMix beendet?" in text
-    assert "Wurde der Stream in vMix beendet?" in text
+    assert "Ist die Aufnahme in vMix beendet?" in text
+    assert "Ist der Stream in vMix beendet?" in text
     assert "Datenvolumen/Kosten" in text
+    assert "[!]" in text
+
+
+def test_tui_start_safety_routes_no_back_to_start():
+    assert tui_start_safety_route("cancel") == "start"
+    assert tui_start_safety_route(None) == "start"
+    assert tui_start_safety_route("confirm") == "source"
 
 
 def test_tui_file_candidates_show_cut_and_raw_mp4_files(tmp_path):

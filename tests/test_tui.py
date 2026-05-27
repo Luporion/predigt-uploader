@@ -165,6 +165,8 @@ def test_tui_start_safety_text_warns_before_workflow():
 
     assert "Ist die Aufnahme in vMix beendet?" in text
     assert "Ist der Stream in vMix beendet?" in text
+    assert "[ ]" not in text
+    assert "==" not in text
     assert "Datenvolumen/Kosten" in text
     assert "[!]" in text
 

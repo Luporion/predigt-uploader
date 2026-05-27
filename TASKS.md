@@ -86,6 +86,9 @@
 - [x] Doppelte Textausgabe unter der Textual-MP4-Tabelle entfernen
 - [x] Start-Hinweis fuer beendete vMix-Aufnahme und beendeten Stream ergaenzen
 - [x] Textual-Start-Hinweis als prominente Sicherheitsseite mit Nein-Standardfokus darstellen
+- [x] Textual-Startcheck-Fragen als grosse getrennte Warnbloecke hervorheben
+- [x] Textual-Startcheck als kompakten ASCII-/Checklisten-Banner nachschaerfen
+- [x] Textual-Startcheck wieder auf breite ruhige Warnseite ohne ASCII-Checkliste zurueckstellen
 - [x] Bibelstunde mit optionaler Themenreihe im gemeinsamen Dateinamen unterstuetzen
 - [x] danach bestehenden lokalen Workflow weiterverwenden
 

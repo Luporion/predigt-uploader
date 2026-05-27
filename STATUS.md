@@ -30,6 +30,7 @@ Der Textual-Prototyp hat nun einen gefuehrten Startablauf fuer neue Aufnahmen: N
 Die Textual-Dateiauswahl nutzt nun fuer geschnittene MP4 und Rohaufnahme dieselbe Auswahl-Logik mit neuester Datei, Such-/Filterliste und manueller Datei- oder Ordner-Eingabe. MP4-Dateien werden als Tabelle mit Dateiname, Aenderungsdatum und Groesse angezeigt; Zurueck und Abbrechen bleiben getrennte Aktionen. Fehlende Metadaten-Pflichtfelder werden direkt an den Eingabefeldern markiert und die Vorschau zeigt einen klaren Bitte-ergaenzen-Hinweis.
 Die Textual-Dateiauswahl zeigt die MP4-Ergebnisse nur noch in der Tabelle, nicht zusaetzlich als Textliste. Vor dem Textual-Startablauf fragt ein Sicherheitshinweis ab, ob Aufnahme und Stream in vMix beendet wurden. Im normalen Hauptmenue erscheint derselbe Hinweis vor dem produktiven Wizard-Start. Fuer Bibelstunden ist Titel/Themenreihe optional; wenn er eingetragen wird, erscheint er im gemeinsamen Dateinamen vor der Bibelstelle.
 Der Textual-Startcheck ist nun eine eigene grosse Sicherheitsseite: "Nein, erst in vMix pruefen" steht links und erhaelt den Standardfokus, "Ja, Aufnahme und Stream sind beendet" fuehrt erst danach in die Dateiauswahl. Der Warnhinweis zu weiterlaufendem Stream und Datenvolumen/Kosten ist deutlich gerahmt.
+Die Textual-Startcheck-Seite nutzt wieder eine breite, ruhige Sicherheitsdarstellung mit Titelrahmen, gemeinsamem Fragenpanel, Warnpanel und klar getrennten Buttons.
 Für robuste Testläufe auf unterschiedlichen Windows-Rechnern gibt es `scripts/test.ps1` und die anklickbare Datei `Tests ausfuehren.cmd`. Das Script nutzt bevorzugt `%LOCALAPPDATA%\PredigtUploader\pytest` für temporäre Testdaten und Pytest-Cache, fällt bei Berechtigungsproblemen auf `%TEMP%\PredigtUploader-pytest` zurück und lässt `pyproject.toml` frei von rechnerabhängigen Temp-Pfaden.
 Das Release-ZIP bleibt ein Nutzerpaket: Sichtbar im Paket sind die drei Gemeinde-Launcher fuer Einrichten, Systemcheck und Starten; der Test-Launcher wird nicht als Top-Level-Datei ausgeliefert.
 
@@ -97,6 +98,7 @@ Das Release-ZIP bleibt ein Nutzerpaket: Sichtbar im Paket sind die drei Gemeinde
 - In Textual fehlende Metadaten-Pflichtfelder direkt am Eingabefeld markieren und rechts gesammelt als Bitte-ergaenzen-Hinweis anzeigen.
 - Vor neuen Aufnahmen in Textual und im normalen Hauptmenue bewusst bestaetigen lassen, dass vMix-Aufnahme und Stream beendet sind.
 - Den Textual-Startcheck als prominente Sicherheitsseite mit Standardfokus auf "Nein" anzeigen.
+- Die Textual-Startcheck-Fragen als getrennte grosse Warnbloecke darstellen.
 - Bibelstunden optional mit Titel/Themenreihe im Dateinamen bilden, ohne Titel weiterhin nur mit Bibelstelle.
 - Tests ueber `scripts/test.ps1` oder `Tests ausfuehren.cmd` mit lokalen, beschreibbaren Temp- und Cache-Ordnern ausfuehren.
 

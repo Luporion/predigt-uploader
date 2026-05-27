@@ -551,7 +551,7 @@ def run_tui(config_path: str | None = None) -> int:
             with Vertical(id="safety_page"):
                 yield Static(TUI_START_SAFETY_TITLE, id="safety_title")
                 yield Static("\n".join(TUI_START_SAFETY_QUESTIONS), id="safety_questions")
-                yield Static(f"[!] {TUI_START_SAFETY_WARNING}", id="safety_warning")
+                yield Static(TUI_START_SAFETY_WARNING, id="safety_warning")
                 with Horizontal(id="safety_actions"):
                     yield Button(TUI_START_SAFETY_CANCEL_LABEL, id="cancel", variant="error")
                     yield Button(TUI_START_SAFETY_CONFIRM_LABEL, id="confirm", variant="primary")
@@ -985,7 +985,7 @@ def run_tui(config_path: str | None = None) -> int:
         }
         #safety_warning {
             text-align: center;
-            width: 100%;
+            width: 64;
             border: heavy $warning;
             padding: 1 2;
             margin-bottom: 2;

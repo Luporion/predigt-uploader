@@ -30,6 +30,7 @@ build/
 # OS / IDE
 .DS_Store
 Thumbs.db
+*.lnk
 Windows PowerShell.txt
 .vscode/*.local.json
 

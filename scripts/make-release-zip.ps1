@@ -20,6 +20,7 @@ $ReleaseItems = @(
     "pyproject.toml",
     "config.example.toml",
     "PredigtUploader starten.cmd",
+    "PredigtUploader Textual starten.cmd",
     "PredigtUploader einrichten.cmd",
     "PredigtUploader Systemcheck.cmd"
 )
@@ -40,7 +41,8 @@ $ExcludedNames = @(
 
 $ExcludedPatterns = @(
     "*.egg-info",
-    "*.pyc"
+    "*.pyc",
+    "*.lnk"
 )
 
 function Write-Step {

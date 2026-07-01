@@ -91,6 +91,13 @@
 - [x] Textual-Startcheck wieder auf breite ruhige Warnseite ohne ASCII-Checkliste zurueckstellen
 - [x] Bibelstunde mit optionaler Themenreihe im gemeinsamen Dateinamen unterstuetzen
 - [x] danach bestehenden lokalen Workflow weiterverwenden
+- [x] Textual-Rohaufnahme-Workflow mit LosslessCut-Export-Erkennung und bewusster Rohaufnahme-Aktionsauswahl absichern
+- [x] Textual-Dienstart-Vorauswahl am wirksamen Aufnahmedatum aus Rohaufnahme oder Schnittdatei ausrichten
+- [x] Textual-Zielordnerpruefung und Zieldatei-Konfliktschutz vor finaler Verarbeitung ergaenzen
+- [x] Textual-Konfliktentscheidung fuer vorhandene Zieldateien prominent und bedienbar anzeigen
+- [x] Textual-Vorbereitung-pruefen-Seite fuer naechste Nutzeraktion verstaendlicher machen
+- [x] Textual-Ersetzen-Button und Erfolgsstatus bei vorhandenen Zieldateien nachschaerfen
+- [x] Textual-Doppelklick-Starter und klare Abschlussseite mit manuellen naechsten Schritten ergaenzen
 
 ## Phase 2: Windows-Nutzerfreundlichkeit
 

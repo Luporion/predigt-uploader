@@ -32,6 +32,20 @@ def test_run_wizard_script_checks_venv_and_starts_cli_wizard() -> None:
     assert "-m predigt_uploader @args" in content
 
 
+def test_run_tui_script_checks_venv_and_starts_textual() -> None:
+    script = PROJECT_ROOT / "scripts" / "run-tui.ps1"
+
+    content = script.read_text(encoding="utf-8")
+
+    assert script.exists()
+    assert ".venv" in content
+    assert "python.exe" in content
+    assert "Die virtuelle Python-Umgebung .venv wurde nicht gefunden." in content
+    assert "PredigtUploader einrichten.cmd" in content
+    assert "[Console]::OutputEncoding" in content
+    assert "-m predigt_uploader tui" in content
+
+
 def test_pytest_config_does_not_pin_machine_local_temp_paths() -> None:
     config = PROJECT_ROOT / "pyproject.toml"
 
@@ -41,6 +55,14 @@ def test_pytest_config_does_not_pin_machine_local_temp_paths() -> None:
     assert "--basetemp=.pytest-tmp" not in content
     assert "--basetemp=.pytest-tmp/run" not in content
     assert 'cache_dir = ".pytest-tmp/cache"' not in content
+
+
+def test_gitignore_excludes_windows_shortcuts() -> None:
+    gitignore = PROJECT_ROOT / ".gitignore"
+
+    content = gitignore.read_text(encoding="utf-8")
+
+    assert "*.lnk" in content
 
 
 def test_test_script_uses_portable_temp_and_cache_folders() -> None:
@@ -95,7 +117,9 @@ def test_windows_starter_scripts_avoid_umlauts_in_console_text() -> None:
         PROJECT_ROOT / "scripts" / "setup-local.ps1",
         PROJECT_ROOT / "scripts" / "check-system.ps1",
         PROJECT_ROOT / "scripts" / "run-wizard.ps1",
+        PROJECT_ROOT / "scripts" / "run-tui.ps1",
         PROJECT_ROOT / "PredigtUploader starten.cmd",
+        PROJECT_ROOT / "PredigtUploader Textual starten.cmd",
         PROJECT_ROOT / "PredigtUploader einrichten.cmd",
         PROJECT_ROOT / "PredigtUploader Systemcheck.cmd",
         PROJECT_ROOT / "Tests ausfuehren.cmd",
@@ -126,6 +150,7 @@ def test_install_v1_5_guide_documents_target_machine_setup() -> None:
 def test_clickable_cmd_launchers_exist_and_call_expected_scripts() -> None:
     launchers = {
         "PredigtUploader starten.cmd": "scripts\\run-wizard.ps1",
+        "PredigtUploader Textual starten.cmd": "scripts\\run-tui.ps1",
         "PredigtUploader einrichten.cmd": "scripts\\setup-local.ps1",
         "PredigtUploader Systemcheck.cmd": "scripts\\check-system.ps1",
         "Tests ausfuehren.cmd": "scripts\\test.ps1",
@@ -176,6 +201,7 @@ def test_release_zip_script_documents_included_and_excluded_paths() -> None:
     assert '"pyproject.toml"' in content
     assert '"config.example.toml"' in content
     assert '"PredigtUploader starten.cmd"' in content
+    assert '"PredigtUploader Textual starten.cmd"' in content
     assert '"PredigtUploader einrichten.cmd"' in content
     assert '"PredigtUploader Systemcheck.cmd"' in content
     assert '"Tests ausfuehren.cmd"' not in content
@@ -192,6 +218,7 @@ def test_release_zip_script_documents_included_and_excluded_paths() -> None:
     assert '"config.toml"' in content
     assert '"*.egg-info"' in content
     assert '"*.pyc"' in content
+    assert '"*.lnk"' in content
     assert "ExcludedPatterns" in content
 
 

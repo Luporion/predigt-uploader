@@ -36,6 +36,7 @@ Für Bibelstunde später optional:
 
 ```text
 Bibelstunde (Hauptbibelstelle)_Redner Vorname Nachname.mp4
+Bibelstunde (Titel_Hauptbibelstelle)_Redner Vorname Nachname.mp4
 ```
 
 ## Ordnerstandard

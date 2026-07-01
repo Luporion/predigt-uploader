@@ -40,4 +40,4 @@ def build_summary_text(plan: ProcessingPlan) -> str:
 def write_summary_file(plan: ProcessingPlan) -> None:
     target_folder = plan.target_mp4.parent
     summary_path = summary_file_path(target_folder)
-    summary_path.write_text(build_summary_text(plan), encoding="utf-8")
+    summary_path.write_text(build_summary_text(plan), encoding="utf-8-sig")

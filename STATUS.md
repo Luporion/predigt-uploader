@@ -33,6 +33,16 @@ Der Textual-Startcheck ist nun eine eigene grosse Sicherheitsseite: "Nein, erst 
 Die Textual-Startcheck-Seite nutzt wieder eine breite, ruhige Sicherheitsdarstellung mit Titelrahmen, gemeinsamem Fragenpanel, Warnpanel und klar getrennten Buttons.
 Für robuste Testläufe auf unterschiedlichen Windows-Rechnern gibt es `scripts/test.ps1` und die anklickbare Datei `Tests ausfuehren.cmd`. Das Script nutzt bevorzugt `%LOCALAPPDATA%\PredigtUploader\pytest` für temporäre Testdaten und Pytest-Cache, fällt bei Berechtigungsproblemen auf `%TEMP%\PredigtUploader-pytest` zurück und lässt `pyproject.toml` frei von rechnerabhängigen Temp-Pfaden.
 Das Release-ZIP bleibt ein Nutzerpaket: Sichtbar im Paket sind die drei Gemeinde-Launcher fuer Einrichten, Systemcheck und Starten; der Test-Launcher wird nicht als Top-Level-Datei ausgeliefert.
+Textual kann nach Datei-Auswahl und Metadaten nun einen zentralen Verarbeitungsplan anzeigen und daraus testbar Dateien vorbereiten: Zielordner erstellen, MP4 uebernehmen, MP3 per FFmpeg erzeugen, Zusammenfassung schreiben, Rohaufnahme je nach Plan behandeln und optional den Zielordner oeffnen. Der normale Wizard bleibt weiterhin produktiver Standard.
+Die Textual-Ausfuehrung meldet nun direkt beim Klick sichtbar "Verarbeitung gestartet...", deaktiviert den Ausfuehren-Button, zeigt Statusschritte und endet bei Erfolg mit einer klaren Fertig-Zusammenfassung. Die Textzusammenfassung wird als UTF-8 mit BOM geschrieben, damit Umlaute in Windows Notepad und PowerShell zuverlaessiger erkannt werden.
+Der Textual-Rohaufnahme-Zweig wurde fachlich korrigiert: Nach Auswahl einer vMix-Rohaufnahme folgt zuerst eine LosslessCut-/Schnitt-Seite und danach die Auswahl der geschnittenen MP4. Erst diese geschnittene MP4 wird als finale Quelle fuer MP4/MP3/Zusammenfassung verwendet; die Rohaufnahme bleibt separat fuer die optionale Aufraeum-Aktion.
+Der Textual-Schnittschritt nutzt nun einen Snapshot-Ansatz: Beim LosslessCut-Schritt werden MP4-Dateien in plausiblen Exportordnern gemerkt, danach werden neue oder geaenderte MP4-Dateien vorgeschlagen und muessen bestaetigt werden. Die Dateitabelle zeigt bis zu 500 passende MP4-Dateien. Vor der finalen Verarbeitung waehlen Nutzer bewusst, ob die Rohaufnahme verschoben, kopiert oder liegen gelassen wird.
+Die automatische Dienstart-Vorauswahl in Textual richtet sich nun nach dem wirksamen Aufnahmedatum: zuerst Rohaufnahme-Dateiname, dann geschnittene MP4, dann Dateidatum und erst zuletzt das heutige Datum. Solange Nutzer die Dienstart nicht manuell aendern, folgt sie weiteren Datumswechseln automatisch.
+Textual prueft nach den Metadaten nun zuerst den Zielordner: fehlende, einzelne vorhandene und mehrere vorhandene Tagesordner werden sichtbar unterschieden. Die finale Pruefseite erkennt bestehende Ziel-MP4, Ziel-MP3 und Zusammenfassung und laesst die Verarbeitung erst nach bewusster Ersetzen-Entscheidung zu.
+Die Textual-Konfliktentscheidung auf der finalen Pruefseite ist nun deutlicher: Bestehende Zieldateien werden kompakt als MP4, MP3 und Zusammenfassung angezeigt, rechts erscheint ein eigener Achtung-Bereich mit Zurueck-, Ersetzen- und Abbrechen-Aktion. Erst nach "Vorhandene Dateien ersetzen" wird der finale Ausfuehren-Button aktiviert.
+Die finale Textual-Pruefseite erklaert nun auch ohne Konflikte direkt, dass der naechste Klick MP4, MP3 und Zusammenfassung erstellt und eine Rohaufnahme gemaess Auswahl behandelt. Bei Konflikten steht rechts ein STOPP-Hinweis mit vorhandenen Dateien und klaren Optionen; nach Erfolg weist der Status auf die manuelle Weiterbearbeitung in Vimeo/WordPress hin.
+Der Textual-Ersetzen-Button ist im Konfliktfall nun als breiter, kontrastreicher Button beschriftet. Nach bestaetigtem Ersetzen verschwindet der STOPP-Text aus dem rechten Bereich, nach erfolgreicher Verarbeitung wird der finale Button deaktiviert und der Status nennt Zielordner-Kontrolle sowie manuelle Vimeo-/WordPress-Weiterarbeit.
+Textual hat nun einen eigenen Doppelklick-Starter `PredigtUploader Textual starten.cmd` und das PowerShell-Skript `scripts/run-tui.ps1`. Das Release-ZIP enthaelt den normalen Wizard-Starter weiterhin unveraendert, zusaetzlich den Textual-Starter und keine Windows-`.lnk`-Verknuepfungen. Der Textual-Abschlussstatus zeigt Zielordner, finale MP4/MP3, Zusammenfassung, Kontrollliste und die manuellen naechsten Schritte fuer Vimeo und WordPress.
 
 ## Was Version 1 bereits kann
 
@@ -96,6 +106,18 @@ Das Release-ZIP bleibt ein Nutzerpaket: Sichtbar im Paket sind die drei Gemeinde
 - In Textual Quelle und Metadaten als Preview-Uebergabeobjekt vorbereiten, ohne den normalen Wizard als produktiven Workflow zu ersetzen.
 - In Textual MP4-Dateien tabellarisch auswaehlen, suchen/filtern, die neueste Datei verwenden oder Datei/Ordner manuell eingeben.
 - In Textual fehlende Metadaten-Pflichtfelder direkt am Eingabefeld markieren und rechts gesammelt als Bitte-ergaenzen-Hinweis anzeigen.
+- In Textual nach der Metadatenpruefung eine finale Seite "Vorbereitung pruefen" mit Quelle, Zielordner, finalen Dateinamen, Zusammenfassung, Rohaufnahme-Aktion, Warnungen und Ausfuehren-Button anzeigen.
+- Aus einem zentralen `PreparedRecordingPlan` heraus kleine Testdateien ueber die gemeinsame Verarbeitungsfunktion vorbereiten, inklusive Statusmeldungen fuer Zielordner, MP4, MP3, Zusammenfassung, Rohaufnahme und Fertig.
+- In Textual beim Start der Datei-Vorbereitung sofort sichtbares Feedback anzeigen und nach Erfolg Zielordner, finale MP4, finale MP3, Zusammenfassung und Rohaufnahme-Aktion im Statusbereich nennen.
+- In Textual Rohaufnahmen nicht mehr direkt als finale Predigt-MP4 verarbeiten, sondern zuerst LosslessCut/Schnitt und danach eine separate Auswahl der geschnittenen MP4 erzwingen.
+- In Textual nach LosslessCut neue oder geaenderte MP4-Exporte per Dateisystem-Snapshot vorschlagen und vor Uebernahme bestaetigen lassen.
+- In Textual vor der finalen Verarbeitung die Rohaufnahme-Aktion explizit waehlen lassen; Verschieben bleibt je nach Config die Vorauswahl, geschieht aber nicht mehr stillschweigend.
+- In Textual die Dienstart anhand des wirksamen Aufnahmedatums statt pauschal anhand des heutigen Datums vorauswaehlen.
+- In Textual vor der finalen Verarbeitung Zielordner-Konflikte und vorhandene Zieldateien getrennt pruefen.
+- In Textual vorhandene Zieldateien mit einem gut sichtbaren Entscheidungsbereich statt nur einem deaktivierten Button behandeln.
+- In Textual die finale Pruefseite mit klaren Naechster-Schritt-Hinweisen, STOPP-Konflikttexten und dynamischen MP4-Aktionstexten nachschaerfen.
+- In Textual den Ersetzen-Button im Konfliktfall lesbar hervorheben und Konflikttexte nach Erfolg ausblenden.
+- Eigenen Textual-Starter fuer Tests bereitstellen und den Abschlussstatus als klare Kontroll- und Weiterarbeitsseite anzeigen.
 - Vor neuen Aufnahmen in Textual und im normalen Hauptmenue bewusst bestaetigen lassen, dass vMix-Aufnahme und Stream beendet sind.
 - Den Textual-Startcheck als prominente Sicherheitsseite mit Standardfokus auf "Nein" anzeigen.
 - Die Textual-Startcheck-Fragen als getrennte grosse Warnbloecke darstellen.
@@ -113,7 +135,7 @@ Das Release-ZIP bleibt ein Nutzerpaket: Sichtbar im Paket sind die drei Gemeinde
 
 ## Nächster geplanter Schritt
 
-Den experimentellen Textual-Prototyp auf dem Zielrechner als Zusatztest pruefen: Startmenue, prominenter vMix-Aufnahme-/Stream-Hinweis mit Standardfokus auf "Nein", tabellarische MP4-Auswahl ohne doppelte Textliste, Mausrad-/Tastaturbedienung, optionale Bibelstunden-Themenreihe, Zurueck/Abbrechen und sichtbare Metadaten-Pflichtfeldmarkierung. Der normale Wizard bleibt der produktive Workflow.
+Den experimentellen Textual-Prototyp auf dem Zielrechner als Zusatztest pruefen: Startmenue, prominenter vMix-Aufnahme-/Stream-Hinweis mit Standardfokus auf "Nein", Rohaufnahme-Auswahl mit LosslessCut-Zwischenschritt, automatische Export-Erkennung mit menschlicher Bestaetigung, Dateiliste mit vielen MP4-Dateien, finale Rohaufnahme-Aktionsauswahl, finale Seite "Vorbereitung pruefen", sofort sichtbares Startfeedback, Fertig-Zusammenfassung im Statusbereich und Fehleranzeige. Der normale Wizard bleibt der produktive Workflow.
 
 ## Sicherheits-Hinweis
 

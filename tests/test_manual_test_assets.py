@@ -1,4 +1,3 @@
-import re
 from pathlib import Path
 
 
@@ -43,6 +42,9 @@ def test_run_tui_script_checks_venv_and_starts_textual() -> None:
     assert "Die virtuelle Python-Umgebung .venv wurde nicht gefunden." in content
     assert "PredigtUploader einrichten.cmd" in content
     assert "[Console]::OutputEncoding" in content
+    assert 'Textual ist nicht installiert.' in content
+    assert 'Bitte PredigtUploader einrichten.cmd erneut starten.' in content
+    assert 'import textual' in content
     assert "-m predigt_uploader tui" in content
 
 
@@ -90,6 +92,10 @@ def test_local_setup_script_prepares_venv_and_installs_package() -> None:
     assert "-m venv" in content
     assert ".venv" in content
     assert "-m pip install -e" in content
+    assert '".[tui]"' in content
+    assert '".[dev,tui]"' in content
+    assert "Der normale Wizard und die experimentelle Textual-Oberflaeche werden eingerichtet." in content
+    assert "Textual-Oberflaeche ist installiert." in content
     assert "Einrichtung abgeschlossen." in content
     assert "Abhaengigkeiten" in content
     assert "FFmpeg wurde nicht gefunden." in content
@@ -105,6 +111,11 @@ def test_system_check_script_checks_wizard_ffmpeg_and_losslesscut() -> None:
 
     assert "PredigtUploader Systempruefung" in content
     assert "-m predigt_uploader --help" in content
+    assert "import textual" in content
+    assert "Textual ist fuer die neue Oberflaeche verfuegbar." in content
+    assert "Textual ist nicht installiert." in content
+    assert "PredigtUploader Textual starten.cmd" in content
+    assert "PredigtUploader einrichten.cmd" in content
     assert "ffmpeg_available" in content
     assert "losslesscut_path" in content
     assert "FFmpeg wurde nicht gefunden" in content
@@ -118,6 +129,7 @@ def test_windows_starter_scripts_avoid_umlauts_in_console_text() -> None:
         PROJECT_ROOT / "scripts" / "check-system.ps1",
         PROJECT_ROOT / "scripts" / "run-wizard.ps1",
         PROJECT_ROOT / "scripts" / "run-tui.ps1",
+        PROJECT_ROOT / "scripts" / "release.ps1",
         PROJECT_ROOT / "PredigtUploader starten.cmd",
         PROJECT_ROOT / "PredigtUploader Textual starten.cmd",
         PROJECT_ROOT / "PredigtUploader einrichten.cmd",
@@ -187,10 +199,17 @@ def test_release_zip_script_documents_included_and_excluded_paths() -> None:
 
     content = script.read_text(encoding="utf-8")
 
-    release_name = re.search(r'\$ReleaseName\s*=\s*"([^"]+)"', content)
-    assert release_name is not None
-    assert release_name.group(1).startswith("predigt-uploader-v$Version-")
-    assert release_name.group(1).endswith("textual-metadata-preview")
+    assert 'param(' in content
+    assert '[string]$ReleaseTag' in content
+    assert '[string]$ReleaseName' in content
+    assert 'Resolve-ReleaseName' in content
+    assert 'git -C $ProjectRoot tag --points-at HEAD' in content
+    assert 'predigt-uploader-$($ReleaseTag.Trim())' in content
+    assert 'predigt-uploader-v$Version-local' in content
+    assert 'Release-Name:' in content
+    assert 'ZIP-Ziel:' in content
+    assert '$Version = "0.1.8"' not in content
+    assert 'textual-metadata-preview' not in content
     assert "dist" in content
     assert "Compress-Archive" in content
     assert '"src"' in content
@@ -222,12 +241,30 @@ def test_release_zip_script_documents_included_and_excluded_paths() -> None:
     assert "ExcludedPatterns" in content
 
 
+def test_release_script_runs_tests_before_building_zip() -> None:
+    script = PROJECT_ROOT / "scripts" / "release.ps1"
+
+    content = script.read_text(encoding="utf-8")
+
+    assert script.exists()
+    assert "[string]$ReleaseTag" in content
+    assert "[string]$ReleaseName" in content
+    assert "test.ps1" in content
+    assert "make-release-zip.ps1" in content
+    assert "Release wird abgebrochen, weil Tests fehlgeschlagen sind." in content
+    assert "-ReleaseTag" in content
+    assert "-ReleaseName" in content
+
+
 def test_release_v1_5_guide_documents_zip_contents_and_target_setup() -> None:
     guide = PROJECT_ROOT / "docs" / "release-v1-5.md"
 
     content = guide.read_text(encoding="utf-8")
 
-    assert "predigt-uploader-v0.1.6-local.zip" in content
+    assert "make-release-zip.ps1 -ReleaseTag v0.1.9-textual-workflow-preview-r3" in content
+    assert "predigt-uploader-v0.1.9-textual-workflow-preview-r3.zip" in content
+    assert "release.ps1 -ReleaseTag v0.1.9-textual-workflow-preview-r3" in content
+    assert "Git-Tag" in content
     assert "src/" in content
     assert "scripts/" in content
     assert "docs/install-v1-5.md" in content
@@ -236,6 +273,7 @@ def test_release_v1_5_guide_documents_zip_contents_and_target_setup() -> None:
     assert "pyproject.toml" in content
     assert "config.example.toml" in content
     assert "PredigtUploader starten.cmd" in content
+    assert "PredigtUploader Textual starten.cmd" in content
     assert ".git/" in content
     assert ".venv/" in content
     assert "logs/" in content
@@ -244,6 +282,7 @@ def test_release_v1_5_guide_documents_zip_contents_and_target_setup() -> None:
     assert "*.egg-info/" in content
     assert "src/predigt_uploader.egg-info/" in content
     assert "*.pyc" in content
+    assert "*.lnk" in content
     assert "config.toml" in content
     assert "Gemeinderechner" in content
     assert "Doppelklick" in content

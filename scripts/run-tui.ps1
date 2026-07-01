@@ -45,7 +45,14 @@ try {
         $env:PYTHONPATH = $SrcDir
     }
 
-    Write-Host "PredigtUploader Textual wird gestartet."
+    & $PythonExe -c "import textual" *> $null
+    if ($LASTEXITCODE -ne 0) {
+        Write-UserError `
+            "Textual ist nicht installiert." `
+            "Bitte PredigtUploader einrichten.cmd erneut starten."
+        exit 1
+    }
+
     Write-Host "Hinweis: Textual ist die experimentelle Oberflaeche. Der normale Wizard bleibt der produktive Standard."
     Write-Host ""
     & $PythonExe -m predigt_uploader tui

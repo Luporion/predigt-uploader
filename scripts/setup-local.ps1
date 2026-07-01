@@ -123,6 +123,7 @@ function Check-Or-Offer-FFmpegInstall {
 
 Write-Host "PredigtUploader lokale Einrichtung"
 Write-Host "=================================="
+Write-Host "Der normale Wizard und die experimentelle Textual-Oberflaeche werden eingerichtet."
 
 $Python = Get-UsablePython
 if ($null -eq $Python) {
@@ -164,12 +165,12 @@ try {
         exit 1
     }
 
-    $InstallTarget = "."
+    $InstallTarget = ".[tui]"
     if ($IncludeDev) {
-        $InstallTarget = ".[dev]"
+        $InstallTarget = ".[dev,tui]"
     }
 
-    Write-Step "PredigtUploader und Abhaengigkeiten werden installiert..."
+    Write-Step "PredigtUploader, Wizard und Textual-Oberflaeche werden installiert..."
     & $VenvPython -m pip install -e $InstallTarget
     if ($LASTEXITCODE -ne 0) {
         Write-UserError `
@@ -180,6 +181,7 @@ try {
 
     Write-Host ""
     Write-Host "Einrichtung abgeschlossen." -ForegroundColor Green
+    Write-Host "Textual-Oberflaeche ist installiert." -ForegroundColor Green
     Check-Or-Offer-FFmpegInstall
     Write-Host "Naechster Schritt:"
     Write-Host ".\scripts\check-system.ps1"

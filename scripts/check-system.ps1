@@ -18,7 +18,7 @@ function Write-CheckOk {
 
 function Write-CheckWarn {
     param([string]$Message)
-    Write-Host "[FEHLT] $Message" -ForegroundColor Yellow
+    Write-Host "[WARN] $Message" -ForegroundColor Yellow
     $Problems.Add($Message) | Out-Null
 }
 
@@ -100,6 +100,19 @@ if (Test-Path -LiteralPath $VenvPython -PathType Leaf) {
     }
     finally {
         Pop-Location
+    }
+
+    try {
+        & $VenvPython -c "import textual" *> $null
+        if ($LASTEXITCODE -eq 0) {
+            Write-CheckOk "Textual ist fuer die neue Oberflaeche verfuegbar."
+        }
+        else {
+            Write-CheckWarn "Textual ist nicht installiert. Der normale Wizard funktioniert, aber `"PredigtUploader Textual starten.cmd`" nicht. Bitte `"PredigtUploader einrichten.cmd`" erneut ausfuehren."
+        }
+    }
+    catch {
+        Write-CheckWarn "Textual ist nicht installiert. Der normale Wizard funktioniert, aber `"PredigtUploader Textual starten.cmd`" nicht. Bitte `"PredigtUploader einrichten.cmd`" erneut ausfuehren."
     }
 
     try {

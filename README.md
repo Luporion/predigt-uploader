@@ -97,6 +97,16 @@ Die Starter setzen die Windows-Konsole auf UTF-8 und verwenden robuste deutsche 
 
 Für eine einfache ZIP-Auslieferung gibt es [docs/release-v1-5.md](docs/release-v1-5.md) und `scripts/make-release-zip.ps1`.
 
+Release-ZIP bauen:
+
+```powershell
+.\scripts\test.ps1
+.\scripts\make-release-zip.ps1
+.\scripts\make-release-zip.ps1 -ReleaseTag v0.1.9-textual-workflow-preview-r3
+```
+
+Empfohlener Ablauf: Tests ausfuehren, committen, Git-Tag setzen und danach `make-release-zip.ps1` starten. Wenn auf `HEAD` ein passender Tag wie `v0.1.9-textual-workflow-preview-r3` liegt, baut das Skript den ZIP-Namen automatisch daraus. Alternativ fuehrt `.\scripts\release.ps1 -ReleaseTag v0.1.9-textual-workflow-preview-r3` zuerst die Tests aus und erstellt nur bei gruenem Ergebnis das ZIP.
+
 ## Wichtige Dateien
 
 - `SPEC.md` – fachliche Spezifikation

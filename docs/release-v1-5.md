@@ -7,16 +7,38 @@ Diese Anleitung beschreibt die einfache ZIP-Auslieferung für den Gemeinderechne
 Im Projektordner:
 
 ```powershell
+.\scripts\test.ps1
 .\scripts\make-release-zip.ps1
 ```
 
-Das Skript erstellt:
+Fuer ein bestimmtes Preview-Release kann ein Tag direkt uebergeben werden:
 
-```text
-dist\predigt-uploader-v0.1.6-local.zip
+```powershell
+.\scripts\make-release-zip.ps1 -ReleaseTag v0.1.9-textual-workflow-preview-r3
 ```
 
-Hinweis: Die Dokumentation bleibt bei "lokale Version 1.5", weil es weiterhin um den lokalen LosslessCut-Zielrechner-Workflow geht. Der ZIP-Dateiname nutzt eine kleinere Paketversion, damit Gemeinderechner-Tests mit nachgebesserten Bedien- und Erkennungsfixes nicht mit der ersten 1.5-ZIP verwechselt werden.
+Das Skript erstellt dann zum Beispiel:
+
+```text
+dist\predigt-uploader-v0.1.9-textual-workflow-preview-r3.zip
+```
+
+Empfohlener Release-Ablauf:
+
+1. `.\scripts\test.ps1`
+2. committen
+3. Git-Tag setzen, zum Beispiel `v0.1.9-textual-workflow-preview-r3`
+4. `.\scripts\make-release-zip.ps1`
+
+Wenn auf `HEAD` ein passender Git-Tag liegt, baut `make-release-zip.ps1` den ZIP-Namen automatisch daraus. Ohne Tag verwendet das Skript einen lokalen Namen auf Basis der Version aus `pyproject.toml`.
+
+Alternativ kann der komplette Ablauf ueber ein Skript gestartet werden:
+
+```powershell
+.\scripts\release.ps1 -ReleaseTag v0.1.9-textual-workflow-preview-r3
+```
+
+Dieses Skript bricht ab, wenn die Tests fehlschlagen.
 
 ## Diese Dateien und Ordner gehören in die ZIP
 
@@ -28,6 +50,7 @@ Hinweis: Die Dokumentation bleibt bei "lokale Version 1.5", weil es weiterhin um
 - `pyproject.toml`
 - `config.example.toml`
 - `PredigtUploader starten.cmd`
+- `PredigtUploader Textual starten.cmd`
 - `PredigtUploader einrichten.cmd`
 - `PredigtUploader Systemcheck.cmd`
 
@@ -40,6 +63,7 @@ Hinweis: Die Dokumentation bleibt bei "lokale Version 1.5", weil es weiterhin um
 - `build/`
 - `*.egg-info/`, zum Beispiel `src/predigt_uploader.egg-info/`
 - `*.pyc`
+- `*.lnk`
 - `__pycache__/`
 - `.pytest_cache/`
 - echte `config.toml`
@@ -61,6 +85,7 @@ Für normale Nutzer sind diese Dateien im entpackten Ordner wichtig:
 - `PredigtUploader einrichten.cmd`: richtet `.venv` und Abhängigkeiten ein.
 - `PredigtUploader Systemcheck.cmd`: prüft Python, Wizard, FFmpeg und optional LosslessCut.
 - `PredigtUploader starten.cmd`: startet den lokalen Wizard.
+- `PredigtUploader Textual starten.cmd`: startet die experimentelle Textual-Oberfläche.
 
 Empfohlene Reihenfolge beim ersten Mal:
 

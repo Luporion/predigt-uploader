@@ -99,6 +99,7 @@
 - [x] Textual-Ersetzen-Button und Erfolgsstatus bei vorhandenen Zieldateien nachschaerfen
 - [x] Textual-Doppelklick-Starter und klare Abschlussseite mit manuellen naechsten Schritten ergaenzen
 - [x] Setup und Systemcheck um Textual-Installation und Textual-Pruefung erweitern
+- [x] Release-ZIP-Prozess von hart codierten Preview-Namen auf Parameter/Git-Tag/Fallback umstellen
 
 ## Phase 2: Windows-Nutzerfreundlichkeit
 

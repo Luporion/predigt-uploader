@@ -43,6 +43,7 @@ Die Textual-Konfliktentscheidung auf der finalen Pruefseite ist nun deutlicher: 
 Die finale Textual-Pruefseite erklaert nun auch ohne Konflikte direkt, dass der naechste Klick MP4, MP3 und Zusammenfassung erstellt und eine Rohaufnahme gemaess Auswahl behandelt. Bei Konflikten steht rechts ein STOPP-Hinweis mit vorhandenen Dateien und klaren Optionen; nach Erfolg weist der Status auf die manuelle Weiterbearbeitung in Vimeo/WordPress hin.
 Der Textual-Ersetzen-Button ist im Konfliktfall nun als breiter, kontrastreicher Button beschriftet. Nach bestaetigtem Ersetzen verschwindet der STOPP-Text aus dem rechten Bereich, nach erfolgreicher Verarbeitung wird der finale Button deaktiviert und der Status nennt Zielordner-Kontrolle sowie manuelle Vimeo-/WordPress-Weiterarbeit.
 Textual hat nun einen eigenen Doppelklick-Starter `PredigtUploader Textual starten.cmd` und das PowerShell-Skript `scripts/run-tui.ps1`. Das Release-ZIP enthaelt den normalen Wizard-Starter weiterhin unveraendert, zusaetzlich den Textual-Starter und keine Windows-`.lnk`-Verknuepfungen. Der Textual-Abschlussstatus zeigt Zielordner, finale MP4/MP3, Zusammenfassung, Kontrollliste und die manuellen naechsten Schritte fuer Vimeo und WordPress.
+Die lokale Einrichtung installiert nun standardmaessig auch die optionale Textual-Abhaengigkeit (`.[tui]`, im Dev-Fall `.[dev,tui]`). Der Systemcheck prueft `import textual` und `run-tui.ps1` meldet bei fehlendem Textual konkret, dass `PredigtUploader einrichten.cmd` erneut gestartet werden soll.
 
 ## Was Version 1 bereits kann
 
@@ -118,6 +119,7 @@ Textual hat nun einen eigenen Doppelklick-Starter `PredigtUploader Textual start
 - In Textual die finale Pruefseite mit klaren Naechster-Schritt-Hinweisen, STOPP-Konflikttexten und dynamischen MP4-Aktionstexten nachschaerfen.
 - In Textual den Ersetzen-Button im Konfliktfall lesbar hervorheben und Konflikttexte nach Erfolg ausblenden.
 - Eigenen Textual-Starter fuer Tests bereitstellen und den Abschlussstatus als klare Kontroll- und Weiterarbeitsseite anzeigen.
+- Lokale Einrichtung und Systemcheck so erweitern, dass die Textual-Oberflaeche nach `PredigtUploader einrichten.cmd` startbar ist.
 - Vor neuen Aufnahmen in Textual und im normalen Hauptmenue bewusst bestaetigen lassen, dass vMix-Aufnahme und Stream beendet sind.
 - Den Textual-Startcheck als prominente Sicherheitsseite mit Standardfokus auf "Nein" anzeigen.
 - Die Textual-Startcheck-Fragen als getrennte grosse Warnbloecke darstellen.

@@ -98,6 +98,7 @@
 - [x] Textual-Vorbereitung-pruefen-Seite fuer naechste Nutzeraktion verstaendlicher machen
 - [x] Textual-Ersetzen-Button und Erfolgsstatus bei vorhandenen Zieldateien nachschaerfen
 - [x] Textual-Doppelklick-Starter und klare Abschlussseite mit manuellen naechsten Schritten ergaenzen
+- [x] Setup und Systemcheck um Textual-Installation und Textual-Pruefung erweitern
 
 ## Phase 2: Windows-Nutzerfreundlichkeit
 

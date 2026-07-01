@@ -26,13 +26,13 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host ""
 Write-Host "2. Release-ZIP wird erstellt..." -ForegroundColor Cyan
-$ArgsForZip = @()
 if (-not [string]::IsNullOrWhiteSpace($ReleaseName)) {
-    $ArgsForZip += @("-ReleaseName", $ReleaseName)
+    & $ReleaseZipScript -ReleaseName $ReleaseName
 }
 elseif (-not [string]::IsNullOrWhiteSpace($ReleaseTag)) {
-    $ArgsForZip += @("-ReleaseTag", $ReleaseTag)
+    & $ReleaseZipScript -ReleaseTag $ReleaseTag
 }
-
-& $ReleaseZipScript @ArgsForZip
+else {
+    & $ReleaseZipScript
+}
 exit $LASTEXITCODE

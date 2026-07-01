@@ -252,8 +252,10 @@ def test_release_script_runs_tests_before_building_zip() -> None:
     assert "test.ps1" in content
     assert "make-release-zip.ps1" in content
     assert "Release wird abgebrochen, weil Tests fehlgeschlagen sind." in content
-    assert "-ReleaseTag" in content
-    assert "-ReleaseName" in content
+    assert "& $ReleaseZipScript -ReleaseName $ReleaseName" in content
+    assert "& $ReleaseZipScript -ReleaseTag $ReleaseTag" in content
+    assert '"-ReleaseName", $ReleaseTag' not in content
+    assert "@ArgsForZip" not in content
 
 
 def test_release_v1_5_guide_documents_zip_contents_and_target_setup() -> None:

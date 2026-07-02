@@ -45,6 +45,10 @@ Der Textual-Ersetzen-Button ist im Konfliktfall nun als breiter, kontrastreicher
 Textual hat nun einen eigenen Doppelklick-Starter `PredigtUploader Textual starten.cmd` und das PowerShell-Skript `scripts/run-tui.ps1`. Das Release-ZIP enthaelt den normalen Wizard-Starter weiterhin unveraendert, zusaetzlich den Textual-Starter und keine Windows-`.lnk`-Verknuepfungen. Der Textual-Abschlussstatus zeigt Zielordner, finale MP4/MP3, Zusammenfassung, Kontrollliste und die manuellen naechsten Schritte fuer Vimeo und WordPress.
 Die lokale Einrichtung installiert nun standardmaessig auch die optionale Textual-Abhaengigkeit (`.[tui]`, im Dev-Fall `.[dev,tui]`). Der Systemcheck prueft `import textual` und `run-tui.ps1` meldet bei fehlendem Textual konkret, dass `PredigtUploader einrichten.cmd` erneut gestartet werden soll.
 Der Release-ZIP-Prozess ist nun tag-basiert und nicht mehr an hart codierte Preview-Suffixe gebunden: `make-release-zip.ps1` akzeptiert `-ReleaseTag` oder `-ReleaseName`, liest sonst einen passenden Git-Tag auf `HEAD` und faellt ohne Tag auf einen lokalen Namen aus `pyproject.toml` zurueck. `scripts/release.ps1` fuehrt erst die Tests aus und baut nur bei Erfolg das ZIP.
+Der Textual-Verarbeitungsabschluss ist nun klarer: Beim Start der finalen Verarbeitung zeigt der Status, dass Dateien erstellt, kopiert oder verschoben werden, waehrend gefaehrliche Aktionen gesperrt sind. Nach Erfolg zeigt die rechte Seite Zielpfade, Rohaufnahme-Aktion und nummerierte naechste Schritte; Fehler nennen verstaendlich, dass nichts still ueberschrieben wurde.
+Nach dem Blindtest verwendet Textual fuer die normale Veranstaltung den sichtbaren Begriff `Gottesdienst`, behaelt intern aber den kompatiblen Wert `Predigt` und damit das bestehende Predigt-Dateinamenschema. Die sieben Workflow-Schritte sind nummeriert, Zurueck-Hilfe und Zurueck-Buttons sind vereinheitlicht, konkrete Aktionsnamen ersetzen Ja/Nein- und allgemeine Weiter-Texte. Rohaufnahmen bleiben in Textual standardmaessig sicher am Quellort; Verschieben muss bewusst ausgewaehlt werden. Eine automatische Gottesdienst-Ordnerkennung wie `-1` existiert nicht und wird nicht erfunden; kuenftige Markerregeln sind zentral in `folders.py` vorgesehen.
+Die Textual-Schritte 5 bis 7 sind nun fuer kleinere Terminalgroessen stabiler: lange Inhalte liegen in scrollbaren Bereichen, waehrend Aktionsleisten ausserhalb sichtbar bleiben. Schritt 6 zeigt je nach Ordnerstatus genau eine empfohlene Primaeraktion und blendet das Zusatzfeld erst bei Bedarf ein. Schritt 7 ist als kompakte Checkliste aufgebaut; nach Erfolg erscheint ein eigener `CompletionScreen` mit Zielpfaden, naechsten Schritten und den Aktionen Zielordner oeffnen, neue Aufnahme oder beenden.
+Die aktuelle UI-Politur fuer die Textual-Oberflaeche hebt Fortschritt, Navigation und Status bunter und klarer hervor, verwendet neutrale Info-Panels statt Warnfarben fuer normale Infobloecke und laeuft auch im Textual-Startcheck wieder sauber an.
 
 ## Was Version 1 bereits kann
 
@@ -122,6 +126,12 @@ Der Release-ZIP-Prozess ist nun tag-basiert und nicht mehr an hart codierte Prev
 - Eigenen Textual-Starter fuer Tests bereitstellen und den Abschlussstatus als klare Kontroll- und Weiterarbeitsseite anzeigen.
 - Lokale Einrichtung und Systemcheck so erweitern, dass die Textual-Oberflaeche nach `PredigtUploader einrichten.cmd` startbar ist.
 - Release-ZIP-Namen dynamisch aus Parameter, Git-Tag oder lokalem Fallback ableiten und optionalen Release-Ablauf mit Tests bereitstellen.
+- Textual-Verarbeitung mit klarer Laufmeldung, Abschlussstatus, Folgeaktionen und verstaendlichem Fehlerstatus nachschaerfen.
+- Textual-Begriffe, siebenstufige Nutzerfuehrung, Zurueck-Navigation und sichere Rohaufnahme-Standards anhand des Blindtests verbessern.
+- Textual-Schritte 5 bis 7 scrollfest gestalten, Zielordnerentscheidung vereinfachen und eigenen Abschlussscreen einfuehren.
+- Textual-Standardweg auf Rohaufnahme ausrichten, alle sieben Schritte mit einer kompakten Fortschrittsanzeige versehen und Aktionsleisten fuer kleine Terminalfenster fest sichtbar halten.
+- Textual-Zieldateikonflikte wahlweise durch eindeutige neue Dateinamen, Sicherung vorhandener Dateien oder bewusst bestaetigtes Ersetzen aufloesen.
+- Textual-Statusbereiche mit einheitlichen Info-, Warn-, Fehler- und Erfolgsmeldungen hervorheben; Vimeo bleibt ausschliesslich ein manueller Folgeschritt.
 - Vor neuen Aufnahmen in Textual und im normalen Hauptmenue bewusst bestaetigen lassen, dass vMix-Aufnahme und Stream beendet sind.
 - Den Textual-Startcheck als prominente Sicherheitsseite mit Standardfokus auf "Nein" anzeigen.
 - Die Textual-Startcheck-Fragen als getrennte grosse Warnbloecke darstellen.

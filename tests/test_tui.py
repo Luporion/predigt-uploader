@@ -1,16 +1,23 @@
 import sys
 from datetime import date, datetime
 import os
+from pathlib import Path
 
 from predigt_uploader import cli
 from predigt_uploader.config import ConfigLoadError
 from predigt_uploader.folders import resolve_folder, suggest_folder
 from predigt_uploader.models import AppConfig, SermonInfo
+from predigt_uploader.processing import execute_processing_plan
 from predigt_uploader.tui_app import (
     TUI_FILE_CHOICE_LIMIT,
     TUI_PROCESSING_DONE_LABEL,
     TUI_PROCESSING_EXECUTE_LABEL,
     TUI_PROCESSING_RUNNING_LABEL,
+    TUI_BACK_LABEL,
+    TUI_GOTTESDIENST_EXPLANATION,
+    TUI_TOTAL_WORKFLOW_STEPS,
+    apply_tui_backup_existing_confirmation,
+    apply_tui_output_suffix,
     apply_tui_overwrite_confirmation,
     build_tui_execute_button_state,
     build_tui_date_options,
@@ -26,18 +33,29 @@ from predigt_uploader.tui_app import (
     build_tui_preparation,
     build_tui_preparation_text,
     build_tui_processing_plan,
+    build_tui_processing_files_text,
+    build_tui_processing_raw_action_text,
     build_tui_processing_ready_text,
+    build_tui_processing_source_text,
+    build_tui_processing_warning_text,
+    build_tui_progress_text,
+    build_tui_processing_error_status,
     build_tui_processing_review_action_text,
     build_tui_processing_started_status,
     build_tui_processing_success_status,
+    tui_processing_warning_class,
     build_tui_target_conflict_text,
     build_tui_target_conflict_decision_text,
     build_tui_target_folder_review_text,
+    build_tui_target_folder_action_hint,
+    build_tui_back_footnote,
     build_tui_info_with_folder_note,
     build_tui_losslesscut_text,
     build_tui_field_labels,
     build_tui_preview_text,
     build_tui_settings_lines,
+    build_tui_screen_help,
+    build_tui_step_title,
     build_tui_start_safety_text,
     build_tui_start_status_text,
     build_tui_validation_text,
@@ -56,15 +74,26 @@ from predigt_uploader.tui_app import (
     score_tui_export_candidate,
     tui_cut_mp4_folder,
     tui_cut_mp4_folder_for_raw,
+    tui_action_requires_confirmation,
     tui_conflict_action_labels,
     tui_export_candidate_folders,
     tui_file_selection_next_screen,
     tui_mp4_action_text,
+    tui_metadata_action_labels,
     tui_processing_finished_action_labels,
     tui_processing_review_back_target,
+    tui_processing_warning_class,
+    tui_target_folder_initial_focus_id,
+    tui_target_folder_note_input_visible,
+    tui_target_folder_primary_action,
+    tui_target_folder_status_class,
+    tui_target_folder_status_message,
+    tui_service_type_display_name,
+    tui_service_type_options,
     tui_service_type_after_date_change,
     tui_source_choice_route,
     tui_start_safety_route,
+    TuiTargetConflict,
     validate_tui_metadata,
 )
 
@@ -189,8 +218,10 @@ def test_tui_start_status_shows_experiment_and_configured_folders(tmp_path):
 
     text = build_tui_start_status_text(config)
 
-    assert "Experimentelle Oberfläche" in text
-    assert "Produktiver Workflow: normaler Wizard" in text
+    assert "Dieses Tool bereitet Gemeinde-Aufnahmen fuer WordPress/Vimeo vor" in text
+    assert "Produktiver Standard bleibt der normale Wizard." in text
+    assert "MP4-Dateien ansehen: nur Anzeige/Info im Textual-Prototyp." in text
+    assert "Einstellungen: nur Anzeige/Info im Textual-Prototyp." in text
     assert f"Ziel-Basisordner: {tmp_path / 'Aufnahmen'}" in text
     assert f"Rohaufnahme-Ordner: {tmp_path / 'vmix'}" in text
 
@@ -210,6 +241,16 @@ def test_tui_start_safety_routes_no_back_to_start():
     assert tui_start_safety_route("cancel") == "start"
     assert tui_start_safety_route(None) == "start"
     assert tui_start_safety_route("confirm") == "source"
+
+
+def test_tui_start_safety_screen_has_back_button_and_returns_to_main_menu():
+    source = (Path(__file__).resolve().parents[1] / "src" / "predigt_uploader" / "tui_app.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'Button(TUI_BACK_LABEL, id="back")' in source
+    assert 'if event.button.id == "back":' in source
+    assert 'self.app.pop_screen()' in source
 
 
 def test_tui_file_candidates_show_cut_and_raw_mp4_files(tmp_path):
@@ -532,6 +573,83 @@ def test_tui_service_type_defaults_follow_weekday(tmp_path):
     assert default_tui_service_type_name(config, date(2026, 5, 21)) == "Predigt"
 
 
+def test_tui_shows_gottesdienst_but_keeps_predigt_internal(tmp_path):
+    config = AppConfig(
+        vmix_storage=tmp_path / "vmix",
+        recordings_base=tmp_path / "Aufnahmen",
+        mp3_base=tmp_path / "Predigten",
+    )
+
+    options = tui_service_type_options(config)
+    info = build_tui_metadata_info(
+        config=config,
+        date_text="2026-05-24",
+        service_type_name="Gottesdienst",
+        title="Lehre statt Leere",
+        bible_reference="Johannes 3,16",
+        speaker="Max Muster",
+        folder_note="",
+    )
+
+    assert ("Gottesdienst", "Predigt") in options
+    assert ("Predigt", "Predigt") not in options
+    assert tui_service_type_display_name("Predigt") == "Gottesdienst"
+    assert service_type_by_name(config, "Gottesdienst").name == "Predigt"
+    assert service_type_by_name(config, "Predigt").name == "Predigt"
+    assert info.sermon_type == "Predigt"
+    assert TUI_GOTTESDIENST_EXPLANATION.startswith("Gottesdienst bedeutet:")
+
+
+def test_tui_workflow_step_titles_and_back_help_are_consistent():
+    expected = (
+        (1, "Startcheck"),
+        (2, "Rohaufnahme auswaehlen"),
+        (3, "Rohaufnahme schneiden"),
+        (4, "Geschnittene MP4 bestaetigen"),
+        (5, "Metadaten erfassen"),
+        (6, "Zielordner pruefen"),
+        (7, "Finale Dateien erstellen / Abschluss"),
+    )
+
+    titles = tuple(build_tui_step_title(step, name) for step, name in expected)
+    help_text = build_tui_screen_help("Auswahl treffen.", "Naechster Schritt wird geoeffnet.")
+
+    assert TUI_TOTAL_WORKFLOW_STEPS == 7
+    assert titles[0] == "Schritt 1/7: Startcheck"
+    assert titles[-1] == "Schritt 7/7: Finale Dateien erstellen / Abschluss"
+    assert all(f"Schritt {step}/7:" in title for (step, _), title in zip(expected, titles))
+    assert TUI_BACK_LABEL == "Zurueck"
+    assert help_text == "Auswahl treffen."
+    assert "Was muss ich hier tun?" not in help_text
+    assert "Was passiert beim naechsten Klick?" not in help_text
+    assert build_tui_back_footnote() == (
+        "Zurueck ist moeglich, solange noch keine finalen Dateien geschrieben wurden."
+    )
+    assert tui_metadata_action_labels() == ("Zurueck", "Abbrechen", "Zielordner pruefen")
+
+
+def test_tui_progress_marks_current_completed_and_skipped_steps():
+    first = build_tui_progress_text(1)
+    metadata = build_tui_progress_text(5)
+    already_cut = build_tui_progress_text(5, {3})
+
+    assert first.startswith("Fortschritt:")
+    assert "▶1 Start" in first
+    assert "[ ]2 Quelle" in first
+    assert "✓1 Start" in metadata
+    assert "✓4 MP4" in metadata
+    assert "▶5 Metadaten" in metadata
+    assert "[-]3 Schnitt" in already_cut
+
+
+def test_tui_only_risky_actions_require_confirmation():
+    assert tui_action_requires_confirmation("overwrite") is True
+    assert tui_action_requires_confirmation("move_raw_recording") is True
+    assert tui_action_requires_confirmation("detected_cut_export") is True
+    assert tui_action_requires_confirmation("select_source") is False
+    assert tui_action_requires_confirmation("edit_metadata") is False
+
+
 def test_tui_service_type_default_uses_source_filename_date_before_today(tmp_path):
     config = AppConfig(
         vmix_storage=tmp_path / "vmix",
@@ -692,8 +810,13 @@ def test_tui_target_folder_review_shows_missing_suggested_folder(tmp_path):
 
     assert resolution.status == "missing"
     assert resolution.suggested_folder == tmp_path / "Aufnahmen" / "2026" / "2026-04-29"
-    assert "noch keinen Ordner" in text
+    assert "Status: Kein vorhandener Ordner gefunden." in text
     assert str(resolution.suggested_folder) in text
+    assert tui_target_folder_primary_action(resolution) == ("Neuen Zielordner verwenden", "use_suggested")
+    assert tui_target_folder_initial_focus_id(resolution) == "use_suggested"
+    assert build_tui_target_folder_action_hint(resolution) == "Es wird ein neuer Zielordner erstellt."
+    assert tui_target_folder_status_message(resolution) == "Kein vorhandener Ordner gefunden"
+    assert tui_target_folder_status_class(resolution) == "status-info"
 
 
 def test_tui_target_folder_review_detects_single_existing_folder(tmp_path):
@@ -716,8 +839,20 @@ def test_tui_target_folder_review_detects_single_existing_folder(tmp_path):
 
     assert resolution.status == "single_existing"
     assert resolution.candidates == (existing,)
-    assert "bereits diesen Ordner" in text
+    assert "Status: Vorhandener Tagesordner gefunden." in text
     assert str(existing) in text
+    assert tui_target_folder_primary_action(resolution) == (
+        "Vorhandenen Ordner verwenden / Dateien dort hinzufuegen",
+        "use_existing",
+    )
+    assert tui_target_folder_initial_focus_id(resolution) == "use_existing"
+    assert tui_target_folder_note_input_visible(False) is False
+    assert tui_target_folder_note_input_visible(True) is True
+    assert tui_target_folder_status_message(resolution) == "Vorhandener Tagesordner gefunden"
+    assert tui_target_folder_status_class(resolution) == "status-ok"
+    assert "Vorhandene Dateien werden in Schritt 7 separat geprueft." in build_tui_target_folder_action_hint(
+        resolution
+    )
 
 
 def test_tui_target_folder_review_detects_multiple_existing_folders(tmp_path):
@@ -742,7 +877,15 @@ def test_tui_target_folder_review_detects_multiple_existing_folders(tmp_path):
 
     assert resolution.status == "multiple_existing"
     assert resolution.candidates == (first, second)
-    assert "mehrere Ordner" in text
+    assert "Status: Mehrere moegliche Ordner gefunden." in text
+    assert tui_target_folder_primary_action(resolution) == ("Ausgewaehlten Ordner verwenden", "use_existing")
+    assert tui_target_folder_initial_focus_id(resolution) == "use_existing"
+    assert tui_target_folder_status_message(resolution) == "Mehrere moegliche Ordner gefunden"
+    assert tui_target_folder_status_class(resolution) == "status-warning"
+    assert "neuer Ordner mit dem Zusatz" in build_tui_target_folder_action_hint(
+        resolution,
+        create_with_note=True,
+    )
 
 
 def test_tui_folder_note_builds_new_target_folder_name(tmp_path):
@@ -830,6 +973,52 @@ def test_tui_processing_plan_builds_final_review_data(tmp_path):
     assert plan.warnings == ()
 
 
+def test_tui_processing_review_uses_clear_checklist_sections(tmp_path):
+    source = tmp_path / "schnitt.mp4"
+    raw = tmp_path / "roh.mp4"
+    source.write_bytes(b"video")
+    raw.write_bytes(b"raw")
+    config = AppConfig(
+        vmix_storage=tmp_path / "vmix",
+        recordings_base=tmp_path / "Aufnahmen",
+        mp3_base=tmp_path / "Predigten",
+    )
+    info = build_tui_metadata_info(
+        config=config,
+        date_text="2026-05-24",
+        service_type_name="Gottesdienst",
+        title="Lehre",
+        bible_reference="Johannes 3,16",
+        speaker="Max Muster",
+        folder_note="",
+    )
+    plan = build_tui_processing_plan(
+        config=config,
+        source_mp4=source,
+        raw_recording=raw,
+        already_cut=False,
+        raw_action="keep",
+        info=info,
+    )
+
+    source_text = build_tui_processing_source_text(plan)
+    files_text = build_tui_processing_files_text(plan)
+    raw_text = build_tui_processing_raw_action_text(plan)
+    warning_text = build_tui_processing_warning_text(plan, ())
+
+    assert "Was wird verwendet?" in source_text
+    assert f"Geschnittene MP4: {source}" in source_text
+    assert f"Rohaufnahme: {raw}" in source_text
+    assert f"Zielordner: {plan.target_folder}" in source_text
+    assert "Welche Dateien werden erstellt?" in files_text
+    assert f"Finale MP4: {plan.target_mp4}" in files_text
+    assert f"Finale MP3: {plan.target_mp3}" in files_text
+    assert f"Zusammenfassung: {plan.summary_path}" in files_text
+    assert "Was passiert mit der Rohaufnahme?" in raw_text
+    assert "Rohaufnahme liegen lassen" in raw_text
+    assert warning_text == "Status / Warnungen\nKeine Konflikte gefunden."
+
+
 def test_tui_processing_plan_uses_target_folder_override(tmp_path):
     source = tmp_path / "quelle.mp4"
     selected_folder = tmp_path / "Aufnahmen" / "2026" / "2026-05-24 - Test"
@@ -895,6 +1084,7 @@ def test_tui_target_conflicts_detect_existing_mp4_mp3_and_summary(tmp_path):
 
     conflicts = detect_tui_target_conflicts(plan)
     text = build_tui_target_conflict_text(conflicts)
+    warning_text = build_tui_processing_warning_text(plan, conflicts)
 
     assert [(conflict.kind, conflict.severity) for conflict in conflicts] == [
         ("mp4", "danger"),
@@ -905,6 +1095,11 @@ def test_tui_target_conflicts_detect_existing_mp4_mp3_and_summary(tmp_path):
     assert "MP4:" in text
     assert "MP3:" in text
     assert "Zusammenfassung:" in text
+    assert "Status / Warnungen" in warning_text
+    assert "STOPP" in warning_text
+    assert "bewusst entscheidest" in warning_text
+    assert tui_processing_warning_class(conflicts) == "status-danger"
+    assert tui_processing_warning_class(()) == "status-ok"
 
 
 def test_tui_target_conflict_decision_text_is_clear_for_users(tmp_path):
@@ -942,6 +1137,41 @@ def test_tui_target_conflict_decision_text_is_clear_for_users(tmp_path):
     assert "Vorhandene Zieldateien:" in text
     assert "MP4:" in text
     assert "Waehle rechts 'Vorhandene Dateien ersetzen'" in text
+
+
+def test_tui_warning_status_uses_warning_or_danger_class_by_severity(tmp_path):
+    source = tmp_path / "quelle.mp4"
+    source.write_bytes(b"video")
+    config = AppConfig(
+        vmix_storage=tmp_path / "vmix",
+        recordings_base=tmp_path / "Aufnahmen",
+        mp3_base=tmp_path / "Predigten",
+    )
+    info = build_tui_metadata_info(
+        config=config,
+        date_text="2026-05-24",
+        service_type_name="Predigt",
+        title="Lehre statt Leere",
+        bible_reference="Johannes 3,16",
+        speaker="Max Muster",
+        folder_note="",
+    )
+    plan = build_tui_processing_plan(
+        config=config,
+        source_mp4=source,
+        raw_recording=None,
+        already_cut=True,
+        info=info,
+    )
+    plan.target_folder.mkdir(parents=True)
+    plan.summary_path.write_text("alt", encoding="utf-8")
+
+    warning_text = build_tui_processing_warning_text(plan, detect_tui_target_conflicts(plan))
+
+    assert warning_text.startswith("Status / Warnungen")
+    assert tui_processing_warning_class(()) == "status-ok"
+    assert tui_processing_warning_class((TuiTargetConflict(path=plan.summary_path, kind="summary", severity="warning", message="x"),)) == "status-warning"
+    assert tui_processing_warning_class((TuiTargetConflict(path=plan.target_mp4, kind="mp4", severity="danger", message="x"),)) == "status-danger"
 
 
 def test_tui_execute_button_is_blocked_when_target_conflicts_exist(tmp_path):
@@ -1011,6 +1241,94 @@ def test_tui_overwrite_confirmation_enables_execute_and_sets_plan_flags(tmp_path
     assert confirmed_plan.overwrite_existing_outputs is True
     assert disabled is False
     assert label == "Vorhandene Dateien ersetzen und finale Dateien erstellen"
+
+
+def test_tui_output_suffix_keeps_existing_files_unchanged(tmp_path):
+    source = tmp_path / "quelle.mp4"
+    source.write_bytes(b"video-neu")
+    config = AppConfig(
+        vmix_storage=tmp_path / "vmix",
+        recordings_base=tmp_path / "Aufnahmen",
+        mp3_base=tmp_path / "Predigten",
+    )
+    info = build_tui_metadata_info(
+        config=config,
+        date_text="2026-05-24",
+        service_type_name="Gottesdienst",
+        title="Lehre",
+        bible_reference="Johannes 3,16",
+        speaker="Max Muster",
+        folder_note="",
+    )
+    original_plan = build_tui_processing_plan(
+        config=config,
+        source_mp4=source,
+        raw_recording=None,
+        already_cut=True,
+        info=info,
+    )
+    original_plan.target_folder.mkdir(parents=True)
+    original_plan.target_mp4.write_bytes(b"video-alt")
+    original_plan.target_mp3.write_bytes(b"mp3-alt")
+    original_plan.summary_path.write_text("summary-alt", encoding="utf-8")
+
+    suffixed_plan = apply_tui_output_suffix(original_plan, "Korrektur")
+    result = execute_processing_plan(
+        suffixed_plan,
+        config,
+        mp3_converter=lambda _source, target, _config: target.write_bytes(b"mp3-neu"),
+        ffmpeg_checker=lambda _config: True,
+    )
+
+    assert result.success is True
+    assert original_plan.target_mp4.read_bytes() == b"video-alt"
+    assert original_plan.target_mp3.read_bytes() == b"mp3-alt"
+    assert original_plan.summary_path.read_text(encoding="utf-8") == "summary-alt"
+    assert suffixed_plan.target_mp4.name.endswith(" - Korrektur.mp4")
+    assert suffixed_plan.target_mp3.name.endswith(" - Korrektur.mp3")
+    assert suffixed_plan.summary_path.name == "predigt-zusammenfassung - Korrektur.txt"
+    assert suffixed_plan.target_mp4.exists()
+    assert suffixed_plan.target_mp3.exists()
+    assert suffixed_plan.summary_path.exists()
+
+
+def test_tui_backup_strategy_requires_selection_then_enables_execute(tmp_path):
+    source = tmp_path / "quelle.mp4"
+    source.write_bytes(b"video")
+    config = AppConfig(
+        vmix_storage=tmp_path / "vmix",
+        recordings_base=tmp_path / "Aufnahmen",
+        mp3_base=tmp_path / "Predigten",
+    )
+    info = build_tui_metadata_info(
+        config=config,
+        date_text="2026-05-24",
+        service_type_name="Gottesdienst",
+        title="Lehre",
+        bible_reference="Johannes 3,16",
+        speaker="Max Muster",
+        folder_note="",
+    )
+    plan = build_tui_processing_plan(
+        config=config,
+        source_mp4=source,
+        raw_recording=None,
+        already_cut=True,
+        info=info,
+    )
+    plan.target_folder.mkdir(parents=True)
+    plan.target_mp4.write_bytes(b"alt")
+
+    blocked_label, blocked = build_tui_execute_button_state(plan, overwrite_confirmed=False)
+    backup_plan = apply_tui_backup_existing_confirmation(plan)
+    enabled_label, enabled = build_tui_execute_button_state(backup_plan, overwrite_confirmed=False)
+
+    assert blocked is True
+    assert "Erst entscheiden" in blocked_label
+    assert backup_plan.backup_existing_outputs is True
+    assert backup_plan.overwrite_existing_outputs is False
+    assert enabled is False
+    assert enabled_label == "Gesicherte Dateien behalten und finale Dateien erstellen"
 
 
 def test_tui_overwrite_confirmed_text_replaces_stop_message():
@@ -1141,6 +1459,42 @@ def test_tui_raw_flow_processing_plan_keeps_cut_mp4_and_raw_recording_separate(t
     assert plan.source_mp4 != plan.raw_recording
     assert f"Quell-MP4 / geschnittene MP4: {cut}" in text
     assert f"Rohaufnahme: {raw}" in text
+
+
+def test_tui_safe_raw_recording_standard_can_be_selected_without_extra_confirmation(tmp_path):
+    raw = tmp_path / "vmix" / "roh.mp4"
+    cut = tmp_path / "schnitt" / "predigt_geschnitten.mp4"
+    raw.parent.mkdir()
+    cut.parent.mkdir()
+    raw.write_bytes(b"raw")
+    cut.write_bytes(b"cut")
+    config = AppConfig(
+        vmix_storage=raw.parent,
+        recordings_base=tmp_path / "Aufnahmen",
+        mp3_base=tmp_path / "Predigten",
+        raw_archive_mode="move",
+    )
+    info = build_tui_metadata_info(
+        config=config,
+        date_text="2026-05-24",
+        service_type_name="Gottesdienst",
+        title="Lehre",
+        bible_reference="Johannes 3,16",
+        speaker="Max Muster",
+        folder_note="",
+    )
+
+    plan = build_tui_processing_plan(
+        config=config,
+        source_mp4=cut,
+        raw_recording=raw,
+        already_cut=False,
+        raw_action="keep",
+        info=info,
+    )
+
+    assert plan.raw_action == "keep"
+    assert tui_action_requires_confirmation("keep") is False
 
 
 def test_tui_processing_review_action_text_warns_when_raw_action_moves(tmp_path):
@@ -1299,19 +1653,18 @@ def test_tui_processing_button_feedback_status_is_visible(tmp_path):
 
     assert started != "Noch nicht gestartet."
     assert "Verarbeitung gestartet" in started
+    assert "Bitte warten. Dateien werden erstellt/kopiert/verschoben." in started
     assert TUI_PROCESSING_RUNNING_LABEL == "Verarbeitung laeuft..."
     assert TUI_PROCESSING_DONE_LABEL == "Fertig vorbereitet"
     assert "Fertig. Die Dateien wurden vorbereitet." in success
     assert "Der Zielordner wurde geoeffnet." in success
-    assert "Bitte jetzt kontrollieren:" in success
-    assert "MP4 im Zielordner vorhanden?" in success
-    assert "MP3 im Zielordner vorhanden?" in success
-    assert "predigt-zusammenfassung.txt vorhanden?" in success
-    assert "Danach manuell weiter:" in success
-    assert "MP4 zu Vimeo hochladen" in success
-    assert "MP3 in WordPress hochladen" in success
-    assert "Angaben aus predigt-zusammenfassung.txt in WordPress uebernehmen" in success
-    assert "Vimeo-Embed-Code spaeter in WordPress ergaenzen" in success
+    assert "Naechste Schritte:" in success
+    assert "1. Zielordner kontrollieren." in success
+    assert "2. MP3 in WordPress hochladen." in success
+    assert "3. Predigtinformationen in WordPress eintragen." in success
+    assert "4. Video in Vimeo hochladen." in success
+    assert "5. Vimeo/Embed-Code in WordPress ergaenzen" in success
+    assert "6. Danach kann der PredigtUploader geschlossen oder eine neue Aufnahme vorbereitet werden." in success
     assert "STOPP" not in success
     assert f"Zielordner: {plan.target_folder}" in success
     assert f"Finale MP4: {plan.target_mp4}" in success
@@ -1353,12 +1706,65 @@ def test_tui_processing_success_status_mentions_replaced_files_after_overwrite(t
     assert "STOPP" not in success
 
 
+def test_tui_processing_error_status_is_understandable(tmp_path):
+    target = tmp_path / "Aufnahmen" / "2026" / "2026-05-24"
+
+    text = build_tui_processing_error_status(
+        ("Verarbeitung gestartet...", "MP3 wird erstellt."),
+        "Die MP3 konnte nicht erstellt werden.",
+        target_folder=target,
+    )
+
+    assert "Die Verarbeitung wurde nicht vollstaendig abgeschlossen." in text
+    assert "Fehler: Die MP3 konnte nicht erstellt werden." in text
+    assert "Es wurden keine Dateien still ueberschrieben." in text
+    assert f"Zielordner: {target}" in text
+    assert "Logdateien liegen" in text
+
+
 def test_tui_processing_finished_actions_are_available_after_success():
     assert tui_processing_finished_action_labels() == (
-        "Zielordner erneut oeffnen",
-        "Neue Aufnahme vorbereiten",
+        "Zielordner oeffnen",
+        "Neue Aufnahme vorbereiten (zurueck zu Schritt 1)",
         "Beenden",
     )
+
+
+def test_tui_steps_five_to_seven_keep_scroll_areas_and_completion_screen():
+    source = (Path(__file__).resolve().parents[1] / "src" / "predigt_uploader" / "tui_app.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'VerticalScroll(id="metadata_scroll")' in source
+    assert 'with Vertical(id="form", classes="panel-neutral")' in source
+    assert 'with Vertical(id="preview_box", classes="panel-info")' in source
+    assert 'Horizontal(id="metadata_actions")' in source
+    assert 'VerticalScroll(id="target_folder_scroll")' in source
+    assert 'with Vertical(id="processing_plan_box", classes="panel-neutral")' in source
+    assert 'with Vertical(id="processing_status_box", classes="panel-info")' in source
+    assert 'Vertical(id="target_folder_actions")' in source
+    assert 'VerticalScroll(id="processing_review_scroll")' in source
+    assert 'with Vertical(id="processing_plan_box", classes="panel-neutral")' in source
+    assert 'with Vertical(id="processing_status_box", classes="panel-info")' in source
+    assert 'Vertical(id="processing_actions")' in source
+    assert "class CompletionScreen" in source
+    assert "self.app.push_screen(\n                    CompletionScreen(" in source
+    assert 'VerticalScroll(id="completion_scroll")' in source
+    assert 'Horizontal(id="completion_actions")' in source
+    assert 'classes="panel-info"' in source
+    assert source.index('Button("Rohaufnahme auswaehlen", id="raw", variant="primary")') < source.index(
+        'Button("Fertig geschnittene MP4 auswaehlen", id="cut")'
+    )
+    assert 'id="target_folder_status_banner"' in source
+    assert 'classes=tui_target_folder_status_class(self.resolution)' in source
+    assert 'id="processing_warning_text"' in source
+    assert 'classes=tui_processing_warning_class(conflicts)' in source
+    assert 'Button("Neue Dateien mit Zusatz speichern", id="use_output_suffix", variant="primary")' in source
+    assert 'Button("Vorhandene Dateien sichern und neue Dateien erstellen", id="backup_existing")' in source
+    assert 'Button("Vorhandene Dateien ersetzen", id="confirm_overwrite", variant="error")' in source
+    assert '"Zurueck und anderen Ordner waehlen" if conflicts else TUI_BACK_LABEL' in source
+    assert ".navigation_actions Button" in source
+    assert "margin-right: 1;" in source
 
 
 def test_tui_metadata_validation_requires_only_fields_for_service_type(tmp_path):

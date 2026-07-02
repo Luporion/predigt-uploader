@@ -7,7 +7,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 from .config import default_service_types, load_config
-from .filename import build_filename_preview, build_media_filename, service_type_config_for
+from .filename import build_filename_preview, build_media_filename, sanitize_filename_part, service_type_config_for
 from .folders import resolve_folder, suggest_folder
 from .models import AppConfig, FolderResolution, ProcessingPlan, SermonInfo, ServiceTypeConfig
 from .processing import (
@@ -17,7 +17,6 @@ from .processing import (
     MP4_ACTION_OVERWRITE,
     PreparedRecordingPlan,
     build_prepared_recording_plan,
-    build_processing_plan_text,
     raw_action_label,
     execute_processing_plan,
 )
@@ -38,6 +37,13 @@ TUI_START_SAFETY_CONFIRM_LABEL = "Ja, Aufnahme und Stream sind beendet"
 TUI_PROCESSING_EXECUTE_LABEL = "Finale Dateien jetzt erstellen"
 TUI_PROCESSING_RUNNING_LABEL = "Verarbeitung laeuft..."
 TUI_PROCESSING_DONE_LABEL = "Fertig vorbereitet"
+TUI_TOTAL_WORKFLOW_STEPS = 7
+TUI_BACK_LABEL = "Zurueck"
+TUI_GOTTESDIENST_EXPLANATION = (
+    "Gottesdienst bedeutet: normale Aufnahme eines Gottesdienstes. "
+    "Die finale Predigtdatei wird trotzdem als Predigt benannt."
+)
+TUI_WORKFLOW_STEP_NAMES = ("Start", "Quelle", "Schnitt", "MP4", "Metadaten", "Ordner", "Final")
 
 
 @dataclass(frozen=True)
@@ -111,6 +117,34 @@ class TuiPreparation:
             target_mp3=self.target_mp3,
             info=self.info,
         )
+
+
+def build_tui_step_title(step: int, name: str) -> str:
+    return f"Schritt {step}/{TUI_TOTAL_WORKFLOW_STEPS}: {name}"
+
+
+def build_tui_progress_text(current_step: int, skipped_steps: set[int] | None = None) -> str:
+    skipped = skipped_steps or set()
+    parts: list[str] = []
+    for step, name in enumerate(TUI_WORKFLOW_STEP_NAMES, start=1):
+        if step in skipped:
+            marker = "[-]"
+        elif step < current_step:
+            marker = "✓"
+        elif step == current_step:
+            marker = "▶"
+        else:
+            marker = "[ ]"
+        parts.append(f"{marker}{step} {name}")
+    return "Fortschritt: " + " | ".join(parts)
+
+
+def build_tui_screen_help(instruction: str, _next_action: str) -> str:
+    return instruction
+
+
+def build_tui_back_footnote() -> str:
+    return "Zurueck ist moeglich, solange noch keine finalen Dateien geschrieben wurden."
 
 
 def load_tui_config(config_path: str | None = None) -> AppConfig:
@@ -219,29 +253,72 @@ def build_tui_info_with_folder_note(info: SermonInfo, folder_note: str) -> Sermo
 
 def build_tui_target_folder_review_text(resolution: FolderResolution) -> str:
     lines = [
-        f"Jahresordner: {resolution.year_folder}",
         f"Datum: {resolution.date_prefix}",
         f"Vorgeschlagener Zielordner: {resolution.suggested_folder}",
-        "",
     ]
     if resolution.status == "missing":
-        lines.extend(
-            [
-                "Fuer dieses Datum gibt es noch keinen Ordner.",
-                f"Dieser Ordner wird neu erstellt: {resolution.suggested_folder}",
-            ]
-        )
+        lines.append("Status: Kein vorhandener Ordner gefunden.")
     elif resolution.status == "single_existing":
-        lines.extend(
-            [
-                f"Fuer dieses Datum gibt es bereits diesen Ordner: {resolution.candidates[0]}",
-                "Du kannst den vorhandenen Ordner verwenden oder einen neuen Ordner mit Besonderheit erstellen.",
-            ]
-        )
+        lines.append("Status: Vorhandener Tagesordner gefunden.")
+        lines.append(f"Vorhandener Ordner: {resolution.candidates[0]}")
     else:
-        lines.append("Fuer dieses Datum gibt es mehrere Ordner. Bitte waehle bewusst einen Zielordner.")
-        lines.extend(f"- {candidate}" for candidate in resolution.candidates)
+        lines.append("Status: Mehrere moegliche Ordner gefunden.")
     return "\n".join(lines)
+
+
+def tui_target_folder_primary_action(resolution: FolderResolution) -> tuple[str, str]:
+    if resolution.status == "missing":
+        return "Neuen Zielordner verwenden", "use_suggested"
+    if resolution.status == "single_existing":
+        return "Vorhandenen Ordner verwenden / Dateien dort hinzufuegen", "use_existing"
+    return "Ausgewaehlten Ordner verwenden", "use_existing"
+
+
+def tui_target_folder_initial_focus_id(resolution: FolderResolution) -> str:
+    return tui_target_folder_primary_action(resolution)[1]
+
+
+def tui_target_folder_note_input_visible(create_with_note: bool) -> bool:
+    return create_with_note
+
+
+def tui_metadata_action_labels() -> tuple[str, str, str]:
+    return (TUI_BACK_LABEL, "Abbrechen", "Zielordner pruefen")
+
+
+def build_tui_target_folder_action_hint(
+    resolution: FolderResolution,
+    *,
+    create_with_note: bool = False,
+    selected_folder: Path | None = None,
+) -> str:
+    if create_with_note:
+        return "Es wird ein neuer Ordner mit dem Zusatz erstellt. Vorhandene Ordner bleiben unveraendert."
+    if resolution.status == "missing":
+        return "Es wird ein neuer Zielordner erstellt."
+    folder = selected_folder or resolution.candidates[0]
+    return (
+        f"Die neuen Dateien werden in diesen Ordner gelegt:\n{folder}\n"
+        "Vorhandene Dateien werden in Schritt 7 separat geprueft."
+    )
+
+
+def tui_target_folder_status_message(resolution: FolderResolution) -> str:
+    messages = {
+        "missing": "Kein vorhandener Ordner gefunden",
+        "single_existing": "Vorhandener Tagesordner gefunden",
+        "multiple_existing": "Mehrere moegliche Ordner gefunden",
+    }
+    return messages[resolution.status]
+
+
+def tui_target_folder_status_class(resolution: FolderResolution) -> str:
+    classes = {
+        "missing": "status-info",
+        "single_existing": "status-ok",
+        "multiple_existing": "status-warning",
+    }
+    return classes[resolution.status]
 
 
 def build_tui_target_folder_status_text(plan: PreparedRecordingPlan) -> str:
@@ -325,8 +402,8 @@ def tui_conflict_action_labels() -> tuple[str, str, str]:
 
 def tui_processing_finished_action_labels() -> tuple[str, str, str]:
     return (
-        "Zielordner erneut oeffnen",
-        "Neue Aufnahme vorbereiten",
+        "Zielordner oeffnen",
+        "Neue Aufnahme vorbereiten (zurueck zu Schritt 1)",
         "Beenden",
     )
 
@@ -339,21 +416,66 @@ def apply_tui_overwrite_confirmation(plan: PreparedRecordingPlan) -> PreparedRec
     )
 
 
+def apply_tui_output_suffix(plan: PreparedRecordingPlan, suffix: str) -> PreparedRecordingPlan:
+    cleaned = sanitize_filename_part(suffix)
+    if not cleaned:
+        raise ValueError("Bitte einen Zusatz fuer die neuen Dateien eingeben.")
+    mp4_action = plan.mp4_action
+    if mp4_action in {MP4_ACTION_OVERWRITE, MP4_ACTION_KEEP}:
+        mp4_action = MP4_ACTION_COPY
+    return replace(
+        plan,
+        target_mp4=plan.target_mp4.with_name(f"{plan.target_mp4.stem} - {cleaned}{plan.target_mp4.suffix}"),
+        target_mp3=plan.target_mp3.with_name(f"{plan.target_mp3.stem} - {cleaned}{plan.target_mp3.suffix}"),
+        summary_path=plan.summary_path.with_name(f"{plan.summary_path.stem} - {cleaned}{plan.summary_path.suffix}"),
+        mp4_action=mp4_action,
+        overwrite_existing_outputs=False,
+        backup_existing_outputs=False,
+    )
+
+
+def apply_tui_backup_existing_confirmation(plan: PreparedRecordingPlan) -> PreparedRecordingPlan:
+    mp4_action = plan.mp4_action
+    if mp4_action in {MP4_ACTION_OVERWRITE, MP4_ACTION_KEEP}:
+        mp4_action = MP4_ACTION_COPY
+    return replace(
+        plan,
+        mp4_action=mp4_action,
+        overwrite_existing_outputs=False,
+        backup_existing_outputs=True,
+    )
+
+
 def build_tui_execute_button_state(
     plan: PreparedRecordingPlan,
     *,
     overwrite_confirmed: bool,
 ) -> tuple[str, bool]:
     conflicts = detect_tui_target_conflicts(plan)
-    if conflicts and not overwrite_confirmed:
+    if conflicts and not overwrite_confirmed and not plan.backup_existing_outputs:
         return "Erst entscheiden: ersetzen oder zurückgehen", True
+    if conflicts and plan.backup_existing_outputs:
+        return "Gesicherte Dateien behalten und finale Dateien erstellen", False
     if conflicts:
         return "Vorhandene Dateien ersetzen und finale Dateien erstellen", False
     return TUI_PROCESSING_EXECUTE_LABEL, False
 
 
+def tui_processing_warning_class(conflicts: tuple[TuiTargetConflict, ...]) -> str:
+    severities = {conflict.severity for conflict in conflicts}
+    if "danger" in severities:
+        return "status-danger"
+    if "warning" in severities:
+        return "status-warning"
+    return "status-ok"
+
+
 def tui_processing_review_back_target() -> str:
     return "target-folder-review"
+
+
+def tui_action_requires_confirmation(action: str) -> bool:
+    return action in {"overwrite", "move_raw_recording", "detected_cut_export"}
 
 
 def _same_tui_path(left: Path, right: Path) -> bool:
@@ -381,8 +503,10 @@ def build_tui_preparation_text(preparation: TuiPreparation) -> str:
 def build_tui_start_status_text(config: AppConfig) -> str:
     return "\n".join(
         [
-            "Experimentelle Oberfläche",
-            "Produktiver Workflow: normaler Wizard",
+            "Dieses Tool bereitet Gemeinde-Aufnahmen fuer WordPress/Vimeo vor: Rohaufnahme waehlen, bei Bedarf in LosslessCut schneiden, Metadaten erfassen, Zielordner pruefen und finale MP4/MP3/Zusammenfassung erstellen.",
+            "Produktiver Standard bleibt der normale Wizard.",
+            "MP4-Dateien ansehen: nur Anzeige/Info im Textual-Prototyp.",
+            "Einstellungen: nur Anzeige/Info im Textual-Prototyp.",
             f"Ziel-Basisordner: {config.recordings_base}",
             f"Rohaufnahme-Ordner: {config.vmix_storage}",
         ]
@@ -807,8 +931,24 @@ def service_types_for_tui(config: AppConfig) -> tuple[ServiceTypeConfig, ...]:
     return default_service_types(config) + config.custom_service_types
 
 
+def tui_service_type_display_name(internal_name: str) -> str:
+    if internal_name.casefold() == "predigt":
+        return "Gottesdienst"
+    return internal_name
+
+
+def normalize_tui_service_type_name(name: str) -> str:
+    if name.strip().casefold() == "gottesdienst":
+        return "Predigt"
+    return name
+
+
+def tui_service_type_options(config: AppConfig) -> tuple[tuple[str, str], ...]:
+    return tuple((tui_service_type_display_name(service.name), service.name) for service in service_types_for_tui(config))
+
+
 def service_type_by_name(config: AppConfig, name: str) -> ServiceTypeConfig:
-    normalized = name.casefold()
+    normalized = normalize_tui_service_type_name(name).casefold()
     for service_type in service_types_for_tui(config):
         if service_type.name.casefold() == normalized:
             return service_type
@@ -921,7 +1061,12 @@ def build_tui_validation_text(messages: tuple[str, ...]) -> str:
 
 
 def build_tui_processing_started_status() -> str:
-    return "Verarbeitung gestartet..."
+    return "\n".join(
+        [
+            "Verarbeitung gestartet...",
+            "Bitte warten. Dateien werden erstellt/kopiert/verschoben.",
+        ]
+    )
 
 
 def build_tui_processing_success_status(plan: PreparedRecordingPlan, *, opened_target_folder: bool = True) -> str:
@@ -935,6 +1080,7 @@ def build_tui_processing_success_status(plan: PreparedRecordingPlan, *, opened_t
             "Fertig. Die Dateien wurden vorbereitet.",
             folder_status,
             "Vorhandene Ziel-Dateien wurden ersetzt." if plan.overwrite_existing_outputs else "",
+            "Vorhandene Ziel-Dateien wurden gesichert." if plan.backup_existing_outputs else "",
             "",
             f"Zielordner: {plan.target_folder}",
             f"Finale MP4: {plan.target_mp4}",
@@ -942,16 +1088,13 @@ def build_tui_processing_success_status(plan: PreparedRecordingPlan, *, opened_t
             f"Zusammenfassung: {plan.summary_path}",
             f"Rohaufnahme-Aktion: {raw_action_label(plan.raw_action, plan.raw_recording)}",
             "",
-            "Bitte jetzt kontrollieren:",
-            "- MP4 im Zielordner vorhanden?",
-            "- MP3 im Zielordner vorhanden?",
-            "- predigt-zusammenfassung.txt vorhanden?",
-            "",
-            "Danach manuell weiter:",
-            "- MP4 zu Vimeo hochladen",
-            "- MP3 in WordPress hochladen",
-            "- Angaben aus predigt-zusammenfassung.txt in WordPress uebernehmen",
-            "- Vimeo-Embed-Code spaeter in WordPress ergaenzen",
+            "Naechste Schritte:",
+            "1. Zielordner kontrollieren.",
+            "2. MP3 in WordPress hochladen.",
+            "3. Predigtinformationen in WordPress eintragen.",
+            "4. Video in Vimeo hochladen.",
+            "5. Vimeo/Embed-Code in WordPress ergaenzen, solange die Video-Automation noch nicht eingebaut ist.",
+            "6. Danach kann der PredigtUploader geschlossen oder eine neue Aufnahme vorbereitet werden.",
         ]
     ).replace("\n\n\n", "\n\n")
 
@@ -963,9 +1106,65 @@ def build_tui_processing_ready_text(plan: PreparedRecordingPlan) -> str:
     )
 
 
-def build_tui_processing_error_status(messages: tuple[str, ...], error: str) -> str:
+def build_tui_processing_source_text(plan: PreparedRecordingPlan) -> str:
+    raw = str(plan.raw_recording) if plan.raw_recording is not None else "keine Rohaufnahme"
+    return "\n".join(
+        [
+            "Was wird verwendet?",
+            f"Geschnittene MP4: {plan.source_mp4}",
+            f"Rohaufnahme: {raw}",
+            f"Zielordner: {plan.target_folder}",
+        ]
+    )
+
+
+def build_tui_processing_files_text(plan: PreparedRecordingPlan) -> str:
+    return "\n".join(
+        [
+            "Welche Dateien werden erstellt?",
+            f"Finale MP4: {plan.target_mp4}",
+            f"Finale MP3: {plan.target_mp3}",
+            f"Zusammenfassung: {plan.summary_path}",
+        ]
+    )
+
+
+def build_tui_processing_raw_action_text(plan: PreparedRecordingPlan) -> str:
+    return "\n".join(
+        [
+            "Was passiert mit der Rohaufnahme?",
+            raw_action_label(plan.raw_action, plan.raw_recording),
+        ]
+    )
+
+
+def build_tui_processing_warning_text(
+    plan: PreparedRecordingPlan,
+    conflicts: tuple[TuiTargetConflict, ...],
+) -> str:
+    if not conflicts:
+        return "Status / Warnungen\nKeine Konflikte gefunden."
+    return "\n".join(
+        [
+            "Status / Warnungen",
+            build_tui_target_conflict_decision_text(conflicts),
+        ]
+    )
+
+
+def build_tui_processing_error_status(messages: tuple[str, ...], error: str, *, target_folder: Path | None = None) -> str:
     lines = list(messages)
-    lines.extend(["", f"Fehler: {error}"])
+    lines.extend(
+        [
+            "",
+            "Die Verarbeitung wurde nicht vollstaendig abgeschlossen.",
+            f"Fehler: {error}",
+            "Es wurden keine Dateien still ueberschrieben.",
+        ]
+    )
+    if target_folder is not None:
+        lines.append(f"Zielordner: {target_folder}")
+    lines.append("Logdateien liegen, falls vorhanden, im Ordner logs.")
     return "\n".join(lines)
 
 
@@ -1063,7 +1262,7 @@ def build_tui_field_labels(service_type: ServiceTypeConfig, *, missing_fields: t
 def run_tui(config_path: str | None = None) -> int:
     try:
         from textual.app import App, ComposeResult
-        from textual.containers import Horizontal, Vertical
+        from textual.containers import Horizontal, Vertical, VerticalScroll
         from textual.screen import Screen
         from textual.widgets import Button, DataTable, Footer, Header, Input, Label, Select, Static
     except ImportError as exc:
@@ -1083,7 +1282,7 @@ def run_tui(config_path: str | None = None) -> int:
                     yield Button("Systemcheck-Hinweis", id="systemcheck")
                     yield Button("Beenden", id="quit")
                 with Vertical(id="status_box"):
-                    yield Static(build_tui_start_status_text(config), id="start_status")
+                    yield Static(build_tui_start_status_text(config), id="start_status", classes="panel-info")
             yield Footer()
 
         def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -1106,18 +1305,24 @@ def run_tui(config_path: str | None = None) -> int:
         def compose(self) -> ComposeResult:
             yield Header(show_clock=False)
             with Vertical(id="safety_page"):
+                yield Static(build_tui_step_title(1, "Startcheck"), id="screen_title")
+                yield Static(build_tui_progress_text(1), classes="workflow_progress")
                 yield Static(TUI_START_SAFETY_TITLE, id="safety_title")
                 yield Static("\n".join(TUI_START_SAFETY_QUESTIONS), id="safety_questions")
-                yield Static(TUI_START_SAFETY_WARNING, id="safety_warning")
+                yield Static(TUI_START_SAFETY_WARNING, id="safety_warning", classes="status-warning")
                 with Horizontal(id="safety_actions"):
-                    yield Button(TUI_START_SAFETY_CANCEL_LABEL, id="cancel", variant="error")
+                    yield Button(TUI_BACK_LABEL, id="back")
+                    yield Button(TUI_START_SAFETY_CANCEL_LABEL, id="cancel")
                     yield Button(TUI_START_SAFETY_CONFIRM_LABEL, id="confirm", variant="primary")
             yield Footer()
 
         def on_mount(self) -> None:
-            self.query_one("#cancel", Button).focus()
+            self.query_one("#back", Button).focus()
 
         def on_button_pressed(self, event: Button.Pressed) -> None:
+            if event.button.id == "back":
+                self.app.pop_screen()
+                return
             route = tui_start_safety_route(event.button.id)
             if route == "source":
                 self.app.push_screen(SourceChoiceScreen(self.app_config))
@@ -1131,15 +1336,20 @@ def run_tui(config_path: str | None = None) -> int:
 
         def compose(self) -> ComposeResult:
             yield Header(show_clock=False)
-            yield Static("Neue Aufnahme vorbereiten", id="screen_title")
+            yield Static(build_tui_step_title(2, "Aufnahmequelle auswaehlen"), id="screen_title")
+            yield Static(build_tui_progress_text(2), classes="workflow_progress")
             yield Static(
-                "Textual sammelt Quelle und Metadaten. Die Verarbeitung laeuft weiterhin im normalen Wizard.",
+                build_tui_screen_help("Standard: Rohaufnahme auswaehlen und danach in LosslessCut schneiden.", ""),
                 id="screen_note",
             )
-            yield Button("Ja, fertig geschnittene MP4 auswaehlen", id="cut", variant="primary")
-            yield Button("Nein, Rohaufnahme auswaehlen", id="raw")
-            yield Button("Abbrechen", id="cancel")
+            yield Button("Rohaufnahme auswaehlen", id="raw", variant="primary")
+            yield Static("Sonderfall: Die MP4 ist bereits fertig geschnitten.", id="cut_special_case")
+            yield Button("Fertig geschnittene MP4 auswaehlen", id="cut")
+            yield Button(TUI_BACK_LABEL, id="back")
             yield Footer()
+
+        def on_mount(self) -> None:
+            self.query_one("#raw", Button).focus()
 
         def on_button_pressed(self, event: Button.Pressed) -> None:
             route = tui_source_choice_route(event.button.id)
@@ -1147,7 +1357,7 @@ def run_tui(config_path: str | None = None) -> int:
                 self.app.push_screen(FileSelectionScreen(self.app_config, already_cut=True))
             elif route == "raw-selection":
                 self.app.push_screen(FileSelectionScreen(self.app_config, already_cut=False))
-            elif route == "start":
+            elif event.button.id == "back" or route == "start":
                 self.app.pop_screen()
 
     class FileSelectionScreen(Screen[None]):
@@ -1173,23 +1383,42 @@ def run_tui(config_path: str | None = None) -> int:
 
         def compose(self) -> ComposeResult:
             yield Header(show_clock=False)
-            yield Static(self.selection.title, id="screen_title")
-            yield Static(self.selection.note, id="screen_note")
-            yield Static(f"Ordner: {self.source_folder}", id="source_folder")
+            step = 4 if self.already_cut else 2
+            step_name = "Geschnittene MP4 bestaetigen" if self.already_cut else "Rohaufnahme auswaehlen"
+            instruction = self.selection.note
+            if self.already_cut and self.raw_recording is None:
+                instruction += " Der Schnittschritt 3 wird uebersprungen, weil die MP4 bereits fertig geschnitten ist."
+            yield Static(build_tui_step_title(step, step_name), id="screen_title")
+            skipped_steps = {3} if self.already_cut and self.raw_recording is None else set()
+            yield Static(build_tui_progress_text(step, skipped_steps), classes="workflow_progress")
+            yield Static(
+                build_tui_screen_help(
+                    instruction,
+                    "Die ausgewaehlte Datei wird fuer den naechsten Schritt uebernommen; es werden noch keine Zieldateien geschrieben.",
+                ),
+                id="screen_note",
+            )
+            with VerticalScroll(id="file_selection_scroll"):
+                yield Static(f"Ordner: {self.source_folder}", id="source_folder")
+                if self.selection.allow_search:
+                    yield Input(placeholder="Dateiname suchen oder filtern", id="file_search")
+                yield Static("Neueste MP4-Dateien", id="file_table_heading")
+                yield DataTable(id="file_table")
+                if self.selection.allow_manual_input:
+                    yield Input(placeholder="Datei oder Ordner manuell eingeben", id="manual_path")
+                    yield Button("Manuellen Pfad verwenden", id="manual")
             with Horizontal(id="file_actions"):
+                yield Button(TUI_BACK_LABEL, id="back")
+                yield Button("Abbrechen", id="cancel")
                 if self.selection.suggest_newest:
                     newest_label = "Neueste geschnittene MP4 verwenden" if self.already_cut else "Neueste Aufnahme verwenden"
-                    yield Button(newest_label, id="newest", variant="primary")
-                yield Button("Ausgewaehlte Datei verwenden", id="select")
-                yield Button("Zurueck", id="back")
-                yield Button("Abbrechen", id="cancel")
-            if self.selection.allow_search:
-                yield Input(placeholder="Dateiname suchen oder filtern", id="file_search")
-            yield Static("Neueste MP4-Dateien", id="file_table_heading")
-            yield DataTable(id="file_table")
-            if self.selection.allow_manual_input:
-                yield Input(placeholder="Datei oder Ordner manuell eingeben", id="manual_path")
-                yield Button("Manuellen Pfad verwenden", id="manual")
+                    yield Button(newest_label, id="newest")
+                selected_label = (
+                    "Ausgewaehlte geschnittene MP4 verwenden"
+                    if self.already_cut
+                    else "Ausgewaehlte Rohaufnahme verwenden"
+                )
+                yield Button(selected_label, id="select", variant="primary")
             yield Footer()
 
         def on_mount(self) -> None:
@@ -1301,13 +1530,21 @@ def run_tui(config_path: str | None = None) -> int:
 
         def compose(self) -> ComposeResult:
             yield Header(show_clock=False)
-            yield Static("Rohaufnahme schneiden", id="screen_title")
+            yield Static(build_tui_step_title(3, "Rohaufnahme schneiden"), id="screen_title")
+            yield Static(build_tui_progress_text(3), classes="workflow_progress")
+            yield Static(
+                build_tui_screen_help(
+                    "Oeffne die Rohaufnahme in LosslessCut, schneide die Predigt und exportiere sie als MP4.",
+                    "Der PredigtUploader sucht anschliessend nach der exportierten MP4; der Vorschlag muss bestaetigt werden.",
+                ),
+                id="screen_note",
+            )
             yield Static(build_tui_losslesscut_text(self.raw_recording, self.app_config), id="losslesscut_note")
             with Horizontal(id="losslesscut_actions"):
-                yield Button("LosslessCut oeffnen", id="open", variant="primary")
-                yield Button("Exportierte MP4 suchen", id="next")
-                yield Button("Zurueck", id="back")
+                yield Button(TUI_BACK_LABEL, id="back")
                 yield Button("Abbrechen", id="cancel")
+                yield Button("LosslessCut oeffnen", id="open")
+                yield Button("Exportierte MP4 suchen", id="next", variant="primary")
             yield Static("", id="losslesscut_status")
             yield Footer()
 
@@ -1380,20 +1617,28 @@ def run_tui(config_path: str | None = None) -> int:
 
         def compose(self) -> ComposeResult:
             yield Header(show_clock=False)
+            yield Static(build_tui_step_title(4, "Geschnittene MP4 bestaetigen"), id="screen_title")
+            yield Static(build_tui_progress_text(4), classes="workflow_progress")
             title = "Vermutlich exportierte Schnittdatei gefunden" if self.candidates else "Exportierte MP4 manuell auswaehlen"
-            yield Static(title, id="screen_title")
-            yield Static(build_tui_export_detection_text(self.candidates), id="screen_note")
+            yield Static(title, id="export_detection_heading")
+            yield Static(
+                build_tui_screen_help(
+                    build_tui_export_detection_text(self.candidates),
+                    "Die bestaetigte Schnittdatei wird als Quelle fuer Metadaten und finale MP4/MP3 verwendet.",
+                ),
+                id="screen_note",
+            )
             if self.candidates:
                 yield DataTable(id="export_candidate_table")
             with Horizontal(id="export_detection_actions"):
+                yield Button(TUI_BACK_LABEL, id="back")
+                yield Button("Abbrechen", id="cancel")
                 if self.candidates:
-                    action_label = "Diese Datei verwenden" if len(self.candidates) == 1 else "Ausgewaehlte Datei verwenden"
-                    yield Button(action_label, id="use", variant="primary")
+                    action_label = "Exportierte MP4 bestaetigen"
                     yield Button("Andere MP4 auswaehlen", id="manual")
+                    yield Button(action_label, id="use", variant="primary")
                 else:
                     yield Button("MP4 manuell auswaehlen", id="manual", variant="primary")
-                yield Button("Zurueck", id="back")
-                yield Button("Abbrechen", id="cancel")
             yield Footer()
 
         def on_mount(self) -> None:
@@ -1471,40 +1716,43 @@ def run_tui(config_path: str | None = None) -> int:
             today = date.today()
             date_options = build_tui_date_options_for_sources(self.source_mp4, self.raw_recording, today)
             preferred_date = preferred_tui_date_option(date_options)
-            service_names = [(service.name, service.name) for service in service_types_for_tui(self.app_config)]
+            service_names = list(tui_service_type_options(self.app_config))
             default_service = default_tui_service_type_name(self.app_config, preferred_date.value)
-            yield Static("Metadaten erfassen", id="screen_title")
+            yield Static(build_tui_step_title(5, "Metadaten erfassen"), id="screen_title")
+            skipped_steps = {3} if self.already_cut and self.raw_recording is None else set()
+            yield Static(build_tui_progress_text(5, skipped_steps), classes="workflow_progress")
             yield Static(
-                "Textual bereitet einen Verarbeitungsplan vor. Der normale Wizard bleibt produktiver Standard.",
+                build_tui_screen_help("Ergaenze die Angaben fuer Dateiname, MP3 und Zusammenfassung.", ""),
                 id="screen_note",
             )
-            with Horizontal():
-                with Vertical(id="form"):
-                    yield Label("Dienstart")
-                    yield Select(service_names, value=default_service, id="service_type")
-                    yield Label("Datum", id="date_label")
-                    yield Select([(option.label, option.kind) for option in date_options], value=preferred_date.kind, id="date_choice")
-                    yield Input(value=preferred_date.value.isoformat(), placeholder="YYYY-MM-DD", id="sermon_date")
-                    yield Label("Titel", id="title_label")
-                    yield Input(placeholder="Titel oder Thema", id="title_input")
-                    yield Label("Hauptbibelstelle", id="bible_label")
-                    yield Input(placeholder="Bibelstelle", id="bible_input")
-                    yield Label("Redner / Leitung", id="speaker_label")
-                    yield Input(placeholder="Redner oder Leitung", id="speaker_input")
-                    yield Label("Besonderheit im Ordner")
-                    yield Input(placeholder="optional, z. B. Taufe oder Gastredner", id="folder_note_input")
-                    yield Static(
-                        "Der vollständige Workflow läuft weiterhin im normalen Wizard.",
-                        id="workflow_note",
-                    )
-                    yield Button("Zurueck", id="back")
-                    yield Button("Abbrechen", id="cancel")
-                    yield Button("Metadaten pruefen", id="next", variant="primary")
-                with Vertical(id="preview_box"):
-                    yield Label("Live-Vorschau", id="preview_heading")
-                    yield Static("", id="filename_preview")
-                    yield Static("", id="validation_status")
-                    yield Static("", id="source_status")
+            with VerticalScroll(id="metadata_scroll"):
+                with Horizontal():
+                    with Vertical(id="form", classes="panel-neutral"):
+                        yield Label("Art der Veranstaltung")
+                        yield Select(service_names, value=default_service, id="service_type")
+                        yield Static(TUI_GOTTESDIENST_EXPLANATION, id="service_type_help")
+                        yield Label("Datum", id="date_label")
+                        yield Select([(option.label, option.kind) for option in date_options], value=preferred_date.kind, id="date_choice")
+                        yield Input(value=preferred_date.value.isoformat(), placeholder="YYYY-MM-DD", id="sermon_date")
+                        yield Label("Titel", id="title_label")
+                        yield Input(placeholder="Titel oder Thema", id="title_input")
+                        yield Label("Hauptbibelstelle", id="bible_label")
+                        yield Input(placeholder="Bibelstelle", id="bible_input")
+                        yield Label("Redner / Leitung", id="speaker_label")
+                        yield Input(placeholder="Redner oder Leitung", id="speaker_input")
+                        yield Label("Besonderheit im Ordner")
+                        yield Input(placeholder="optional, z. B. Taufe oder Gastredner", id="folder_note_input")
+                    with Vertical(id="preview_box", classes="panel-info"):
+                        yield Label("Live-Vorschau", id="preview_heading")
+                        yield Static("", id="filename_preview")
+                        yield Static("", id="validation_status")
+                        yield Static("", id="source_status")
+            yield Static(build_tui_back_footnote(), classes="back_footnote")
+            with Horizontal(id="metadata_actions"):
+                back_label, cancel_label, next_label = tui_metadata_action_labels()
+                yield Button(back_label, id="back")
+                yield Button(cancel_label, id="cancel")
+                yield Button(next_label, id="next", variant="primary")
             yield Footer()
 
         def on_mount(self) -> None:
@@ -1685,31 +1933,44 @@ def run_tui(config_path: str | None = None) -> int:
             self.info = info
             self.resolution = resolve_folder(app_config, info)
             self.selected_existing_folder: Path | None = self.resolution.candidates[0] if self.resolution.candidates else None
+            self.creating_with_note = False
 
         def compose(self) -> ComposeResult:
             yield Header(show_clock=False)
-            yield Static("Zielordner pruefen", id="screen_title")
+            yield Static(build_tui_step_title(6, "Zielordner pruefen"), id="screen_title")
+            skipped_steps = {3} if self.already_cut and self.raw_recording is None else set()
+            yield Static(build_tui_progress_text(6, skipped_steps), classes="workflow_progress")
             yield Static(
-                "Ordner und Zieldateien werden getrennt geprueft. Ein vorhandener Ordner ist erlaubt, vorhandene Dateien brauchen spaeter eine bewusste Entscheidung.",
+                build_tui_screen_help("Waehle den Zielordner fuer diese Aufnahme.", ""),
                 id="screen_note",
             )
-            with Horizontal():
-                with Vertical(id="processing_plan_box"):
-                    yield Static(build_tui_target_folder_review_text(self.resolution), id="target_folder_review_text")
-                    if self.resolution.status == "multiple_existing":
-                        yield DataTable(id="target_folder_table")
-                    if self.resolution.status != "missing":
-                        yield Label("Besonderheit fuer neuen Ordner")
-                        yield Input(value=self.info.folder_note, placeholder="z. B. Test oder Gastredner", id="folder_note_override")
-                with Vertical(id="processing_status_box"):
-                    yield Label("Was passiert?", id="processing_status_heading")
-                    yield Static(self._action_hint(), id="target_folder_action_hint")
-            with Horizontal(id="processing_actions"):
-                yield Button("Vorhandenen Ordner verwenden / Dateien dort hinzufuegen", id="use_existing")
-                yield Button("Neuen Ordner mit Besonderheit erstellen", id="create_with_note")
-                yield Button("Weiter zur finalen Pruefung", id="continue", variant="primary")
-                yield Button("Zurueck zu Metadaten", id="back")
-                yield Button("Abbrechen", id="cancel")
+            with VerticalScroll(id="target_folder_scroll"):
+                with Horizontal():
+                    with Vertical(id="processing_plan_box", classes="panel-neutral"):
+                        yield Label("Plan / Auswahl")
+                        yield Static(build_tui_target_folder_review_text(self.resolution), id="target_folder_review_text")
+                        if self.resolution.status == "multiple_existing":
+                            yield DataTable(id="target_folder_table")
+                        if self.resolution.status != "missing":
+                            yield Label("Zusatz fuer neuen Ordner", id="folder_note_label")
+                            yield Input(value=self.info.folder_note, placeholder="z. B. Taufe oder Gastredner", id="folder_note_override")
+                    with Vertical(id="processing_status_box", classes="panel-info"):
+                        yield Label("Status / Entscheidung", id="processing_status_heading")
+                        yield Static(
+                            tui_target_folder_status_message(self.resolution),
+                            id="target_folder_status_banner",
+                            classes=tui_target_folder_status_class(self.resolution),
+                        )
+                        yield Static(self._action_hint(), id="target_folder_action_hint")
+            yield Static(build_tui_back_footnote(), classes="back_footnote")
+            with Vertical(id="target_folder_actions"):
+                primary_label, primary_id = tui_target_folder_primary_action(self.resolution)
+                yield Button(primary_label, id=primary_id, variant="primary")
+                if self.resolution.status != "missing":
+                    yield Button("Neuen Ordner mit Zusatz erstellen", id="create_with_note")
+                with Horizontal(classes="navigation_actions"):
+                    yield Button(f"{TUI_BACK_LABEL} zu Metadaten", id="back")
+                    yield Button("Abbrechen", id="cancel")
             yield Footer()
 
         def on_mount(self) -> None:
@@ -1719,18 +1980,20 @@ def run_tui(config_path: str | None = None) -> int:
                 for candidate in self.resolution.candidates:
                     table.add_row(str(candidate), key=str(candidate))
                 table.cursor_type = "row"
-            if self.resolution.status == "missing":
-                self.query_one("#use_existing", Button).disabled = True
-                self.query_one("#create_with_note", Button).disabled = True
-            elif self.resolution.status == "single_existing":
-                self.query_one("#continue", Button).disabled = True
-            else:
-                self.query_one("#continue", Button).disabled = True
+            if self.resolution.status != "missing":
+                visible = tui_target_folder_note_input_visible(self.creating_with_note)
+                self.query_one("#folder_note_label", Label).display = visible
+                self.query_one("#folder_note_override", Input).display = visible
+            primary_id = tui_target_folder_initial_focus_id(self.resolution)
+            self.query_one(f"#{primary_id}", Button).focus()
 
         def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
             self.selected_existing_folder = Path(str(event.row_key.value))
             self.query_one("#target_folder_action_hint", Static).update(
-                f"Ausgewaehlter vorhandener Ordner:\n{self.selected_existing_folder}"
+                build_tui_target_folder_action_hint(
+                    self.resolution,
+                    selected_folder=self.selected_existing_folder,
+                )
             )
 
         def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -1740,7 +2003,7 @@ def run_tui(config_path: str | None = None) -> int:
             if event.button.id == "cancel":
                 self._return_to_start()
                 return
-            if event.button.id == "continue":
+            if event.button.id == "use_suggested":
                 self._open_processing_review(self.resolution.suggested_folder, self.info)
                 return
             if event.button.id == "use_existing":
@@ -1751,6 +2014,17 @@ def run_tui(config_path: str | None = None) -> int:
                 self._open_processing_review(folder, self.info)
                 return
             if event.button.id == "create_with_note":
+                if not self.creating_with_note:
+                    self.creating_with_note = True
+                    self.query_one("#folder_note_label", Label).display = True
+                    note_input = self.query_one("#folder_note_override", Input)
+                    note_input.display = True
+                    note_input.focus()
+                    event.button.label = "Neuen Ordner verwenden"
+                    self.query_one("#target_folder_action_hint", Static).update(
+                        build_tui_target_folder_action_hint(self.resolution, create_with_note=True)
+                    )
+                    return
                 note = self.query_one("#folder_note_override", Input).value.strip()
                 if not note:
                     self.notify("Bitte eine Besonderheit fuer den neuen Ordner eingeben.")
@@ -1768,17 +2042,17 @@ def run_tui(config_path: str | None = None) -> int:
                         raw_recording=self.raw_recording,
                         already_cut=self.already_cut,
                         info=info,
+                        raw_action="keep" if self.raw_recording is not None else None,
                         target_folder_override=target_folder,
                     ),
                 )
             )
 
         def _action_hint(self) -> str:
-            if self.resolution.status == "missing":
-                return "Der vorgeschlagene Zielordner wird neu erstellt."
-            if self.resolution.status == "single_existing":
-                return "Waehle bewusst, ob der vorhandene Tagesordner genutzt oder ein neuer Ordner mit Besonderheit erstellt wird."
-            return "Waehle einen vorhandenen Ordner aus der Tabelle oder erstelle ueber eine Besonderheit einen neuen Ordner."
+            return build_tui_target_folder_action_hint(
+                self.resolution,
+                selected_folder=self.selected_existing_folder,
+            )
 
         def _return_to_start(self) -> None:
             for _ in range(4):
@@ -1793,92 +2067,130 @@ def run_tui(config_path: str | None = None) -> int:
             self.app_config = app_config
             self.plan = plan
             self.overwrite_confirmed = plan.overwrite_existing_outputs
+            self.adding_output_suffix = False
 
         def compose(self) -> ComposeResult:
+            conflicts = detect_tui_target_conflicts(self.plan)
             yield Header(show_clock=False)
-            yield Static("Vorbereitung pruefen", id="screen_title")
+            yield Static(build_tui_step_title(7, "Finale Dateien erstellen / Abschluss"), id="screen_title")
+            skipped_steps = {3} if self.plan.raw_recording is None else set()
+            yield Static(build_tui_progress_text(7, skipped_steps), classes="workflow_progress")
             yield Static(
-                "Bitte pruefe Quelle, Zielordner und Dateinamen. Erst der Button unten schreibt Dateien.",
+                build_tui_screen_help("Pruefe den Plan. Erst der blaue Button erstellt oder ersetzt Dateien.", ""),
                 id="screen_note",
             )
-            with Horizontal():
-                with Vertical(id="processing_plan_box"):
-                    yield Static(build_tui_target_folder_status_text(self.plan), id="target_folder_status")
-                    yield Static(build_processing_plan_text(self.plan, self.app_config), id="processing_plan_text")
-                    yield Static(build_tui_target_conflict_text(detect_tui_target_conflicts(self.plan)), id="target_conflict_text")
-                    if self.plan.raw_recording is not None:
-                        yield Label("Was soll mit der urspruenglichen Rohaufnahme passieren?")
-                        yield Select(
-                            [
-                                ("Rohaufnahme in Zielordner verschieben (empfohlen)", "move"),
-                                ("Rohaufnahme in Zielordner kopieren", "copy"),
-                                ("Rohaufnahme in vMixStorage liegen lassen", "none"),
-                            ],
-                            value=self.plan.raw_action,
-                            id="raw_action",
-                        )
-                    yield Static(build_tui_processing_review_action_text(self.plan), id="processing_action_text")
-                with Vertical(id="processing_status_box"):
-                    yield Label("Status", id="processing_status_heading")
-                    if detect_tui_target_conflicts(self.plan):
-                        conflict_back_label, confirm_overwrite_label, conflict_cancel_label = tui_conflict_action_labels()
+            with VerticalScroll(id="processing_review_scroll"):
+                with Horizontal():
+                    with Vertical(id="processing_plan_box", classes="panel-neutral"):
+                        yield Label("Plan / Auswahl")
+                        yield Static(build_tui_processing_source_text(self.plan), id="processing_source_text")
+                        yield Static(build_tui_processing_files_text(self.plan), id="processing_files_text")
+                        if self.plan.raw_recording is not None:
+                            yield Label("Rohaufnahme-Aktion")
+                            yield Select(
+                                [
+                                    ("Rohaufnahme in Zielordner verschieben", "move"),
+                                    ("Rohaufnahme in Zielordner kopieren", "copy"),
+                                    ("Rohaufnahme in vMixStorage liegen lassen (sicherer Standard)", "keep"),
+                                ],
+                                value=self.plan.raw_action,
+                                id="raw_action",
+                            )
+                        yield Static(build_tui_processing_raw_action_text(self.plan), id="processing_raw_action_text")
+                    with Vertical(id="processing_status_box", classes="panel-info"):
+                        yield Label("Status / Entscheidung")
                         yield Static(
-                            build_tui_target_conflict_decision_text(detect_tui_target_conflicts(self.plan)),
-                            id="target_conflict_decision",
+                            build_tui_processing_warning_text(self.plan, conflicts),
+                            id="processing_warning_text",
+                            classes=tui_processing_warning_class(conflicts),
                         )
-                        yield Button(
-                            conflict_back_label,
-                            id="conflict_back",
-                        )
-                        yield Button(
-                            confirm_overwrite_label,
-                            id="confirm_overwrite",
-                            variant="warning",
-                        )
-                        yield Button(conflict_cancel_label, id="conflict_cancel")
-                    else:
-                        yield Static(build_tui_processing_ready_text(self.plan), id="processing_ready_text")
-                    yield Static("Noch nicht gestartet.", id="processing_status")
-            with Horizontal(id="processing_actions"):
-                yield Button("Zurueck", id="back")
-                yield Button("Abbrechen", id="cancel")
+                        yield Static(build_tui_processing_review_action_text(self.plan), id="processing_action_text")
+                        if conflicts:
+                            yield Label("Zusatz fuer neue Dateien", id="output_suffix_label")
+                            yield Input(placeholder="z. B. Teil 2, neu oder Korrektur", id="output_suffix_input")
+                        yield Static("Noch nicht gestartet.", id="processing_status")
+            yield Static(build_tui_back_footnote(), classes="back_footnote")
+            with Vertical(id="processing_actions"):
+                if conflicts:
+                    yield Button("Neue Dateien mit Zusatz speichern", id="use_output_suffix", variant="primary")
+                    yield Button("Vorhandene Dateien sichern und neue Dateien erstellen", id="backup_existing")
+                    yield Button("Vorhandene Dateien ersetzen", id="confirm_overwrite", variant="error")
                 yield Button(TUI_PROCESSING_EXECUTE_LABEL, id="execute", variant="primary")
-            with Horizontal(id="processing_finished_actions"):
-                open_label, new_label, quit_label = tui_processing_finished_action_labels()
-                yield Button(open_label, id="open_target", disabled=True)
-                yield Button(new_label, id="new_recording")
-                yield Button(quit_label, id="quit")
+                with Horizontal(classes="navigation_actions"):
+                    back_label = "Zurueck und anderen Ordner waehlen" if conflicts else TUI_BACK_LABEL
+                    yield Button(back_label, id="back")
+                    yield Button("Zielordner oeffnen", id="open_target", disabled=True)
+                    yield Button("Abbrechen", id="cancel")
             yield Footer()
 
         def on_mount(self) -> None:
+            if detect_tui_target_conflicts(self.plan):
+                self.query_one("#output_suffix_label", Label).display = False
+                self.query_one("#output_suffix_input", Input).display = False
             self._sync_execute_button()
 
         def on_select_changed(self, event: Select.Changed) -> None:
             if event.select.id == "raw_action":
                 self.plan = replace(self.plan, raw_action=str(event.value))
-                self.query_one("#processing_plan_text", Static).update(build_processing_plan_text(self.plan, self.app_config))
-                self.query_one("#processing_action_text", Static).update(build_tui_processing_review_action_text(self.plan))
-            elif event.select.id == "conflict_action":
-                self.overwrite_confirmed = event.value == "overwrite"
-                if self.overwrite_confirmed:
-                    self.plan = apply_tui_overwrite_confirmation(self.plan)
+                self.query_one("#processing_raw_action_text", Static).update(
+                    build_tui_processing_raw_action_text(self.plan)
+                )
                 self.query_one("#processing_action_text", Static).update(build_tui_processing_review_action_text(self.plan))
             self._sync_execute_button()
 
         def on_button_pressed(self, event: Button.Pressed) -> None:
-            if event.button.id in {"back", "conflict_back"}:
+            if event.button.id == "back":
                 self.app.pop_screen()
                 return
-            if event.button.id in {"cancel", "conflict_cancel"}:
+            if event.button.id == "cancel":
                 self._return_to_start()
                 return
             if event.button.id == "confirm_overwrite":
                 self.overwrite_confirmed = True
                 self.plan = apply_tui_overwrite_confirmation(self.plan)
-                self.query_one("#processing_plan_text", Static).update(build_processing_plan_text(self.plan, self.app_config))
                 self.query_one("#processing_action_text", Static).update(build_tui_processing_review_action_text(self.plan))
-                self.query_one("#target_conflict_decision", Static).update(build_tui_overwrite_confirmed_text())
+                warning = self.query_one("#processing_warning_text", Static)
+                warning.update(build_tui_overwrite_confirmed_text())
+                warning.set_classes("status-warning")
                 self.query_one("#processing_status", Static).update("Bereit zum Ersetzen.")
+                self._hide_conflict_strategy_buttons()
+                self._sync_execute_button()
+                return
+            if event.button.id == "use_output_suffix":
+                if not self.adding_output_suffix:
+                    self.adding_output_suffix = True
+                    self.query_one("#output_suffix_label", Label).display = True
+                    suffix_input = self.query_one("#output_suffix_input", Input)
+                    suffix_input.display = True
+                    suffix_input.focus()
+                    event.button.label = "Zusatz anwenden"
+                    return
+                try:
+                    self.plan = apply_tui_output_suffix(
+                        self.plan,
+                        self.query_one("#output_suffix_input", Input).value,
+                    )
+                except ValueError as exc:
+                    self.notify(str(exc), severity="error")
+                    return
+                self._refresh_plan_widgets()
+                warning = self.query_one("#processing_warning_text", Static)
+                warning.update("Status / Warnungen\nNeue eindeutige Dateinamen werden verwendet. Vorhandene Dateien bleiben unveraendert.")
+                warning.set_classes("status-ok")
+                self.query_one("#processing_status", Static).update("Bereit mit neuen Dateinamen.")
+                self._hide_conflict_strategy_buttons()
+                self._sync_execute_button()
+                return
+            if event.button.id == "backup_existing":
+                self.plan = apply_tui_backup_existing_confirmation(self.plan)
+                self._refresh_plan_widgets()
+                warning = self.query_one("#processing_warning_text", Static)
+                warning.update(
+                    "Status / Warnungen\nSicherung bestaetigt. Vorhandene Dateien erhalten vor dem Schreiben einen __alt-Zeitstempel."
+                )
+                warning.set_classes("status-warning")
+                self.query_one("#processing_status", Static).update("Bereit zum Sichern und Erstellen.")
+                self._hide_conflict_strategy_buttons()
                 self._sync_execute_button()
                 return
             if event.button.id == "execute":
@@ -1889,18 +2201,13 @@ def run_tui(config_path: str | None = None) -> int:
                     self.plan = apply_tui_overwrite_confirmation(self.plan)
                 event.button.disabled = True
                 event.button.label = TUI_PROCESSING_RUNNING_LABEL
+                self._set_processing_controls_disabled(True)
                 self.query_one("#processing_status", Static).update(build_tui_processing_started_status())
                 self.set_timer(0.1, self._execute_plan)
                 return
             if event.button.id == "open_target":
                 self._open_target_folder_again()
                 return
-            if event.button.id == "new_recording":
-                self._return_to_start()
-                self.app.push_screen(SourceChoiceScreen(self.app_config))
-                return
-            if event.button.id == "quit":
-                self.app.exit()
 
         def _sync_execute_button(self) -> None:
             button = self.query_one("#execute", Button)
@@ -1910,6 +2217,24 @@ def run_tui(config_path: str | None = None) -> int:
             )
             button.disabled = disabled
             button.label = label
+
+        def _refresh_plan_widgets(self) -> None:
+            self.query_one("#processing_source_text", Static).update(build_tui_processing_source_text(self.plan))
+            self.query_one("#processing_files_text", Static).update(build_tui_processing_files_text(self.plan))
+            self.query_one("#processing_raw_action_text", Static).update(build_tui_processing_raw_action_text(self.plan))
+            self.query_one("#processing_action_text", Static).update(build_tui_processing_review_action_text(self.plan))
+
+        def _hide_conflict_strategy_buttons(self) -> None:
+            for selector in ("#use_output_suffix", "#backup_existing", "#confirm_overwrite"):
+                try:
+                    self.query_one(selector, Button).display = False
+                except Exception:
+                    continue
+            for selector in ("#output_suffix_label", "#output_suffix_input"):
+                try:
+                    self.query_one(selector).display = False
+                except Exception:
+                    continue
 
         def _execute_plan(self) -> None:
             status_widget = self.query_one("#processing_status", Static)
@@ -1922,36 +2247,53 @@ def run_tui(config_path: str | None = None) -> int:
             try:
                 result = execute_processing_plan(self.plan, self.app_config, progress=append_status)
             except Exception as exc:
+                self._set_processing_controls_disabled(False)
                 self.query_one("#execute", Button).disabled = False
                 self.query_one("#execute", Button).label = TUI_PROCESSING_EXECUTE_LABEL
-                status_widget.update(build_tui_processing_error_status(tuple(status_lines), f"{type(exc).__name__}: {exc}"))
+                self._enable_open_target_if_available()
+                status_widget.update(
+                    build_tui_processing_error_status(
+                        tuple(status_lines),
+                        f"{type(exc).__name__}: {exc}",
+                        target_folder=self.plan.target_folder,
+                    )
+                )
                 self.notify("Die Vorbereitung ist mit einem Fehler abgebrochen.", severity="error")
                 return
 
             if result.success:
-                self._hide_conflict_controls_after_success()
-                status_widget.update(
-                    build_tui_processing_success_status(self.plan, opened_target_folder=result.opened_target_folder)
+                self.app.push_screen(
+                    CompletionScreen(
+                        self.app_config,
+                        self.plan,
+                        opened_target_folder=result.opened_target_folder,
+                    )
                 )
-                self.query_one("#execute", Button).disabled = True
-                self.query_one("#execute", Button).label = TUI_PROCESSING_DONE_LABEL
-                self.query_one("#open_target", Button).disabled = False
                 self.notify("Dateien wurden vorbereitet.")
                 return
 
             self.query_one("#execute", Button).disabled = False
             self.query_one("#execute", Button).label = TUI_PROCESSING_EXECUTE_LABEL
+            self._set_processing_controls_disabled(False)
+            self._enable_open_target_if_available()
             error = result.error or "Die Vorbereitung ist nicht vollstaendig abgeschlossen."
-            status_widget.update(build_tui_processing_error_status(result.messages, error))
+            status_widget.update(build_tui_processing_error_status(result.messages, error, target_folder=self.plan.target_folder))
             self.notify(error, severity="error")
 
-        def _hide_conflict_controls_after_success(self) -> None:
-            for selector in ("#target_conflict_decision", "#conflict_back", "#confirm_overwrite", "#conflict_cancel"):
+        def _set_processing_controls_disabled(self, disabled: bool) -> None:
+            for selector in ("#back", "#cancel", "#use_output_suffix", "#backup_existing", "#confirm_overwrite"):
                 try:
-                    widget = self.query_one(selector)
+                    self.query_one(selector, Button).disabled = disabled
                 except Exception:
                     continue
-                widget.display = False
+            try:
+                self.query_one("#raw_action", Select).disabled = disabled
+            except Exception:
+                pass
+
+        def _enable_open_target_if_available(self) -> None:
+            if self.plan.target_folder.exists():
+                self.query_one("#open_target", Button).disabled = False
 
         def _open_target_folder_again(self) -> None:
             try:
@@ -1963,6 +2305,64 @@ def run_tui(config_path: str | None = None) -> int:
 
         def _return_to_start(self) -> None:
             for _ in range(4):
+                try:
+                    self.app.pop_screen()
+                except Exception:
+                    return
+
+    class CompletionScreen(Screen[None]):
+        def __init__(
+            self,
+            app_config: AppConfig,
+            plan: PreparedRecordingPlan,
+            *,
+            opened_target_folder: bool,
+        ) -> None:
+            super().__init__()
+            self.app_config = app_config
+            self.plan = plan
+            self.opened_target_folder = opened_target_folder
+
+        def compose(self) -> ComposeResult:
+            yield Header(show_clock=False)
+            yield Static("Fertig vorbereitet", id="screen_title")
+            skipped_steps = {3} if self.plan.raw_recording is None else set()
+            yield Static(build_tui_progress_text(7, skipped_steps), classes="workflow_progress")
+            with VerticalScroll(id="completion_scroll"):
+                yield Static(
+                    build_tui_processing_success_status(
+                        self.plan,
+                        opened_target_folder=self.opened_target_folder,
+                    ),
+                    id="completion_status",
+                    classes="panel-info",
+                )
+            with Horizontal(id="completion_actions"):
+                open_label, new_label, quit_label = tui_processing_finished_action_labels()
+                yield Button(open_label, id="open_target", variant="primary")
+                yield Button(new_label, id="new_recording")
+                yield Button(quit_label, id="quit")
+            yield Footer()
+
+        def on_button_pressed(self, event: Button.Pressed) -> None:
+            if event.button.id == "open_target":
+                try:
+                    subprocess.Popen(["explorer", str(self.plan.target_folder)])
+                except OSError as exc:
+                    self.query_one("#completion_status", Static).update(
+                        build_tui_processing_success_status(self.plan, opened_target_folder=False)
+                        + f"\n\nAdmin-Hinweis: {exc}"
+                    )
+                return
+            if event.button.id == "new_recording":
+                self._return_to_start()
+                self.app.push_screen(StartSafetyScreen(self.app_config))
+                return
+            if event.button.id == "quit":
+                self.app.exit()
+
+        def _return_to_start(self) -> None:
+            for _ in range(8):
                 try:
                     self.app.pop_screen()
                 except Exception:
@@ -2032,8 +2432,6 @@ def run_tui(config_path: str | None = None) -> int:
         }
         #status_box {
             width: 1fr;
-            border: solid $accent;
-            padding: 1;
         }
         #form {
             width: 1fr;
@@ -2041,8 +2439,6 @@ def run_tui(config_path: str | None = None) -> int:
         }
         #preview_box {
             width: 1fr;
-            border: solid $accent;
-            padding: 1;
         }
         #preview_heading {
             text-style: bold;
@@ -2050,14 +2446,10 @@ def run_tui(config_path: str | None = None) -> int:
         }
         #processing_plan_box {
             width: 1fr;
-            border: solid $accent;
-            padding: 1;
             margin-right: 1;
         }
         #processing_status_box {
             width: 1fr;
-            border: solid $warning;
-            padding: 1;
         }
         #processing_status_heading {
             text-style: bold;
@@ -2067,9 +2459,74 @@ def run_tui(config_path: str | None = None) -> int:
             height: auto;
             margin-top: 1;
         }
-        #processing_finished_actions {
+        #metadata_scroll, #target_folder_scroll, #processing_review_scroll, #completion_scroll {
+            height: 1fr;
+        }
+        #metadata_actions, #target_folder_actions, #completion_actions {
             height: auto;
             margin-top: 1;
+        }
+        #target_folder_actions > Button, #processing_actions > Button {
+            width: 100%;
+        }
+        .navigation_actions {
+            height: auto;
+        }
+        .navigation_actions Button, #metadata_actions Button, #completion_actions Button {
+            width: 1fr;
+            margin-right: 1;
+        }
+        #file_actions Button, #losslesscut_actions Button, #export_detection_actions Button,
+        #safety_actions Button {
+            margin-right: 1;
+        }
+        .back_footnote {
+            color: $text-muted;
+            height: auto;
+        }
+        .workflow_progress {
+            height: auto;
+            color: $text-muted;
+            margin-bottom: 1;
+        }
+        .panel-neutral, .panel-info, .panel-warning, .panel-danger {
+            padding: 1;
+            margin-bottom: 1;
+        }
+        .panel-neutral {
+            border: solid #7f7f7f;
+        }
+        .panel-info {
+            border: solid $accent;
+        }
+        .panel-warning {
+            border: heavy $warning;
+        }
+        .panel-danger {
+            border: heavy $error;
+        }
+        .status-ok, .status-info, .status-warning, .status-danger {
+            padding: 1;
+            margin-bottom: 1;
+            text-style: bold;
+        }
+        .status-ok {
+            border: solid $success;
+        }
+        .status-info {
+            border: solid $accent;
+        }
+        .status-warning {
+            border: heavy $warning;
+        }
+        .status-danger {
+            border: heavy $error;
+        }
+        #target_folder_table {
+            height: 8;
+        }
+        #processing_source_text, #processing_files_text, #processing_raw_action_text {
+            margin-bottom: 1;
         }
         #target_conflict_decision {
             border: heavy $error;

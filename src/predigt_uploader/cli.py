@@ -20,6 +20,7 @@ from .mp3 import Mp3ConversionError, convert_mp4_to_mp3, ffmpeg_available
 from .report import build_summary_text, write_summary_file
 from .run_log import WorkflowLog
 from .ui import BACK, MenuOption, UserAbortError, ask_file_path, ask_yes_no, choose_from_options, search_from_options
+from .workflow_state import completed_local_workflow_state, save_workflow_state
 
 
 class Mp4TransferError(RuntimeError):
@@ -1543,7 +1544,11 @@ def _validate_local_workflow_result(plan: ProcessingPlan) -> None:
         ) from exc
 
 
-def _print_local_workflow_success(plan: ProcessingPlan, summary_path: Path | None) -> None:
+def _print_local_workflow_success(
+    plan: ProcessingPlan,
+    summary_path: Path | None,
+    workflow_path: Path | None = None,
+) -> None:
     print()
     print("Lokaler Workflow erfolgreich abgeschlossen.")
     print(f"Zielordner: {plan.target_mp4.parent}")
@@ -1551,6 +1556,8 @@ def _print_local_workflow_success(plan: ProcessingPlan, summary_path: Path | Non
     print(f"Finale MP3: {plan.target_mp3}")
     if summary_path is not None:
         print(f"Zusammenfassung: {summary_path}")
+    if workflow_path is not None:
+        print(f"Workflow-Status: {workflow_path}")
 
 
 def _open_target_folder(target_folder: Path) -> None:
@@ -2114,7 +2121,25 @@ def run_wizard(args: argparse.Namespace) -> int:
     log.event("Lokaler Workflow-Endzustand geprueft.")
 
     _maybe_archive_raw_recording(raw_recording, plan, config, log)
-    _print_local_workflow_success(plan, summary_path)
+    workflow_path: Path | None = None
+    try:
+        workflow_path = save_workflow_state(
+            completed_local_workflow_state(
+                sermon=plan.info,
+                raw_recording=raw_recording,
+                cut_mp4=plan.source_mp4,
+                target_folder=plan.target_mp4.parent,
+                final_mp4=plan.target_mp4,
+                final_mp3=plan.target_mp3,
+                summary=summary_path,
+            )
+        )
+        log.event(f"Workflow-Status gespeichert: {workflow_path}")
+    except OSError as exc:
+        log.error("Workflow-Status konnte nicht gespeichert werden.", admin_hint=str(exc))
+        print("Der Workflow-Status konnte nicht gespeichert werden. Die erstellten Mediendateien bleiben erhalten.")
+        print(f"Admin-Hinweis: {exc}")
+    _print_local_workflow_success(plan, summary_path, workflow_path)
     _open_target_folder_safely(config, plan.target_mp4.parent, log)
     if log.enabled:
         print(f"Logdatei: {log.path}")

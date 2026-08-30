@@ -1,5 +1,6 @@
 # Beispielkonfiguration für PredigtUploader
 # Kopiere diese Datei später nach config.toml oder nach %APPDATA%\PredigtUploader\config.toml
+# Vimeo-/WordPress-Tokens und Passwörter gehören nicht in diese Datei.
 
 [paths]
 # Beispiel: Auf Zielrechnern ist ein UNC-Pfad oft robuster als ein gemapptes Laufwerk.

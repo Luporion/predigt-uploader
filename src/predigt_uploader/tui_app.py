@@ -16,11 +16,16 @@ from .processing import (
     MP4_ACTION_MOVE,
     MP4_ACTION_OVERWRITE,
     PreparedRecordingPlan,
+    apply_output_filenames,
     build_prepared_recording_plan,
+    planned_existing_output_renames,
     raw_action_label,
     execute_processing_plan,
+    unique_output_name_suggestions,
+    validate_windows_filename,
 )
 from .report import summary_file_path
+from .workflow_state import workflow_state_path
 
 TUI_MP4_PREVIEW_LIMIT = 5
 TUI_FILE_CHOICE_LIMIT = 500
@@ -321,6 +326,28 @@ def tui_target_folder_status_class(resolution: FolderResolution) -> str:
     return classes[resolution.status]
 
 
+def build_tui_new_folder_decision_text(config: AppConfig, info: SermonInfo, note: str) -> str:
+    cleaned_note = note.strip()
+    if not cleaned_note:
+        return "Neuer Ordner mit Zusatz\nBitte zuerst einen Zusatz eingeben."
+    target_folder = suggest_folder(config, build_tui_info_with_folder_note(info, cleaned_note))
+    folder_state = (
+        "Dieser Zielordner existiert bereits. Er wird als vorhandener Ordner verwendet; "
+        "Dateikonflikte werden weiterhin in Schritt 7 geprueft."
+        if target_folder.exists()
+        else "Der vorhandene Tagesordner bleibt unveraendert."
+    )
+    return f"Neuer Ordner mit Zusatz\nNeuer Zielordner: {target_folder}\n{folder_state}"
+
+
+def tui_new_folder_decision_status_class(config: AppConfig, info: SermonInfo, note: str) -> str:
+    cleaned_note = note.strip()
+    if not cleaned_note:
+        return "status-warning"
+    target_folder = suggest_folder(config, build_tui_info_with_folder_note(info, cleaned_note))
+    return "status-warning" if target_folder.exists() else "status-info"
+
+
 def build_tui_target_folder_status_text(plan: PreparedRecordingPlan) -> str:
     if plan.target_folder.exists():
         return "Der Zielordner existiert bereits. Die neuen Dateien werden in diesen Ordner hinzugefuegt."
@@ -372,6 +399,45 @@ def build_tui_target_conflict_text(conflicts: tuple[TuiTargetConflict, ...]) -> 
     return "\n".join(lines)
 
 
+def build_tui_target_file_plan_text(
+    plan: PreparedRecordingPlan,
+    conflicts: tuple[TuiTargetConflict, ...],
+    *,
+    proposed_names: dict[str, str] | None = None,
+) -> str:
+    conflict_kinds = {conflict.kind for conflict in conflicts}
+    existing_renames = {source: target for source, target in plan.existing_output_renames}
+    rows = (
+        ("mp4", "MP4", plan.target_mp4),
+        ("mp3", "MP3", plan.target_mp3),
+        ("summary", "Zusammenfassung", plan.summary_path),
+    )
+    lines = ["Datei | Zustand | geplante Aktion"]
+    for kind, label, path in rows:
+        if kind in conflict_kinds:
+            if proposed_names:
+                action = f"Neue Datei: {proposed_names[kind]}"
+            elif path in existing_renames:
+                action = f"Vorhandene Datei -> {existing_renames[path].name}; neue Datei -> {path.name}"
+            elif plan.overwrite_existing_outputs:
+                action = f"Vorhandene Datei ersetzen -> {path.name}"
+            else:
+                action = "Entscheidung erforderlich"
+            lines.append(f"{label} | KONFLIKT: {path.name} | {action}")
+        else:
+            lines.append(f"{label} | frei | wird erstellt: {path.name}")
+    return "\n".join(lines)
+
+
+def build_tui_existing_output_rename_text(plan: PreparedRecordingPlan) -> str:
+    if not plan.existing_output_renames:
+        return ""
+    lines = ["Vorhandene Dateien werden umbenannt:"]
+    lines.extend(f"- {source.name} -> {target.name}" for source, target in plan.existing_output_renames)
+    lines.append("Erst der finale Ausfuehren-Button fuehrt diese Umbenennungen aus.")
+    return "\n".join(lines)
+
+
 def build_tui_target_conflict_decision_text(conflicts: tuple[TuiTargetConflict, ...]) -> str:
     if not conflicts:
         return ""
@@ -420,17 +486,11 @@ def apply_tui_output_suffix(plan: PreparedRecordingPlan, suffix: str) -> Prepare
     cleaned = sanitize_filename_part(suffix)
     if not cleaned:
         raise ValueError("Bitte einen Zusatz fuer die neuen Dateien eingeben.")
-    mp4_action = plan.mp4_action
-    if mp4_action in {MP4_ACTION_OVERWRITE, MP4_ACTION_KEEP}:
-        mp4_action = MP4_ACTION_COPY
-    return replace(
+    return apply_output_filenames(
         plan,
-        target_mp4=plan.target_mp4.with_name(f"{plan.target_mp4.stem} - {cleaned}{plan.target_mp4.suffix}"),
-        target_mp3=plan.target_mp3.with_name(f"{plan.target_mp3.stem} - {cleaned}{plan.target_mp3.suffix}"),
-        summary_path=plan.summary_path.with_name(f"{plan.summary_path.stem} - {cleaned}{plan.summary_path.suffix}"),
-        mp4_action=mp4_action,
-        overwrite_existing_outputs=False,
-        backup_existing_outputs=False,
+        mp4_filename=f"{plan.target_mp4.stem} - {cleaned}{plan.target_mp4.suffix}",
+        mp3_filename=f"{plan.target_mp3.stem} - {cleaned}{plan.target_mp3.suffix}",
+        summary_filename=f"{plan.summary_path.stem} - {cleaned}{plan.summary_path.suffix}",
     )
 
 
@@ -443,6 +503,7 @@ def apply_tui_backup_existing_confirmation(plan: PreparedRecordingPlan) -> Prepa
         mp4_action=mp4_action,
         overwrite_existing_outputs=False,
         backup_existing_outputs=True,
+        existing_output_renames=planned_existing_output_renames(plan),
     )
 
 
@@ -1060,6 +1121,51 @@ def build_tui_validation_text(messages: tuple[str, ...]) -> str:
     return "Bitte ergaenzen:\n" + "\n".join(f"- {message}" for message in messages)
 
 
+def build_tui_metadata_validation_text(messages: tuple[str, ...]) -> str:
+    if not messages:
+        return "Alle Pflichtfelder ausgefüllt."
+    normalized_messages = tuple(_normalize_tui_metadata_message(message) for message in messages)
+    return f"Noch auszufüllen: {', '.join(normalized_messages)}"
+
+
+def _normalize_tui_metadata_message(message: str) -> str:
+    cleaned = message.strip().rstrip(".")
+    if cleaned.casefold().endswith(" fehlt"):
+        cleaned = cleaned[:-6].rstrip()
+    return cleaned
+
+
+def build_tui_metadata_scroll_hint_text(
+    missing_fields_above: tuple[str, ...],
+    missing_fields_below: tuple[str, ...],
+) -> str:
+    if not missing_fields_above and not missing_fields_below:
+        return ""
+    if missing_fields_below:
+        if len(missing_fields_below) == 1:
+            return "↓ Pflichtfeld weiter unten"
+        return f"↓ {len(missing_fields_below)} Pflichtfelder weiter unten"
+    if len(missing_fields_above) == 1:
+        return "↑ Pflichtfeld weiter oben"
+    return f"↑ {len(missing_fields_above)} Pflichtfelder weiter oben"
+
+
+def classify_tui_metadata_fields_by_position(
+    field_regions: tuple[tuple[str, int, int], ...],
+    *,
+    viewport_top: int,
+    viewport_bottom: int,
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    above: list[str] = []
+    below: list[str] = []
+    for field_name, field_top, field_bottom in field_regions:
+        if field_bottom <= viewport_top:
+            above.append(field_name)
+        elif field_top >= viewport_bottom:
+            below.append(field_name)
+    return tuple(above), tuple(below)
+
+
 def build_tui_processing_started_status() -> str:
     return "\n".join(
         [
@@ -1077,7 +1183,7 @@ def build_tui_processing_success_status(plan: PreparedRecordingPlan, *, opened_t
     )
     return "\n".join(
         [
-            "Fertig. Die Dateien wurden vorbereitet.",
+            "Lokale Vorbereitung abgeschlossen.",
             folder_status,
             "Vorhandene Ziel-Dateien wurden ersetzt." if plan.overwrite_existing_outputs else "",
             "Vorhandene Ziel-Dateien wurden gesichert." if plan.backup_existing_outputs else "",
@@ -1086,6 +1192,7 @@ def build_tui_processing_success_status(plan: PreparedRecordingPlan, *, opened_t
             f"Finale MP4: {plan.target_mp4}",
             f"Finale MP3: {plan.target_mp3}",
             f"Zusammenfassung: {plan.summary_path}",
+            f"Workflow-Status: {workflow_state_path(plan.target_folder)}",
             f"Rohaufnahme-Aktion: {raw_action_label(plan.raw_action, plan.raw_recording)}",
             "",
             "Naechste Schritte:",
@@ -1097,6 +1204,12 @@ def build_tui_processing_success_status(plan: PreparedRecordingPlan, *, opened_t
             "6. Danach kann der PredigtUploader geschlossen oder eine neue Aufnahme vorbereitet werden.",
         ]
     ).replace("\n\n\n", "\n\n")
+
+
+def build_tui_processing_success_banner(plan: PreparedRecordingPlan, *, opened_target_folder: bool = True) -> str:
+    if opened_target_folder:
+        return "Fertig vorbereitet\nDie Dateien wurden erstellt und der Zielordner wurde geoeffnet."
+    return "Fertig vorbereitet\nDie Dateien wurden erstellt. Der Zielordner konnte nicht automatisch geoeffnet werden."
 
 
 def build_tui_processing_ready_text(plan: PreparedRecordingPlan) -> str:
@@ -1259,7 +1372,58 @@ def build_tui_field_labels(service_type: ServiceTypeConfig, *, missing_fields: t
     }
 
 
-def run_tui(config_path: str | None = None) -> int:
+TUI_METADATA_FIELD_ORDER = ("title", "bible", "speaker")
+
+
+def tui_metadata_required_field_keys(service_type: ServiceTypeConfig) -> tuple[str, ...]:
+    keys: list[str] = []
+    for field_key in TUI_METADATA_FIELD_ORDER:
+        if field_key == "title" and service_type.requires_title:
+            keys.append(field_key)
+        elif field_key == "bible" and service_type.requires_bible_reference:
+            keys.append(field_key)
+        elif field_key == "speaker" and service_type.requires_speaker:
+            keys.append(field_key)
+    return tuple(keys)
+
+
+def tui_metadata_optional_field_keys(service_type: ServiceTypeConfig) -> tuple[str, ...]:
+    keys: list[str] = []
+    for field_key in TUI_METADATA_FIELD_ORDER:
+        if field_key == "title" and not service_type.requires_title:
+            keys.append(field_key)
+        elif field_key == "bible" and not service_type.requires_bible_reference:
+            keys.append(field_key)
+        elif field_key == "speaker" and not service_type.requires_speaker:
+            keys.append(field_key)
+    keys.append("folder_note")
+    return tuple(keys)
+
+
+def tui_metadata_section_field_ids(field_key: str) -> tuple[str, str]:
+    return f"{field_key}_label", f"{field_key}_input"
+
+
+def tui_metadata_widget_order(service_type: ServiceTypeConfig) -> tuple[str, ...]:
+    order: list[str] = [
+        "metadata_basic_heading",
+        "service_type_label",
+        "service_type",
+        "service_type_help",
+        "date_label",
+        "date_choice",
+        "sermon_date",
+        "metadata_required_heading",
+    ]
+    for field_key in tui_metadata_required_field_keys(service_type):
+        order.extend(tui_metadata_section_field_ids(field_key))
+    order.append("metadata_optional_heading")
+    for field_key in tui_metadata_optional_field_keys(service_type):
+        order.extend(tui_metadata_section_field_ids(field_key))
+    return tuple(order)
+
+
+def build_tui_app(config_path: str | None = None):
     try:
         from textual.app import App, ComposeResult
         from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -1269,6 +1433,15 @@ def run_tui(config_path: str | None = None) -> int:
         raise ImportError("Textual ist nicht installiert.") from exc
 
     config = load_tui_config(config_path)
+
+    class MetadataFormScroll(VerticalScroll):
+        def watch_scroll_y(self, old_value: float, new_value: float) -> None:
+            super().watch_scroll_y(old_value, new_value)
+            if round(old_value) == round(new_value) or not self.is_mounted:
+                return
+            update_hint = getattr(self.screen, "_update_metadata_scroll_hint", None)
+            if update_hint is not None:
+                self.call_after_refresh(update_hint)
 
     class StartScreen(Screen[None]):
         def compose(self) -> ComposeResult:
@@ -1725,38 +1898,64 @@ def run_tui(config_path: str | None = None) -> int:
                 build_tui_screen_help("Ergaenze die Angaben fuer Dateiname, MP3 und Zusammenfassung.", ""),
                 id="screen_note",
             )
-            with VerticalScroll(id="metadata_scroll"):
-                with Horizontal():
-                    with Vertical(id="form", classes="panel-neutral"):
-                        yield Label("Art der Veranstaltung")
-                        yield Select(service_names, value=default_service, id="service_type")
-                        yield Static(TUI_GOTTESDIENST_EXPLANATION, id="service_type_help")
-                        yield Label("Datum", id="date_label")
-                        yield Select([(option.label, option.kind) for option in date_options], value=preferred_date.kind, id="date_choice")
-                        yield Input(value=preferred_date.value.isoformat(), placeholder="YYYY-MM-DD", id="sermon_date")
-                        yield Label("Titel", id="title_label")
-                        yield Input(placeholder="Titel oder Thema", id="title_input")
-                        yield Label("Hauptbibelstelle", id="bible_label")
-                        yield Input(placeholder="Bibelstelle", id="bible_input")
-                        yield Label("Redner / Leitung", id="speaker_label")
-                        yield Input(placeholder="Redner oder Leitung", id="speaker_input")
-                        yield Label("Besonderheit im Ordner")
-                        yield Input(placeholder="optional, z. B. Taufe oder Gastredner", id="folder_note_input")
-                    with Vertical(id="preview_box", classes="panel-info"):
+            yield Static("", id="metadata_validation", classes="status-info")
+            with Vertical(id="metadata_content"):
+                with Horizontal(id="metadata_body"):
+                    with Vertical(id="metadata_form_pane"):
+                        with MetadataFormScroll(id="metadata_form_scroll", classes="panel-neutral"):
+                            with Vertical(id="metadata_field_stack"):
+                                yield Static("Grunddaten", id="metadata_basic_heading", classes="metadata_section_heading")
+                                yield Label("Art der Veranstaltung", id="service_type_label")
+                                yield Select(service_names, value=default_service, id="service_type")
+                                yield Static(TUI_GOTTESDIENST_EXPLANATION, id="service_type_help")
+                                yield Label("Datum", id="date_label")
+                                yield Select(
+                                    [(option.label, option.kind) for option in date_options],
+                                    value=preferred_date.kind,
+                                    id="date_choice",
+                                )
+                                yield Input(value=preferred_date.value.isoformat(), placeholder="YYYY-MM-DD", id="sermon_date")
+                                yield Static("Pflichtangaben", id="metadata_required_heading", classes="metadata_section_heading")
+                                yield Label("Titel", id="title_label")
+                                yield Input(placeholder="Titel oder Thema", id="title_input")
+                                yield Label("Hauptbibelstelle", id="bible_label")
+                                yield Input(placeholder="Bibelstelle", id="bible_input")
+                                yield Label("Redner / Leitung", id="speaker_label")
+                                yield Input(placeholder="Redner oder Leitung", id="speaker_input")
+                                yield Static("Optionale Angaben", id="metadata_optional_heading", classes="metadata_section_heading")
+                                yield Label("Besonderheit im Ordner", id="folder_note_label")
+                                yield Input(placeholder="optional, z. B. Taufe oder Gastredner", id="folder_note_input")
+                        with Horizontal(id="metadata_scroll_hint_row"):
+                            yield Static("", id="metadata_scroll_hint", classes="scroll-hint")
+                    with VerticalScroll(id="metadata_preview_scroll", classes="panel-info"):
                         yield Label("Live-Vorschau", id="preview_heading")
                         yield Static("", id="filename_preview")
                         yield Static("", id="validation_status")
                         yield Static("", id="source_status")
-            yield Static(build_tui_back_footnote(), classes="back_footnote")
-            with Horizontal(id="metadata_actions"):
-                back_label, cancel_label, next_label = tui_metadata_action_labels()
-                yield Button(back_label, id="back")
-                yield Button(cancel_label, id="cancel")
-                yield Button(next_label, id="next", variant="primary")
+                yield Static(build_tui_back_footnote(), classes="back_footnote")
+                with Horizontal(id="metadata_actions"):
+                    back_label, cancel_label, next_label = tui_metadata_action_labels()
+                    yield Button(back_label, id="back")
+                    yield Button(cancel_label, id="cancel")
+                    yield Button(next_label, id="next", variant="primary")
             yield Footer()
 
         def on_mount(self) -> None:
             self._update_preview()
+
+        def on_descendant_focus(self, event) -> None:
+            for selector in ("#metadata_form_scroll", "#metadata_preview_scroll"):
+                try:
+                    scroll_container = self.query_one(selector, VerticalScroll)
+                except Exception:
+                    continue
+                if not (
+                    scroll_container.can_view_partial(event.widget)
+                    or scroll_container.can_view_entire(event.widget)
+                ):
+                    scroll_container.scroll_to_widget(event.widget, top=False, immediate=True)
+                    break
+            self._update_metadata_scroll_hint()
 
         def on_input_changed(self, _event: Input.Changed) -> None:
             if _event.input.id == "sermon_date":
@@ -1770,6 +1969,15 @@ def run_tui(config_path: str | None = None) -> int:
                 self._sync_date_input_to_choice()
                 self._sync_service_type_for_date()
             self._update_preview()
+
+        def on_mouse_scroll_down(self, _event) -> None:
+            self._update_metadata_scroll_hint()
+
+        def on_mouse_scroll_up(self, _event) -> None:
+            self._update_metadata_scroll_hint()
+
+        def on_resize(self, _event) -> None:
+            self._update_metadata_scroll_hint()
 
         def on_button_pressed(self, event: Button.Pressed) -> None:
             if event.button.id == "back":
@@ -1795,6 +2003,7 @@ def run_tui(config_path: str | None = None) -> int:
 
         def _update_preview(self) -> None:
             preview_widget = self.query_one("#filename_preview", Static)
+            validation_banner = self.query_one("#metadata_validation", Static)
             validation_widget = self.query_one("#validation_status", Static)
             source_widget = self.query_one("#source_status", Static)
             service_type = str(
@@ -1806,6 +2015,7 @@ def run_tui(config_path: str | None = None) -> int:
                 )
             )
             service_config = service_type_by_name(self.app_config, service_type)
+            self._update_metadata_widget_order(service_config)
             info = self._current_info()
             date_text = self._validation_date_text()
             messages = validate_tui_metadata(info, self.app_config, date_text=date_text)
@@ -1820,8 +2030,64 @@ def run_tui(config_path: str | None = None) -> int:
             )
             preview_widget.update(build_tui_preparation_text(preparation))
             validation_widget.update(build_tui_validation_text(messages))
+            validation_banner.update(build_tui_metadata_validation_text(messages))
+            validation_banner.set_classes("status-ok" if not messages else "status-warning")
             source_widget.update(self._source_hint())
             self.query_one("#next", Button).disabled = bool(messages)
+            self._update_metadata_scroll_hint(missing_fields)
+
+        def _update_metadata_widget_order(self, service_type: ServiceTypeConfig) -> None:
+            stack = self.query_one("#metadata_field_stack", Vertical)
+            desired_order = tui_metadata_widget_order(service_type)
+            previous_widget = None
+            for widget_id in desired_order:
+                widget = self.query_one(f"#{widget_id}")
+                if previous_widget is None:
+                    if stack.children and stack.children[0] is not widget:
+                        stack.move_child(widget, before=stack.children[0])
+                else:
+                    stack.move_child(widget, after=previous_widget)
+                previous_widget = widget
+
+        def _update_metadata_scroll_hint(self, missing_fields: tuple[str, ...] | None = None) -> None:
+            if missing_fields is None:
+                date_text = self._validation_date_text()
+                info = self._current_info()
+                missing_fields = missing_tui_metadata_fields(info, self.app_config, date_text=date_text)
+            missing_above, missing_below = self._metadata_missing_field_directions(missing_fields)
+            hint_widget = self.query_one("#metadata_scroll_hint", Static)
+            hint_text = build_tui_metadata_scroll_hint_text(missing_above, missing_below)
+            hint_widget.update(hint_text)
+            hint_widget.display = bool(hint_text)
+            self.query_one("#metadata_scroll_hint_row", Horizontal).display = bool(hint_text)
+
+        def _metadata_missing_field_directions(
+            self, missing_fields: tuple[str, ...]
+        ) -> tuple[tuple[str, ...], tuple[str, ...]]:
+            field_widgets = {
+                "date": "#sermon_date",
+                "title": "#title_input",
+                "bible": "#bible_input",
+                "speaker": "#speaker_input",
+                "folder_note": "#folder_note_input",
+            }
+            scroll_container = self.query_one("#metadata_form_scroll", VerticalScroll)
+            field_regions: list[tuple[str, int, int]] = []
+            for field_name in missing_fields:
+                widget_id = field_widgets.get(field_name)
+                if widget_id is None:
+                    continue
+                try:
+                    widget = self.query_one(widget_id)
+                except Exception:
+                    continue
+                field_regions.append((field_name, widget.region.y, widget.region.bottom))
+            viewport = scroll_container.scrollable_content_region
+            return classify_tui_metadata_fields_by_position(
+                tuple(field_regions),
+                viewport_top=viewport.y,
+                viewport_bottom=viewport.bottom,
+            )
 
         def _validation_messages(self, info: SermonInfo | None = None) -> tuple[str, ...]:
             date_text = self._validation_date_text()
@@ -1896,6 +2162,7 @@ def run_tui(config_path: str | None = None) -> int:
         def _update_field_state(self, service_type: ServiceTypeConfig, missing_fields: tuple[str, ...]) -> None:
             labels = build_tui_field_labels(service_type, missing_fields=missing_fields)
             date_label = "Datum - FEHLT" if "date" in missing_fields else "Datum"
+            self.query_one("#service_type_label", Label).update("Art der Veranstaltung")
             self.query_one("#date_label", Label).update(date_label)
             self.query_one("#title_label", Label).update(labels["title"])
             self.query_one("#bible_label", Label).update(labels["bible"])
@@ -1945,13 +2212,14 @@ def run_tui(config_path: str | None = None) -> int:
                 id="screen_note",
             )
             with VerticalScroll(id="target_folder_scroll"):
-                with Horizontal():
+                with Horizontal(id="target_folder_body"):
                     with Vertical(id="processing_plan_box", classes="panel-neutral"):
                         yield Label("Plan / Auswahl")
                         yield Static(build_tui_target_folder_review_text(self.resolution), id="target_folder_review_text")
                         if self.resolution.status == "multiple_existing":
                             yield DataTable(id="target_folder_table")
                         if self.resolution.status != "missing":
+                            yield Button("Neuen Ordner mit Zusatz erstellen", id="create_with_note")
                             yield Label("Zusatz fuer neuen Ordner", id="folder_note_label")
                             yield Input(value=self.info.folder_note, placeholder="z. B. Taufe oder Gastredner", id="folder_note_override")
                     with Vertical(id="processing_status_box", classes="panel-info"):
@@ -1965,9 +2233,7 @@ def run_tui(config_path: str | None = None) -> int:
             yield Static(build_tui_back_footnote(), classes="back_footnote")
             with Vertical(id="target_folder_actions"):
                 primary_label, primary_id = tui_target_folder_primary_action(self.resolution)
-                yield Button(primary_label, id=primary_id, variant="primary")
-                if self.resolution.status != "missing":
-                    yield Button("Neuen Ordner mit Zusatz erstellen", id="create_with_note")
+                yield Button(primary_label, id="target_folder_primary", variant="primary")
                 with Horizontal(classes="navigation_actions"):
                     yield Button(f"{TUI_BACK_LABEL} zu Metadaten", id="back")
                     yield Button("Abbrechen", id="cancel")
@@ -1984,8 +2250,7 @@ def run_tui(config_path: str | None = None) -> int:
                 visible = tui_target_folder_note_input_visible(self.creating_with_note)
                 self.query_one("#folder_note_label", Label).display = visible
                 self.query_one("#folder_note_override", Input).display = visible
-            primary_id = tui_target_folder_initial_focus_id(self.resolution)
-            self.query_one(f"#{primary_id}", Button).focus()
+            self.query_one("#target_folder_primary", Button).focus()
 
         def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
             self.selected_existing_folder = Path(str(event.row_key.value))
@@ -2003,15 +2268,8 @@ def run_tui(config_path: str | None = None) -> int:
             if event.button.id == "cancel":
                 self._return_to_start()
                 return
-            if event.button.id == "use_suggested":
-                self._open_processing_review(self.resolution.suggested_folder, self.info)
-                return
-            if event.button.id == "use_existing":
-                folder = self.selected_existing_folder or (self.resolution.candidates[0] if self.resolution.candidates else None)
-                if folder is None:
-                    self.notify("Bitte zuerst einen vorhandenen Ordner auswaehlen.")
-                    return
-                self._open_processing_review(folder, self.info)
+            if event.button.id == "target_folder_primary":
+                self._confirm_primary_decision()
                 return
             if event.button.id == "create_with_note":
                 if not self.creating_with_note:
@@ -2020,17 +2278,70 @@ def run_tui(config_path: str | None = None) -> int:
                     note_input = self.query_one("#folder_note_override", Input)
                     note_input.display = True
                     note_input.focus()
-                    event.button.label = "Neuen Ordner verwenden"
-                    self.query_one("#target_folder_action_hint", Static).update(
-                        build_tui_target_folder_action_hint(self.resolution, create_with_note=True)
-                    )
+                    event.button.label = "Doch vorhandenen Tagesordner verwenden"
+                    self._refresh_folder_decision()
+                    try:
+                        self.call_after_refresh(self._scroll_to_folder_note)
+                    except Exception:
+                        pass
                     return
+                self.creating_with_note = False
+                self.query_one("#folder_note_label", Label).display = False
+                self.query_one("#folder_note_override", Input).display = False
+                event.button.label = "Neuen Ordner mit Zusatz erstellen"
+                self._refresh_folder_decision()
+
+        def on_input_changed(self, event: Input.Changed) -> None:
+            if event.input.id == "folder_note_override" and self.creating_with_note:
+                self._refresh_folder_decision()
+                self.call_after_refresh(self._scroll_to_folder_note)
+
+        def _confirm_primary_decision(self) -> None:
+            if self.creating_with_note:
                 note = self.query_one("#folder_note_override", Input).value.strip()
                 if not note:
                     self.notify("Bitte eine Besonderheit fuer den neuen Ordner eingeben.")
                     return
                 info = build_tui_info_with_folder_note(self.info, note)
                 self._open_processing_review(suggest_folder(self.app_config, info), info)
+                return
+            if self.resolution.status == "missing":
+                self._open_processing_review(self.resolution.suggested_folder, self.info)
+                return
+            folder = self.selected_existing_folder or (
+                self.resolution.candidates[0] if self.resolution.candidates else None
+            )
+            if folder is None:
+                self.notify("Bitte zuerst einen vorhandenen Ordner auswaehlen.")
+                return
+            self._open_processing_review(folder, self.info)
+
+        def _scroll_to_folder_note(self) -> None:
+            note_input = self.query_one("#folder_note_override", Input)
+            self.query_one("#target_folder_scroll", VerticalScroll).scroll_to_widget(
+                note_input,
+                top=False,
+                immediate=True,
+            )
+
+        def _refresh_folder_decision(self) -> None:
+            primary = self.query_one("#target_folder_primary", Button)
+            status = self.query_one("#target_folder_status_banner", Static)
+            hint = self.query_one("#target_folder_action_hint", Static)
+            if self.creating_with_note:
+                note = self.query_one("#folder_note_override", Input).value
+                primary.label = "Neuen Ordner mit Zusatz verwenden"
+                primary.disabled = not note.strip()
+                status.update(build_tui_new_folder_decision_text(self.app_config, self.info, note))
+                status.set_classes(tui_new_folder_decision_status_class(self.app_config, self.info, note))
+                hint.update(build_tui_target_folder_action_hint(self.resolution, create_with_note=True))
+                return
+            primary_label, _primary_id = tui_target_folder_primary_action(self.resolution)
+            primary.label = primary_label
+            primary.disabled = False
+            status.update(tui_target_folder_status_message(self.resolution))
+            status.set_classes(tui_target_folder_status_class(self.resolution))
+            hint.update(self._action_hint())
 
         def _open_processing_review(self, target_folder: Path, info: SermonInfo) -> None:
             self.app.push_screen(
@@ -2049,6 +2360,11 @@ def run_tui(config_path: str | None = None) -> int:
             )
 
         def _action_hint(self) -> str:
+            if self.creating_with_note:
+                note = self.query_one("#folder_note_override", Input).value.strip()
+                if not note:
+                    return build_tui_target_folder_action_hint(self.resolution, create_with_note=True) + "\nBitte zuerst einen Zusatz eingeben."
+                return build_tui_target_folder_action_hint(self.resolution, create_with_note=True)
             return build_tui_target_folder_action_hint(
                 self.resolution,
                 selected_folder=self.selected_existing_folder,
@@ -2067,7 +2383,7 @@ def run_tui(config_path: str | None = None) -> int:
             self.app_config = app_config
             self.plan = plan
             self.overwrite_confirmed = plan.overwrite_existing_outputs
-            self.adding_output_suffix = False
+            self.editing_output_names = False
 
         def compose(self) -> ComposeResult:
             conflicts = detect_tui_target_conflicts(self.plan)
@@ -2079,8 +2395,9 @@ def run_tui(config_path: str | None = None) -> int:
                 build_tui_screen_help("Pruefe den Plan. Erst der blaue Button erstellt oder ersetzt Dateien.", ""),
                 id="screen_note",
             )
+            suggestions = unique_output_name_suggestions(self.plan)
             with VerticalScroll(id="processing_review_scroll"):
-                with Horizontal():
+                with Horizontal(id="processing_review_body"):
                     with Vertical(id="processing_plan_box", classes="panel-neutral"):
                         yield Label("Plan / Auswahl")
                         yield Static(build_tui_processing_source_text(self.plan), id="processing_source_text")
@@ -2105,16 +2422,24 @@ def run_tui(config_path: str | None = None) -> int:
                             classes=tui_processing_warning_class(conflicts),
                         )
                         yield Static(build_tui_processing_review_action_text(self.plan), id="processing_action_text")
+                        yield Static(
+                            build_tui_target_file_plan_text(self.plan, conflicts),
+                            id="processing_file_state_text",
+                        )
                         if conflicts:
-                            yield Label("Zusatz fuer neue Dateien", id="output_suffix_label")
-                            yield Input(placeholder="z. B. Teil 2, neu oder Korrektur", id="output_suffix_input")
+                            with Vertical(id="output_rename_fields"):
+                                yield Label("Neuer MP4-Dateiname")
+                                yield Input(value=suggestions["mp4"], id="new_mp4_name")
+                                yield Label("Neuer MP3-Dateiname")
+                                yield Input(value=suggestions["mp3"], id="new_mp3_name")
+                                yield Label("Neuer Name der Zusammenfassung")
+                                yield Input(value=suggestions["summary"], id="new_summary_name")
+                            yield Button("Neue Dateien umbenennen", id="use_output_suffix", variant="primary")
+                            yield Button("Vorhandene Dateien umbenennen und neue Dateien erstellen", id="backup_existing")
+                            yield Button("Vorhandene Dateien ersetzen", id="confirm_overwrite", variant="error")
                         yield Static("Noch nicht gestartet.", id="processing_status")
             yield Static(build_tui_back_footnote(), classes="back_footnote")
             with Vertical(id="processing_actions"):
-                if conflicts:
-                    yield Button("Neue Dateien mit Zusatz speichern", id="use_output_suffix", variant="primary")
-                    yield Button("Vorhandene Dateien sichern und neue Dateien erstellen", id="backup_existing")
-                    yield Button("Vorhandene Dateien ersetzen", id="confirm_overwrite", variant="error")
                 yield Button(TUI_PROCESSING_EXECUTE_LABEL, id="execute", variant="primary")
                 with Horizontal(classes="navigation_actions"):
                     back_label = "Zurueck und anderen Ordner waehlen" if conflicts else TUI_BACK_LABEL
@@ -2125,9 +2450,12 @@ def run_tui(config_path: str | None = None) -> int:
 
         def on_mount(self) -> None:
             if detect_tui_target_conflicts(self.plan):
-                self.query_one("#output_suffix_label", Label).display = False
-                self.query_one("#output_suffix_input", Input).display = False
+                self.query_one("#output_rename_fields", Vertical).display = False
             self._sync_execute_button()
+
+        def on_input_changed(self, event: Input.Changed) -> None:
+            if event.input.id in {"new_mp4_name", "new_mp3_name", "new_summary_name"} and self.editing_output_names:
+                self._update_output_name_preview()
 
         def on_select_changed(self, event: Select.Changed) -> None:
             if event.select.id == "raw_action":
@@ -2148,7 +2476,7 @@ def run_tui(config_path: str | None = None) -> int:
             if event.button.id == "confirm_overwrite":
                 self.overwrite_confirmed = True
                 self.plan = apply_tui_overwrite_confirmation(self.plan)
-                self.query_one("#processing_action_text", Static).update(build_tui_processing_review_action_text(self.plan))
+                self._refresh_plan_widgets()
                 warning = self.query_one("#processing_warning_text", Static)
                 warning.update(build_tui_overwrite_confirmed_text())
                 warning.set_classes("status-warning")
@@ -2157,20 +2485,18 @@ def run_tui(config_path: str | None = None) -> int:
                 self._sync_execute_button()
                 return
             if event.button.id == "use_output_suffix":
-                if not self.adding_output_suffix:
-                    self.adding_output_suffix = True
-                    self.query_one("#output_suffix_label", Label).display = True
-                    suffix_input = self.query_one("#output_suffix_input", Input)
-                    suffix_input.display = True
-                    suffix_input.focus()
-                    event.button.label = "Zusatz anwenden"
+                if not self.editing_output_names:
+                    self.editing_output_names = True
+                    self.query_one("#output_rename_fields", Vertical).display = True
+                    self.query_one("#new_mp4_name", Input).focus()
+                    event.button.label = "Neue Dateinamen verwenden"
+                    self.call_after_refresh(self._scroll_to_output_names)
+                    self.set_timer(0.05, self._scroll_to_output_names)
+                    self._update_output_name_preview()
                     return
                 try:
-                    self.plan = apply_tui_output_suffix(
-                        self.plan,
-                        self.query_one("#output_suffix_input", Input).value,
-                    )
-                except ValueError as exc:
+                    self.plan = self._candidate_output_name_plan()
+                except (ValueError, FileExistsError) as exc:
                     self.notify(str(exc), severity="error")
                     return
                 self._refresh_plan_widgets()
@@ -2186,7 +2512,7 @@ def run_tui(config_path: str | None = None) -> int:
                 self._refresh_plan_widgets()
                 warning = self.query_one("#processing_warning_text", Static)
                 warning.update(
-                    "Status / Warnungen\nSicherung bestaetigt. Vorhandene Dateien erhalten vor dem Schreiben einen __alt-Zeitstempel."
+                    "Status / Warnungen\nUmbenennen bestaetigt.\n" + build_tui_existing_output_rename_text(self.plan)
                 )
                 warning.set_classes("status-warning")
                 self.query_one("#processing_status", Static).update("Bereit zum Sichern und Erstellen.")
@@ -2194,7 +2520,11 @@ def run_tui(config_path: str | None = None) -> int:
                 self._sync_execute_button()
                 return
             if event.button.id == "execute":
-                if detect_tui_target_conflicts(self.plan) and not self.overwrite_confirmed:
+                if (
+                    detect_tui_target_conflicts(self.plan)
+                    and not self.overwrite_confirmed
+                    and not self.plan.backup_existing_outputs
+                ):
                     self.notify("Bitte zuerst bewusst entscheiden, ob vorhandene Dateien ersetzt werden sollen.")
                     return
                 if self.overwrite_confirmed:
@@ -2223,6 +2553,48 @@ def run_tui(config_path: str | None = None) -> int:
             self.query_one("#processing_files_text", Static).update(build_tui_processing_files_text(self.plan))
             self.query_one("#processing_raw_action_text", Static).update(build_tui_processing_raw_action_text(self.plan))
             self.query_one("#processing_action_text", Static).update(build_tui_processing_review_action_text(self.plan))
+            self.query_one("#processing_file_state_text", Static).update(
+                build_tui_target_file_plan_text(self.plan, detect_tui_target_conflicts(self.plan))
+            )
+
+        def _candidate_output_name_plan(self) -> PreparedRecordingPlan:
+            return apply_output_filenames(
+                self.plan,
+                mp4_filename=self.query_one("#new_mp4_name", Input).value,
+                mp3_filename=self.query_one("#new_mp3_name", Input).value,
+                summary_filename=self.query_one("#new_summary_name", Input).value,
+            )
+
+        def _update_output_name_preview(self) -> None:
+            button = self.query_one("#use_output_suffix", Button)
+            status = self.query_one("#processing_status", Static)
+            proposed_names = {
+                "mp4": self.query_one("#new_mp4_name", Input).value,
+                "mp3": self.query_one("#new_mp3_name", Input).value,
+                "summary": self.query_one("#new_summary_name", Input).value,
+            }
+            self.query_one("#processing_file_state_text", Static).update(
+                build_tui_target_file_plan_text(
+                    self.plan,
+                    detect_tui_target_conflicts(self.plan),
+                    proposed_names=proposed_names,
+                )
+            )
+            try:
+                self._candidate_output_name_plan()
+            except (ValueError, FileExistsError) as exc:
+                button.disabled = True
+                status.update(f"Dateinamen noch nicht verwendbar: {exc}")
+            else:
+                button.disabled = False
+                status.update("Die vorgeschlagenen Dateinamen sind frei und koennen verwendet werden.")
+
+        def _scroll_to_output_names(self) -> None:
+            self.query_one("#processing_review_scroll", VerticalScroll).scroll_to_widget(
+                self.query_one("#new_mp4_name", Input),
+                top=False,
+                immediate=True,
+            )
 
         def _hide_conflict_strategy_buttons(self) -> None:
             for selector in ("#use_output_suffix", "#backup_existing", "#confirm_overwrite"):
@@ -2230,7 +2602,7 @@ def run_tui(config_path: str | None = None) -> int:
                     self.query_one(selector, Button).display = False
                 except Exception:
                     continue
-            for selector in ("#output_suffix_label", "#output_suffix_input"):
+            for selector in ("#output_rename_fields",):
                 try:
                     self.query_one(selector).display = False
                 except Exception:
@@ -2328,6 +2700,7 @@ def run_tui(config_path: str | None = None) -> int:
             yield Static("Fertig vorbereitet", id="screen_title")
             skipped_steps = {3} if self.plan.raw_recording is None else set()
             yield Static(build_tui_progress_text(7, skipped_steps), classes="workflow_progress")
+            yield Static(build_tui_processing_success_banner(self.plan, opened_target_folder=self.opened_target_folder), id="completion_banner", classes="status-ok")
             with VerticalScroll(id="completion_scroll"):
                 yield Static(
                     build_tui_processing_success_status(
@@ -2437,8 +2810,55 @@ def run_tui(config_path: str | None = None) -> int:
             width: 1fr;
             padding-right: 2;
         }
-        #preview_box {
+        #metadata_content {
+            height: 1fr;
+            min-height: 0;
+        }
+        #metadata_body {
+            height: 1fr;
+            min-height: 0;
+        }
+        #metadata_field_stack {
+            height: auto;
+            min-height: 0;
+        }
+        #metadata_form_pane {
             width: 1fr;
+            min-height: 0;
+            margin-right: 1;
+        }
+        #metadata_form_scroll, #metadata_preview_scroll {
+            width: 1fr;
+            height: 1fr;
+            min-height: 0;
+            overflow-y: auto;
+        }
+        #metadata_preview_scroll {
+            padding: 1;
+        }
+        #metadata_validation {
+            margin-bottom: 1;
+        }
+        .metadata_section_heading {
+            margin-top: 1;
+            margin-bottom: 0;
+            text-style: bold;
+        }
+        #metadata_basic_heading {
+            margin-top: 0;
+        }
+        #metadata_scroll_hint_row {
+            height: auto;
+            min-height: 0;
+            margin-top: 0;
+            margin-bottom: 1;
+            align: right middle;
+        }
+        .scroll-hint {
+            color: $warning;
+            text-style: bold;
+            padding: 0 1;
+            border: round $warning;
         }
         #preview_heading {
             text-style: bold;
@@ -2459,8 +2879,23 @@ def run_tui(config_path: str | None = None) -> int:
             height: auto;
             margin-top: 1;
         }
-        #metadata_scroll, #target_folder_scroll, #processing_review_scroll, #completion_scroll {
+        #target_folder_scroll, #processing_review_scroll, #completion_scroll {
             height: 1fr;
+            min-height: 0;
+        }
+        #target_folder_body {
+            height: auto;
+            min-height: 0;
+        }
+        #target_folder_body > Vertical {
+            height: auto;
+        }
+        #processing_review_body {
+            height: auto;
+            min-height: 0;
+        }
+        #processing_review_body > Vertical, #output_rename_fields {
+            height: auto;
         }
         #metadata_actions, #target_folder_actions, #completion_actions {
             height: auto;
@@ -2521,6 +2956,9 @@ def run_tui(config_path: str | None = None) -> int:
         }
         .status-danger {
             border: heavy $error;
+        }
+        #completion_banner {
+            margin-bottom: 1;
         }
         #target_folder_table {
             height: 8;
@@ -2600,7 +3038,11 @@ def run_tui(config_path: str | None = None) -> int:
         def on_mount(self) -> None:
             self.push_screen(StartScreen())
 
-    PredigtUploaderTui().run()
+    return PredigtUploaderTui()
+
+
+def run_tui(config_path: str | None = None) -> int:
+    build_tui_app(config_path).run()
     return 0
 
 

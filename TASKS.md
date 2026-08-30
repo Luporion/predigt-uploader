@@ -100,6 +100,15 @@
 - [x] Textual-Doppelklick-Starter und klare Abschlussseite mit manuellen naechsten Schritten ergaenzen
 - [x] Setup und Systemcheck um Textual-Installation und Textual-Pruefung erweitern
 - [x] Release-ZIP-Prozess von hart codierten Preview-Namen auf Parameter/Git-Tag/Fallback umstellen
+- [x] Textual-Abschluss und Fehlerstatus fuer finale Verarbeitung verstaendlicher machen
+- [x] Textual-Blindtest-Feedback zu Gottesdienst-Begriff, Schritten, Zurueck und Klickreduktion umsetzen
+- [x] Textual-Schritte 5 bis 7 fuer kleine Terminals scrollfest machen und CompletionScreen ergaenzen
+- [x] Textual-Standardweg, Fortschrittsanzeige und feste Navigation ueber alle Workflow-Schritte vereinheitlichen
+- [x] Textual-Konflikte durch Dateizusatz, Sicherung oder bewusstes Ersetzen sicher aufloesbar machen
+- [x] Textual-Statusmeldungen hervorheben und Vimeo als manuellen Abschlussschritt nennen
+- [x] Textual-Metadatenformular mit echter Scrollbar, richtungsabhaengigem Pflichtfeld-Hinweis und Pilot-Tests absichern
+- [x] Textual-Zielordnerpruefung mit eindeutigem Zusatzordner-Modus, Live-Zielpfad und dynamischer Primaeraktion abschliessen
+- [x] Textual-Dateikonflikte mit echten Zielnamen, sicherem Umbenennen/Ersetzen und kleinem Pilot-Layout vervollstaendigen
 
 ## Phase 2: Windows-Nutzerfreundlichkeit
 
@@ -118,6 +127,14 @@
 - [ ] Clipauswahl mit Dauer anzeigen
 
 ## Phase 4: Vimeo
+
+- [x] UI-unabhängigen Workflow-State mit Schema-Version vorbereiten
+- [x] lokale Metadaten und tatsächliche Ausgabepfade atomar in `predigt-workflow.json` speichern
+- [x] Vimeo-/WordPress-Status sowie spätere IDs/URLs ohne Secrets vorbereiten
+- [x] Secrets- und Publishing-Architektur dokumentieren
+- [ ] Vimeo-Credentials außerhalb von Git und Statusdatei laden
+- [ ] Vimeo-Upload mit Fortschritt, Fehlerbehandlung und Doppelschutz implementieren
+- [ ] Vimeo-ID und Vimeo-URL nach bestätigtem Erfolg atomar speichern
 
 - [ ] Vimeo API-Zugang dokumentieren
 - [ ] API-Token sicher speichern

@@ -1,5 +1,8 @@
 from datetime import date
+from dataclasses import replace
 from pathlib import Path
+
+import pytest
 
 from predigt_uploader.models import AppConfig, SermonInfo
 from predigt_uploader.processing import (
@@ -9,8 +12,14 @@ from predigt_uploader.processing import (
     build_prepared_recording_plan,
     build_processing_plan_text,
     execute_processing_plan,
+    apply_output_filenames,
+    next_available_numbered_path,
+    planned_existing_output_renames,
+    unique_output_name_suggestions,
+    validate_windows_filename,
     raw_action_label,
 )
+from predigt_uploader.workflow_state import load_workflow_state
 from predigt_uploader.report import build_summary_text, write_summary_file
 
 
@@ -178,6 +187,40 @@ def test_execute_processing_plan_copies_mp4_creates_mp3_summary_and_opens_folder
     assert "MP3 wird erstellt." in result.messages
     assert "Zusammenfassung wird geschrieben." in result.messages
     assert result.messages[-1] == "Fertig."
+    assert result.workflow_state_path == plan.target_folder / "predigt-workflow.json"
+    state = load_workflow_state(result.workflow_state_path)
+    assert state.local_preparation.status == "complete"
+    assert state.paths.final_mp4 == plan.target_mp4
+    assert state.paths.final_mp3 == plan.target_mp3
+    assert state.paths.summary == plan.summary_path
+    assert state.vimeo.step.status == "pending"
+
+
+def test_execute_processing_plan_keeps_local_success_when_state_file_cannot_be_written(monkeypatch, tmp_path):
+    source = tmp_path / "quelle.mp4"
+    source.write_bytes(b"video")
+    config = _config(tmp_path)
+    info = SermonInfo(date(2026, 5, 24), "Lehre", "Johannes 3,16", "Max Muster")
+    plan = build_prepared_recording_plan(config=config, source_mp4=source, info=info)
+
+    def fail_state_write(_state):
+        raise PermissionError("Statusdatei gesperrt")
+
+    monkeypatch.setattr("predigt_uploader.processing.save_workflow_state", fail_state_write)
+
+    result = execute_processing_plan(
+        plan,
+        config,
+        mp3_converter=lambda _source, target, _config: target.write_bytes(b"mp3"),
+        ffmpeg_checker=lambda _config: True,
+    )
+
+    assert result.success is True
+    assert result.workflow_state_path is None
+    assert plan.target_mp4.exists()
+    assert plan.target_mp3.exists()
+    assert plan.summary_path.exists()
+    assert any("Mediendateien bleiben erhalten" in message for message in result.messages)
 
 
 def test_summary_text_and_file_keep_utf8_umlauts(tmp_path):
@@ -341,3 +384,176 @@ def test_execute_processing_plan_can_overwrite_existing_outputs_after_confirmati
     assert plan.target_mp4.read_bytes() == b"video"
     assert plan.target_mp3.read_bytes() == b"neue mp3"
     assert plan.summary_path.read_text(encoding="utf-8-sig")
+
+
+def test_execute_processing_plan_backs_up_existing_outputs_before_writing(tmp_path):
+    source = tmp_path / "quelle.mp4"
+    source.write_bytes(b"video-neu")
+    config = _config(tmp_path)
+    info = SermonInfo(
+        sermon_date=date(2026, 5, 24),
+        title="Lehre",
+        bible_reference="Johannes 3,16",
+        speaker="Max Muster",
+    )
+    plan = build_prepared_recording_plan(
+        config=config,
+        source_mp4=source,
+        info=info,
+        backup_existing_outputs=True,
+    )
+    plan.target_folder.mkdir(parents=True)
+    plan.target_mp4.write_bytes(b"video-alt")
+    plan.target_mp3.write_bytes(b"mp3-alt")
+    plan.summary_path.write_text("zusammenfassung-alt", encoding="utf-8")
+
+    result = execute_processing_plan(
+        plan,
+        config,
+        mp3_converter=lambda _source, target, _config: target.write_bytes(b"mp3-neu"),
+        ffmpeg_checker=lambda _config: True,
+    )
+
+    assert result.success is True
+    assert plan.target_mp4.read_bytes() == b"video-neu"
+    assert plan.target_mp3.read_bytes() == b"mp3-neu"
+    assert len(tuple(plan.target_folder.glob(f"{plan.target_mp4.stem}__alt-*.mp4"))) == 1
+    assert len(tuple(plan.target_folder.glob(f"{plan.target_mp3.stem}__alt-*.mp3"))) == 1
+    assert len(tuple(plan.target_folder.glob("predigt-zusammenfassung__alt-*.txt"))) == 1
+    assert "Vorhandene Ziel-Dateien werden gesichert." in result.messages
+
+
+def test_execute_processing_plan_writes_custom_summary_path(tmp_path):
+    source = tmp_path / "quelle.mp4"
+    source.write_bytes(b"video")
+    config = _config(tmp_path)
+    info = SermonInfo(
+        sermon_date=date(2026, 5, 24),
+        title="Lehre",
+        bible_reference="Johannes 3,16",
+        speaker="Max Muster",
+    )
+    plan = build_prepared_recording_plan(config=config, source_mp4=source, info=info)
+    custom_summary = plan.target_folder / "predigt-zusammenfassung - Korrektur.txt"
+    plan = replace(plan, summary_path=custom_summary)
+
+    result = execute_processing_plan(
+        plan,
+        config,
+        mp3_converter=lambda _source, target, _config: target.write_bytes(b"mp3"),
+        ffmpeg_checker=lambda _config: True,
+    )
+
+    assert result.success is True
+    assert custom_summary.exists()
+    assert not (plan.target_folder / "predigt-zusammenfassung.txt").exists()
+
+
+def test_unique_output_names_use_numbered_windows_safe_suggestions(tmp_path):
+    source = tmp_path / "quelle.mp4"
+    source.write_bytes(b"video")
+    plan = build_prepared_recording_plan(
+        config=_config(tmp_path),
+        source_mp4=source,
+        info=SermonInfo(date(2026, 5, 24), "Lehre", "Johannes 3,16", "Max Muster"),
+    )
+    plan.target_folder.mkdir(parents=True)
+    plan.target_mp4.write_bytes(b"alt")
+    plan.target_mp4.with_name(f"{plan.target_mp4.stem} (2).mp4").write_bytes(b"auch alt")
+    plan.target_mp3.write_bytes(b"alt")
+
+    suggestions = unique_output_name_suggestions(plan)
+
+    assert suggestions["mp4"].endswith(" (3).mp4")
+    assert suggestions["mp3"].endswith(" (2).mp3")
+    assert suggestions["summary"] == plan.summary_path.name
+
+
+def test_apply_output_filenames_accepts_custom_unique_names_and_preserves_extensions(tmp_path):
+    source = tmp_path / "quelle.mp4"
+    source.write_bytes(b"video")
+    plan = build_prepared_recording_plan(
+        config=_config(tmp_path),
+        source_mp4=source,
+        info=SermonInfo(date(2026, 5, 24), "Lehre", "Johannes 3,16", "Max Muster"),
+    )
+
+    renamed = apply_output_filenames(
+        plan,
+        mp4_filename="Predigt neu.mp4",
+        mp3_filename="Predigt neu.mp3",
+        summary_filename="Zusammenfassung neu.txt",
+    )
+
+    assert renamed.target_mp4.name == "Predigt neu.mp4"
+    assert renamed.target_mp3.name == "Predigt neu.mp3"
+    assert renamed.summary_path.name == "Zusammenfassung neu.txt"
+    assert renamed.overwrite_existing_outputs is False
+
+
+@pytest.mark.parametrize(
+    ("filename", "extension"),
+    [
+        ("Predigt?.mp4", ".mp4"),
+        ("CON.mp4", ".mp4"),
+        ("Predigt.mp3", ".mp4"),
+        ("Predigt. ", ".mp4"),
+    ],
+)
+def test_validate_windows_filename_rejects_invalid_names(filename, extension):
+    with pytest.raises(ValueError):
+        validate_windows_filename(filename, expected_suffix=extension)
+
+
+def test_apply_output_filenames_rechecks_custom_name_collision(tmp_path):
+    source = tmp_path / "quelle.mp4"
+    source.write_bytes(b"video")
+    plan = build_prepared_recording_plan(
+        config=_config(tmp_path),
+        source_mp4=source,
+        info=SermonInfo(date(2026, 5, 24), "Lehre", "Johannes 3,16", "Max Muster"),
+    )
+    plan.target_folder.mkdir(parents=True)
+    (plan.target_folder / "Schon da.mp4").write_bytes(b"alt")
+
+    with pytest.raises(FileExistsError, match="Schon da.mp4"):
+        apply_output_filenames(
+            plan,
+            mp4_filename="Schon da.mp4",
+            mp3_filename="Neu.mp3",
+            summary_filename="Neu.txt",
+        )
+
+
+def test_planned_existing_renames_are_explicit_and_do_not_change_files_before_execution(tmp_path):
+    source = tmp_path / "quelle.mp4"
+    source.write_bytes(b"video-neu")
+    config = _config(tmp_path)
+    plan = build_prepared_recording_plan(
+        config=config,
+        source_mp4=source,
+        info=SermonInfo(date(2026, 5, 24), "Lehre", "Johannes 3,16", "Max Muster"),
+    )
+    plan.target_folder.mkdir(parents=True)
+    plan.target_mp4.write_bytes(b"video-alt")
+    plan.target_mp3.write_bytes(b"mp3-alt")
+
+    renames = planned_existing_output_renames(plan)
+
+    assert [(old.name, new.name) for old, new in renames] == [
+        (plan.target_mp4.name, f"{plan.target_mp4.stem}__alt.mp4"),
+        (plan.target_mp3.name, f"{plan.target_mp3.stem}__alt.mp3"),
+    ]
+    assert plan.target_mp4.read_bytes() == b"video-alt"
+    assert not renames[0][1].exists()
+
+    confirmed = replace(plan, backup_existing_outputs=True, existing_output_renames=renames)
+    result = execute_processing_plan(
+        confirmed,
+        config,
+        mp3_converter=lambda _source, target, _config: target.write_bytes(b"mp3-neu"),
+        ffmpeg_checker=lambda _config: True,
+    )
+    assert result.success
+    assert renames[0][1].read_bytes() == b"video-alt"
+    assert renames[1][1].read_bytes() == b"mp3-alt"

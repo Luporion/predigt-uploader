@@ -6,6 +6,18 @@ PredigtUploader soll den lokalen Predigt-Workflow einer Gemeinde unter Windows v
 
 ## Aktueller Entwicklungsstand
 
+### Stabile lokale Baseline (30.08.2026)
+
+Die Baseline trägt die Projektversion `0.2.0`; `pyproject.toml` ist die einzige numerische Versionsquelle. Der Release-Kanal heißt `local-workflow`, sodass der automatische ZIP-Name ohne passenden HEAD-Tag `predigt-uploader-v0.2.0-local-workflow.zip` lautet. Ein Git-Tag wird nicht automatisch erzeugt.
+
+Der lokale Textual-Workflow ist durchgängig funktionsfähig: Startcheck, Quell- oder Rohaufnahmeauswahl, LosslessCut-Aufruf, Exporterkennung und -bestätigung, Metadaten, Zielordnerentscheidung, sichere Dateikonfliktbehandlung, finale MP4/MP3/Zusammenfassung sowie Abschlussbildschirm. Der responsive Aufbau der Schritte 5 bis 7 und die Bottom-Actions bleiben erhalten. Der normale Terminal-Wizard bleibt parallel verfügbar und wird nicht entfernt oder zwangsweise durch Textual ersetzt.
+
+Nach erfolgreicher lokaler Verarbeitung schreiben Wizard und Textual zusätzlich `predigt-workflow.json` in den Zielordner. Das UI-unabhängige Modell verwendet die vorhandenen `SermonInfo`-Daten, speichert die tatsächlichen lokalen Pfade atomar und bereitet `vimeo`, `wordpress_audio` und `wordpress_post` mit Status, IDs und URLs vor. Lokale Vorbereitung steht dann auf `complete`, alle noch nicht implementierten Publishing-Schritte auf `pending`. `predigt-zusammenfassung.txt` bleibt unverändert als menschlich lesbarer Bericht erhalten.
+
+Vimeo-Upload, WordPress-MP3-Upload, WordPress-Beitrag und Vimeo-Embed sind weiterhin nicht automatisiert. Secrets werden weder im Workflow-State noch in der Beispielkonfiguration gespeichert; für die nächste Phase sind Umgebungsvariablen oder eine separate lokale Datei unter `%APPDATA%\PredigtUploader` vorgesehen.
+
+Die vollständige automatische Suite umfasst für diese Baseline 310 bestandene Tests. Systemcheck, Wizard-Startbarkeit, Textual-Import/App-Aufbau und das Release-ZIP `predigt-uploader-v0.2.0-local-workflow.zip` wurden ebenfalls erfolgreich geprüft.
+
 Das Projekt ist ein lokaler CLI-Prototyp in Phase 1. Die Grundstruktur, Fachregeln für Dateinamen und Ordner sowie automatische Tests sind vorhanden. Der Terminal-Wizard wurde nutzerfreundlicher gemacht, prüft Eingaben robuster, behandelt Config-Fehler verständlich, sichert die lokale MP4-Übernahme besser ab, prüft die MP3-Erzeugung genauer, schreibt eine einfache Logdatei und meldet den lokalen Workflow-Endzustand klar. Die abschließende Gegenprüfung sieht keine blockierenden offenen Punkte für Phase 1 mehr.
 Für die erste lokale Testversion gibt es eine manuelle Testanleitung und ein PowerShell-Startskript für den Wizard. Der Ziel-Basisordner wird ohne eigene Config aus dem aktuellen Windows-Benutzer abgeleitet und kann im Wizard für den aktuellen Lauf direkt per Pfadeingabe überschrieben werden.
 Phase 1.5 ergänzt einen einfachen LosslessCut-Schnitt-Assistenten: Rohaufnahme wählen, LosslessCut extern öffnen, Predigt manuell schneiden/exportieren und die exportierte MP4 danach in den bestehenden lokalen Workflow übernehmen.
@@ -48,7 +60,10 @@ Der Release-ZIP-Prozess ist nun tag-basiert und nicht mehr an hart codierte Prev
 Der Textual-Verarbeitungsabschluss ist nun klarer: Beim Start der finalen Verarbeitung zeigt der Status, dass Dateien erstellt, kopiert oder verschoben werden, waehrend gefaehrliche Aktionen gesperrt sind. Nach Erfolg zeigt die rechte Seite Zielpfade, Rohaufnahme-Aktion und nummerierte naechste Schritte; Fehler nennen verstaendlich, dass nichts still ueberschrieben wurde.
 Nach dem Blindtest verwendet Textual fuer die normale Veranstaltung den sichtbaren Begriff `Gottesdienst`, behaelt intern aber den kompatiblen Wert `Predigt` und damit das bestehende Predigt-Dateinamenschema. Die sieben Workflow-Schritte sind nummeriert, Zurueck-Hilfe und Zurueck-Buttons sind vereinheitlicht, konkrete Aktionsnamen ersetzen Ja/Nein- und allgemeine Weiter-Texte. Rohaufnahmen bleiben in Textual standardmaessig sicher am Quellort; Verschieben muss bewusst ausgewaehlt werden. Eine automatische Gottesdienst-Ordnerkennung wie `-1` existiert nicht und wird nicht erfunden; kuenftige Markerregeln sind zentral in `folders.py` vorgesehen.
 Die Textual-Schritte 5 bis 7 sind nun fuer kleinere Terminalgroessen stabiler: lange Inhalte liegen in scrollbaren Bereichen, waehrend Aktionsleisten ausserhalb sichtbar bleiben. Schritt 6 zeigt je nach Ordnerstatus genau eine empfohlene Primaeraktion und blendet das Zusatzfeld erst bei Bedarf ein. Schritt 7 ist als kompakte Checkliste aufgebaut; nach Erfolg erscheint ein eigener `CompletionScreen` mit Zielpfaden, naechsten Schritten und den Aktionen Zielordner oeffnen, neue Aufnahme oder beenden.
-Die aktuelle UI-Politur fuer die Textual-Oberflaeche hebt Fortschritt, Navigation und Status bunter und klarer hervor, verwendet neutrale Info-Panels statt Warnfarben fuer normale Infobloecke und laeuft auch im Textual-Startcheck wieder sauber an.
+Die aktuelle UI-Politur fuer die Textual-Oberflaeche hebt Fortschritt, Navigation und Status bunter und klarer hervor, verwendet neutrale Info-Panels statt Warnfarben fuer normale Infobloecke und laeuft auch im Textual-Startcheck wieder sauber an. Schritt 5 zeigt eine feste Validierungszeile, einen kleinen lokalen Scroll-Hinweis im Formularbereich und eine klarere Aufteilung zwischen Eingaben und Vorschau; Schritt 6 fuehrt die Zusatz-Ordnerwahl eindeutiger und Schritt 7 endet mit einem eigenen gruenen Abschlussbanner.
+Der linke Formularbereich in Textual-Schritt 5 ist wieder ein eigener, hoehenbegrenzter Scrollcontainer mit sichtbarer Scrollbar bei Ueberlauf. Fokusnavigation scrollt verdeckte Felder in den sichtbaren Bereich; der lokale Pflichtfeld-Hinweis unterscheidet fehlende Felder oberhalb und unterhalb des Viewports. Pilot-Tests decken 100x32 und 120x50 Terminalzellen ab.
+Textual-Schritt 6 behandelt den Zusatzordner nun als eigenen Entscheidungszustand: Status, vollstaendiger Live-Zielpfad und grosser Primaerbutton wechseln gemeinsam auf den neuen Ordner. Ein leerer Zusatz bleibt gesperrt, bestehende Zusatzordner werden sichtbar als vorhandene Ziele gemeldet und der Rueckwechsel zum normalen Tagesordner bleibt als Sekundaeraktion moeglich. Der scrollbare Inhalt und die feste Bottom-Navigation sind bei 100x32 Terminalzellen per Pilot geprueft.
+Textual-Schritt 7 zeigt Dateikonflikte nun als kompakte Datei-/Zustand-/Aktionsuebersicht fuer MP4, MP3 und Zusammenfassung. Nutzer koennen vorhandene Dateien nach bewusster Bestaetigung ersetzen, fuer neue Dateien automatisch vorgeschlagene oder eigene Windows-gueltige Namen verwenden oder vorhandene Dateien vorab auf konkret angezeigte `__alt`-Namen umbenennen lassen. Alle neuen Namen werden vor Freigabe erneut auf Kollision geprueft; bis zum finalen Ausfuehren werden keine Dateien veraendert. Konfliktentscheidungen liegen im scrollbaren rechten Bereich, waehrend Ausfuehren und Navigation bei 100x32 sichtbar bleiben.
 
 ## Was Version 1 bereits kann
 
@@ -128,7 +143,7 @@ Die aktuelle UI-Politur fuer die Textual-Oberflaeche hebt Fortschritt, Navigatio
 - Release-ZIP-Namen dynamisch aus Parameter, Git-Tag oder lokalem Fallback ableiten und optionalen Release-Ablauf mit Tests bereitstellen.
 - Textual-Verarbeitung mit klarer Laufmeldung, Abschlussstatus, Folgeaktionen und verstaendlichem Fehlerstatus nachschaerfen.
 - Textual-Begriffe, siebenstufige Nutzerfuehrung, Zurueck-Navigation und sichere Rohaufnahme-Standards anhand des Blindtests verbessern.
-- Textual-Schritte 5 bis 7 scrollfest gestalten, Zielordnerentscheidung vereinfachen und eigenen Abschlussscreen einfuehren.
+- Textual-Schritte 5 bis 7 scrollfest gestalten, Zielordnerentscheidung vereinfachen und eigenen Abschlussscreen einfuehren. Der offene Scroll-Hinweis fuer Schritt 5 ist als kleine lokale Badge im Formularbereich umgesetzt.
 - Textual-Standardweg auf Rohaufnahme ausrichten, alle sieben Schritte mit einer kompakten Fortschrittsanzeige versehen und Aktionsleisten fuer kleine Terminalfenster fest sichtbar halten.
 - Textual-Zieldateikonflikte wahlweise durch eindeutige neue Dateinamen, Sicherung vorhandener Dateien oder bewusst bestaetigtes Ersetzen aufloesen.
 - Textual-Statusbereiche mit einheitlichen Info-, Warn-, Fehler- und Erfolgsmeldungen hervorheben; Vimeo bleibt ausschliesslich ein manueller Folgeschritt.
@@ -149,7 +164,7 @@ Die aktuelle UI-Politur fuer die Textual-Oberflaeche hebt Fortschritt, Navigatio
 
 ## Nächster geplanter Schritt
 
-Den experimentellen Textual-Prototyp auf dem Zielrechner als Zusatztest pruefen: Startmenue, prominenter vMix-Aufnahme-/Stream-Hinweis mit Standardfokus auf "Nein", Rohaufnahme-Auswahl mit LosslessCut-Zwischenschritt, automatische Export-Erkennung mit menschlicher Bestaetigung, Dateiliste mit vielen MP4-Dateien, finale Rohaufnahme-Aktionsauswahl, finale Seite "Vorbereitung pruefen", sofort sichtbares Startfeedback, Fertig-Zusammenfassung im Statusbereich und Fehleranzeige. Der normale Wizard bleibt der produktive Workflow.
+Vimeo-Upload vollständig und robust als UI-unabhängige Publishing-Fachlogik implementieren. Dabei zuerst Credential-Laden außerhalb von Git/Workflow-State, Upload-Fortschritt, verständliche Fehler, Doppelschutz und das atomare Speichern von Vimeo-ID/URL umsetzen und testen. Erst danach soll eine dünne Bedienebene in Textual ergänzt werden; der bestehende lokale Workflow und der normale Wizard bleiben erhalten.
 
 ## Sicherheits-Hinweis
 

@@ -37,7 +37,7 @@ def build_summary_text(plan: ProcessingPlan) -> str:
     )
 
 
-def write_summary_file(plan: ProcessingPlan) -> None:
+def write_summary_file(plan: ProcessingPlan, *, target_path: Path | None = None) -> None:
     target_folder = plan.target_mp4.parent
-    summary_path = summary_file_path(target_folder)
+    summary_path = target_path or summary_file_path(target_folder)
     summary_path.write_text(build_summary_text(plan), encoding="utf-8-sig")

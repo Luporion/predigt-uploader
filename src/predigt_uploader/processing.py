@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import os
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
@@ -11,6 +12,7 @@ from .folders import ensure_folder, suggest_folder
 from .models import AppConfig, ProcessingPlan, SermonInfo
 from .mp3 import Mp3ConversionError, convert_mp4_to_mp3, ffmpeg_available
 from .report import summary_file_path, write_summary_file
+from .workflow_state import completed_local_workflow_state, save_workflow_state
 
 RAW_ACTION_MOVE = "move"
 RAW_ACTION_COPY = "copy"
@@ -40,6 +42,8 @@ class PreparedRecordingPlan:
     raw_action: str = RAW_ACTION_NONE
     mp4_action: str = MP4_ACTION_COPY
     overwrite_existing_outputs: bool = False
+    backup_existing_outputs: bool = False
+    existing_output_renames: tuple[tuple[Path, Path], ...] = ()
     warnings: tuple[str, ...] = ()
 
     @property
@@ -84,6 +88,7 @@ class ProcessingExecutionResult:
     summary_path: Path | None = None
     archived_raw_recording: Path | None = None
     opened_target_folder: bool = False
+    workflow_state_path: Path | None = None
 
 
 def build_prepared_recording_plan(
@@ -96,6 +101,7 @@ def build_prepared_recording_plan(
     mp4_action: str | None = None,
     target_folder_override: Path | None = None,
     overwrite_existing_outputs: bool = False,
+    backup_existing_outputs: bool = False,
     warnings: tuple[str, ...] = (),
 ) -> PreparedRecordingPlan:
     target_folder = target_folder_override or suggest_folder(config, info)
@@ -114,8 +120,103 @@ def build_prepared_recording_plan(
         raw_action=normalize_raw_action(normalized_raw_action),
         mp4_action=normalized_mp4_action,
         overwrite_existing_outputs=overwrite_existing_outputs,
+        backup_existing_outputs=backup_existing_outputs,
         warnings=tuple(warnings),
     )
+
+
+WINDOWS_RESERVED_FILENAMES = {
+    "CON", "PRN", "AUX", "NUL",
+    *(f"COM{index}" for index in range(1, 10)),
+    *(f"LPT{index}" for index in range(1, 10)),
+}
+WINDOWS_INVALID_FILENAME_CHARS = '<>:"/\\|?*'
+
+
+def validate_windows_filename(filename: str, *, expected_suffix: str) -> str:
+    cleaned = filename.strip()
+    if not cleaned:
+        raise ValueError("Bitte einen Dateinamen eingeben.")
+    if len(cleaned) > 255:
+        raise ValueError("Der Dateiname ist zu lang. Bitte einen kuerzeren Namen eingeben.")
+    if any(character in cleaned for character in WINDOWS_INVALID_FILENAME_CHARS) or any(
+        ord(character) < 32 for character in cleaned
+    ):
+        raise ValueError("Der Dateiname enthaelt fuer Windows ungueltige Zeichen.")
+    if cleaned.endswith((" ", ".")):
+        raise ValueError("Der Dateiname darf nicht mit einem Punkt oder Leerzeichen enden.")
+    if Path(cleaned).suffix.casefold() != expected_suffix.casefold():
+        raise ValueError(f"Der Dateiname muss die Endung {expected_suffix} behalten.")
+    if Path(cleaned).stem.upper() in WINDOWS_RESERVED_FILENAMES:
+        raise ValueError("Dieser Dateiname ist unter Windows reserviert. Bitte einen anderen Namen verwenden.")
+    return cleaned
+
+
+def next_available_numbered_path(path: Path) -> Path:
+    if not path.exists():
+        return path
+    for index in range(2, 1000):
+        candidate = path.with_name(f"{path.stem} ({index}){path.suffix}")
+        if not candidate.exists():
+            return candidate
+    raise FileExistsError(f"Kein freier Dateiname gefunden: {path}")
+
+
+def unique_output_name_suggestions(plan: PreparedRecordingPlan) -> dict[str, str]:
+    return {
+        "mp4": next_available_numbered_path(plan.target_mp4).name,
+        "mp3": next_available_numbered_path(plan.target_mp3).name,
+        "summary": next_available_numbered_path(plan.summary_path).name,
+    }
+
+
+def apply_output_filenames(
+    plan: PreparedRecordingPlan,
+    *,
+    mp4_filename: str,
+    mp3_filename: str,
+    summary_filename: str,
+) -> PreparedRecordingPlan:
+    targets = {
+        "mp4": plan.target_folder / validate_windows_filename(mp4_filename, expected_suffix=".mp4"),
+        "mp3": plan.target_folder / validate_windows_filename(mp3_filename, expected_suffix=".mp3"),
+        "summary": plan.target_folder / validate_windows_filename(summary_filename, expected_suffix=".txt"),
+    }
+    collisions = tuple(path for path in targets.values() if path.exists())
+    if collisions:
+        raise FileExistsError(f"Der neue Dateiname ist bereits vorhanden: {collisions[0].name}")
+    mp4_action = plan.mp4_action
+    if mp4_action in {MP4_ACTION_OVERWRITE, MP4_ACTION_KEEP}:
+        mp4_action = MP4_ACTION_COPY
+    return replace(
+        plan,
+        target_mp4=targets["mp4"],
+        target_mp3=targets["mp3"],
+        summary_path=targets["summary"],
+        mp4_action=mp4_action,
+        overwrite_existing_outputs=False,
+        backup_existing_outputs=False,
+        existing_output_renames=(),
+    )
+
+
+def planned_existing_output_renames(plan: PreparedRecordingPlan) -> tuple[tuple[Path, Path], ...]:
+    renames: list[tuple[Path, Path]] = []
+    for path in (plan.target_mp4, plan.target_mp3, plan.summary_path):
+        if path.exists():
+            renames.append((path, _available_named_backup_path(path)))
+    return tuple(renames)
+
+
+def _available_named_backup_path(path: Path) -> Path:
+    candidate = path.with_name(f"{path.stem}__alt{path.suffix}")
+    if not candidate.exists():
+        return candidate
+    for index in range(2, 1000):
+        candidate = path.with_name(f"{path.stem}__alt ({index}){path.suffix}")
+        if not candidate.exists():
+            return candidate
+    raise FileExistsError(f"Kein freier Sicherungsname gefunden: {path}")
 
 
 def normalize_raw_action(action: str) -> str:
@@ -184,6 +285,9 @@ def execute_processing_plan(
     try:
         emit("Zielordner wird erstellt/geprueft.")
         ensure_folder(plan.target_folder)
+        if plan.backup_existing_outputs:
+            emit("Vorhandene Ziel-Dateien werden gesichert.")
+            _backup_existing_outputs(plan)
         _ensure_outputs_can_be_written(plan)
 
         emit(_mp4_status_message(plan.mp4_action, config))
@@ -196,9 +300,31 @@ def execute_processing_plan(
             emit("MP3 wurde uebersprungen: FFmpeg wurde nicht gefunden.")
 
         emit("Zusammenfassung wird geschrieben.")
-        write_summary_file(plan.processing_plan)
+        write_summary_file(plan.processing_plan, target_path=plan.summary_path)
 
         archived_raw = _execute_raw_action(plan, emit)
+
+        state_path: Path | None = None
+        if plan.target_mp3.exists():
+            emit("Lokaler Workflow-Status wird gespeichert.")
+            try:
+                state_path = save_workflow_state(
+                    completed_local_workflow_state(
+                        sermon=plan.info,
+                        raw_recording=plan.raw_recording,
+                        archived_raw_recording=archived_raw,
+                        cut_mp4=plan.source_mp4,
+                        target_folder=plan.target_folder,
+                        final_mp4=plan.target_mp4,
+                        final_mp3=plan.target_mp3,
+                        summary=plan.summary_path,
+                    )
+                )
+            except OSError as exc:
+                emit(
+                    "Workflow-Status konnte nicht gespeichert werden. "
+                    f"Die erstellten Mediendateien bleiben erhalten. Admin-Hinweis: {exc}"
+                )
 
         opened = False
         if config.open_target_folder:
@@ -217,6 +343,7 @@ def execute_processing_plan(
             summary_path=plan.summary_path,
             archived_raw_recording=archived_raw,
             opened_target_folder=opened,
+            workflow_state_path=state_path,
         )
     except (OSError, Mp3ConversionError) as exc:
         error = _user_facing_processing_error(exc)
@@ -257,6 +384,58 @@ def _ensure_outputs_can_be_written(plan: PreparedRecordingPlan) -> None:
             raise FileExistsError(f"Ziel-MP3 existiert bereits: {plan.target_mp3}")
         if plan.summary_path.exists():
             raise FileExistsError(f"Zusammenfassung existiert bereits: {plan.summary_path}")
+
+
+def _backup_existing_outputs(plan: PreparedRecordingPlan, *, now: datetime | None = None) -> tuple[Path, ...]:
+    if plan.existing_output_renames:
+        planned_sources = {source for source, _target in plan.existing_output_renames}
+        unexpected = tuple(
+            path
+            for path in (plan.target_mp4, plan.target_mp3, plan.summary_path)
+            if path.exists() and path not in planned_sources
+        )
+        if unexpected:
+            raise FileExistsError(f"Nicht eingeplante Zieldatei existiert bereits: {unexpected[0]}")
+        return _rename_existing_outputs(plan.existing_output_renames)
+    timestamp = (now or datetime.now()).strftime("%Y%m%d-%H%M%S")
+    backups: list[Path] = []
+    for path in (plan.target_mp4, plan.target_mp3, plan.summary_path):
+        if not path.exists():
+            continue
+        backup = _available_backup_path(path, timestamp)
+        path.rename(backup)
+        backups.append(backup)
+    return tuple(backups)
+
+
+def _rename_existing_outputs(renames: tuple[tuple[Path, Path], ...]) -> tuple[Path, ...]:
+    for source, target in renames:
+        if not source.exists():
+            raise FileNotFoundError(f"Vorhandene Datei wurde nicht gefunden: {source}")
+        if target.exists():
+            raise FileExistsError(f"Umbenennungsziel existiert bereits: {target}")
+    completed: list[tuple[Path, Path]] = []
+    try:
+        for source, target in renames:
+            source.rename(target)
+            completed.append((source, target))
+    except OSError:
+        for source, target in reversed(completed):
+            if target.exists() and not source.exists():
+                target.rename(source)
+        raise
+    return tuple(target for _source, target in renames)
+
+
+def _available_backup_path(path: Path, timestamp: str) -> Path:
+    candidate = path.with_name(f"{path.stem}__alt-{timestamp}{path.suffix}")
+    if not candidate.exists():
+        return candidate
+    for index in range(1, 100):
+        candidate = path.with_name(f"{path.stem}__alt-{timestamp}-{index}{path.suffix}")
+        if not candidate.exists():
+            return candidate
+    raise FileExistsError(f"Kein freier Sicherungsname gefunden: {path}")
 
 
 def _execute_raw_action(plan: PreparedRecordingPlan, emit: ProgressCallback) -> Path | None:

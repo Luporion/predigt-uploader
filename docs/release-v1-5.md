@@ -11,31 +11,31 @@ Im Projektordner:
 .\scripts\make-release-zip.ps1
 ```
 
-Fuer ein bestimmtes Preview-Release kann ein Tag direkt uebergeben werden:
+Für ein bestimmtes Release kann ein Tag direkt übergeben werden:
 
 ```powershell
-.\scripts\make-release-zip.ps1 -ReleaseTag v0.1.9-textual-workflow-preview-r3
+.\scripts\make-release-zip.ps1 -ReleaseTag v0.2.0-local-workflow
 ```
 
 Das Skript erstellt dann zum Beispiel:
 
 ```text
-dist\predigt-uploader-v0.1.9-textual-workflow-preview-r3.zip
+dist\predigt-uploader-v0.2.0-local-workflow.zip
 ```
 
 Empfohlener Release-Ablauf:
 
 1. `.\scripts\test.ps1`
 2. committen
-3. Git-Tag setzen, zum Beispiel `v0.1.9-textual-workflow-preview-r3`
+3. Git-Tag setzen, zum Beispiel `v0.2.0-local-workflow`
 4. `.\scripts\make-release-zip.ps1`
 
-Wenn auf `HEAD` ein passender Git-Tag liegt, baut `make-release-zip.ps1` den ZIP-Namen automatisch daraus. Ohne Tag verwendet das Skript einen lokalen Namen auf Basis der Version aus `pyproject.toml`.
+`pyproject.toml` ist die einzige Quelle der numerischen Version. Wenn auf `HEAD` ein zu dieser Version passender Git-Tag liegt, baut `make-release-zip.ps1` den ZIP-Namen automatisch daraus. Tags mit einer anderen numerischen Version werden ignoriert; ein ausdrücklich übergebener unpassender `-ReleaseTag` führt zu einem Fehler. Ohne passenden Tag ergänzt das Skript den Baseline-Kanal `local-workflow`; bei Version `0.2.0` entsteht daher ebenfalls `predigt-uploader-v0.2.0-local-workflow.zip`.
 
 Alternativ kann der komplette Ablauf ueber ein Skript gestartet werden:
 
 ```powershell
-.\scripts\release.ps1 -ReleaseTag v0.1.9-textual-workflow-preview-r3
+.\scripts\release.ps1 -ReleaseTag v0.2.0-local-workflow
 ```
 
 Dieses Skript bricht ab, wenn die Tests fehlschlagen.
@@ -43,9 +43,13 @@ Dieses Skript bricht ab, wenn die Tests fehlschlagen.
 ## Diese Dateien und Ordner gehören in die ZIP
 
 - `src/`
-- `scripts/`
+- `scripts/setup-local.ps1`
+- `scripts/check-system.ps1`
+- `scripts/run-wizard.ps1`
+- `scripts/run-tui.ps1`
 - `docs/install-v1-5.md`
 - `docs/manual-test-v1-5.md`
+- `docs/publishing-architecture.md`
 - `README.md`
 - `pyproject.toml`
 - `config.example.toml`
@@ -67,6 +71,8 @@ Dieses Skript bricht ab, wenn die Tests fehlschlagen.
 - `__pycache__/`
 - `.pytest_cache/`
 - echte `config.toml`
+- `secrets.toml` und `*.secrets.toml`
+- Test- und Release-Werkzeuge wie `scripts/test.ps1`, `scripts/release.ps1` und `scripts/make-release-zip.ps1`
 - Test-Ausgabedateien oder lokale Aufnahme-/Exportdateien
 
 ## Auf dem Gemeinderechner entpacken

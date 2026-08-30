@@ -1,9 +1,13 @@
+import asyncio
 import sys
 from datetime import date, datetime
 import os
 from pathlib import Path
 
+import pytest
+
 from predigt_uploader import cli
+import predigt_uploader.tui_app as tui_module
 from predigt_uploader.config import ConfigLoadError
 from predigt_uploader.folders import resolve_folder, suggest_folder
 from predigt_uploader.models import AppConfig, SermonInfo
@@ -43,11 +47,15 @@ from predigt_uploader.tui_app import (
     build_tui_processing_review_action_text,
     build_tui_processing_started_status,
     build_tui_processing_success_status,
+    build_tui_processing_success_banner,
     tui_processing_warning_class,
     build_tui_target_conflict_text,
     build_tui_target_conflict_decision_text,
+    build_tui_target_file_plan_text,
+    build_tui_existing_output_rename_text,
     build_tui_target_folder_review_text,
     build_tui_target_folder_action_hint,
+    build_tui_new_folder_decision_text,
     build_tui_back_footnote,
     build_tui_info_with_folder_note,
     build_tui_losslesscut_text,
@@ -56,6 +64,13 @@ from predigt_uploader.tui_app import (
     build_tui_settings_lines,
     build_tui_screen_help,
     build_tui_step_title,
+    build_tui_metadata_validation_text,
+    build_tui_metadata_scroll_hint_text,
+    build_tui_app,
+    classify_tui_metadata_fields_by_position,
+    tui_metadata_optional_field_keys,
+    tui_metadata_required_field_keys,
+    tui_metadata_widget_order,
     build_tui_start_safety_text,
     build_tui_start_status_text,
     build_tui_validation_text,
@@ -88,6 +103,7 @@ from predigt_uploader.tui_app import (
     tui_target_folder_primary_action,
     tui_target_folder_status_class,
     tui_target_folder_status_message,
+    tui_new_folder_decision_status_class,
     tui_service_type_display_name,
     tui_service_type_options,
     tui_service_type_after_date_change,
@@ -906,6 +922,46 @@ def test_tui_folder_note_builds_new_target_folder_name(tmp_path):
     assert suggest_folder(config, changed) == tmp_path / "Aufnahmen" / "2026" / "2026-04-29 - Test"
 
 
+def test_tui_new_folder_decision_shows_live_target_and_existing_collision(tmp_path):
+    config = AppConfig(
+        vmix_storage=tmp_path / "vmix",
+        recordings_base=tmp_path / "Aufnahmen",
+        mp3_base=tmp_path / "Predigten",
+    )
+    info = SermonInfo(
+        sermon_date=date(2026, 4, 29),
+        title="Lehre",
+        bible_reference="Johannes 3,16",
+        speaker="Max Muster",
+    )
+    target = tmp_path / "Aufnahmen" / "2026" / "2026-04-29 - Test"
+
+    text = build_tui_new_folder_decision_text(config, info, " Test ")
+
+    assert "Neuer Ordner mit Zusatz" in text
+    assert f"Neuer Zielordner: {target}" in text
+    assert "Der vorhandene Tagesordner bleibt unveraendert." in text
+    assert tui_new_folder_decision_status_class(config, info, "Test") == "status-info"
+
+    target.mkdir(parents=True)
+    collision_text = build_tui_new_folder_decision_text(config, info, "Test")
+    assert "Dieser Zielordner existiert bereits." in collision_text
+    assert "Dateikonflikte werden weiterhin in Schritt 7 geprueft." in collision_text
+    assert tui_new_folder_decision_status_class(config, info, "Test") == "status-warning"
+
+
+def test_tui_new_folder_decision_requires_non_empty_note(tmp_path):
+    config = AppConfig(
+        vmix_storage=tmp_path / "vmix",
+        recordings_base=tmp_path / "Aufnahmen",
+        mp3_base=tmp_path / "Predigten",
+    )
+    info = SermonInfo(sermon_date=date(2026, 4, 29), title="", bible_reference="", speaker="")
+
+    assert "Bitte zuerst einen Zusatz eingeben." in build_tui_new_folder_decision_text(config, info, "   ")
+    assert tui_new_folder_decision_status_class(config, info, "   ") == "status-warning"
+
+
 def test_tui_preparation_uses_shared_filename_folder_and_summary_helpers(tmp_path):
     source = tmp_path / "quelle.mp4"
     source.write_bytes(b"video")
@@ -1100,6 +1156,59 @@ def test_tui_target_conflicts_detect_existing_mp4_mp3_and_summary(tmp_path):
     assert "bewusst entscheidest" in warning_text
     assert tui_processing_warning_class(conflicts) == "status-danger"
     assert tui_processing_warning_class(()) == "status-ok"
+
+
+@pytest.mark.parametrize(
+    ("kind", "attribute"),
+    (("mp4", "target_mp4"), ("mp3", "target_mp3"), ("summary", "summary_path")),
+)
+def test_tui_detects_each_output_conflict_separately(tmp_path, kind, attribute):
+    source = tmp_path / "quelle.mp4"
+    source.write_bytes(b"video")
+    config = AppConfig(tmp_path / "vmix", tmp_path / "Aufnahmen", tmp_path / "Predigten")
+    info = build_tui_metadata_info(
+        config=config,
+        date_text="2026-05-24",
+        service_type_name="Predigt",
+        title="Lehre",
+        bible_reference="Johannes 3,16",
+        speaker="Max Muster",
+        folder_note="",
+    )
+    plan = build_tui_processing_plan(config=config, source_mp4=source, raw_recording=None, already_cut=True, info=info)
+    plan.target_folder.mkdir(parents=True)
+    path = getattr(plan, attribute)
+    path.write_bytes(b"alt")
+
+    assert [conflict.kind for conflict in detect_tui_target_conflicts(plan)] == [kind]
+
+
+def test_tui_file_plan_distinguishes_free_and_conflicting_outputs(tmp_path):
+    source = tmp_path / "quelle.mp4"
+    source.write_bytes(b"video")
+    config = AppConfig(tmp_path / "vmix", tmp_path / "Aufnahmen", tmp_path / "Predigten")
+    info = build_tui_metadata_info(
+        config=config,
+        date_text="2026-05-24",
+        service_type_name="Predigt",
+        title="Lehre",
+        bible_reference="Johannes 3,16",
+        speaker="Max Muster",
+        folder_note="",
+    )
+    plan = build_tui_processing_plan(config=config, source_mp4=source, raw_recording=None, already_cut=True, info=info)
+    plan.target_folder.mkdir(parents=True)
+    plan.target_mp4.write_bytes(b"alt")
+
+    text = build_tui_target_file_plan_text(
+        plan,
+        detect_tui_target_conflicts(plan),
+        proposed_names={"mp4": "Predigt (2).mp4", "mp3": plan.target_mp3.name, "summary": plan.summary_path.name},
+    )
+
+    assert f"MP4 | KONFLIKT: {plan.target_mp4.name} | Neue Datei: Predigt (2).mp4" in text
+    assert f"MP3 | frei | wird erstellt: {plan.target_mp3.name}" in text
+    assert f"Zusammenfassung | frei | wird erstellt: {plan.summary_path.name}" in text
 
 
 def test_tui_target_conflict_decision_text_is_clear_for_users(tmp_path):
@@ -1327,6 +1436,12 @@ def test_tui_backup_strategy_requires_selection_then_enables_execute(tmp_path):
     assert "Erst entscheiden" in blocked_label
     assert backup_plan.backup_existing_outputs is True
     assert backup_plan.overwrite_existing_outputs is False
+    assert backup_plan.existing_output_renames
+    assert plan.target_mp4.exists()
+    assert "->" in build_tui_existing_output_rename_text(backup_plan)
+    backup_matrix = build_tui_target_file_plan_text(backup_plan, detect_tui_target_conflicts(backup_plan))
+    assert f"Vorhandene Datei -> {plan.target_mp4.stem}__alt.mp4" in backup_matrix
+    assert f"neue Datei -> {plan.target_mp4.name}" in backup_matrix
     assert enabled is False
     assert enabled_label == "Gesicherte Dateien behalten und finale Dateien erstellen"
 
@@ -1656,7 +1771,8 @@ def test_tui_processing_button_feedback_status_is_visible(tmp_path):
     assert "Bitte warten. Dateien werden erstellt/kopiert/verschoben." in started
     assert TUI_PROCESSING_RUNNING_LABEL == "Verarbeitung laeuft..."
     assert TUI_PROCESSING_DONE_LABEL == "Fertig vorbereitet"
-    assert "Fertig. Die Dateien wurden vorbereitet." in success
+    assert "Lokale Vorbereitung abgeschlossen." in success
+    assert "Workflow-Status:" in success
     assert "Der Zielordner wurde geoeffnet." in success
     assert "Naechste Schritte:" in success
     assert "1. Zielordner kontrollieren." in success
@@ -1730,14 +1846,404 @@ def test_tui_processing_finished_actions_are_available_after_success():
     )
 
 
+def test_tui_metadata_validation_text_reports_missing_or_complete_fields():
+    assert build_tui_metadata_validation_text(()) == "Alle Pflichtfelder ausgefüllt."
+    assert build_tui_metadata_validation_text(("Hauptbibelstelle fehlt.", "Redner / Leitung fehlt.")) == (
+        "Noch auszufüllen: Hauptbibelstelle, Redner / Leitung"
+    )
+
+
+def test_tui_metadata_scroll_hint_text_shows_only_hidden_missing_fields():
+    assert build_tui_metadata_scroll_hint_text((), ("bible", "speaker")) == "↓ 2 Pflichtfelder weiter unten"
+    assert build_tui_metadata_scroll_hint_text((), ("bible",)) == "↓ Pflichtfeld weiter unten"
+    assert build_tui_metadata_scroll_hint_text(("bible",), ()) == "↑ Pflichtfeld weiter oben"
+    assert build_tui_metadata_scroll_hint_text(("bible", "speaker"), ()) == "↑ 2 Pflichtfelder weiter oben"
+    assert build_tui_metadata_scroll_hint_text((), ()) == ""
+
+
+def test_tui_metadata_field_positions_distinguish_above_visible_and_below():
+    above, below = classify_tui_metadata_fields_by_position(
+        (("title", 3, 4), ("bible", 8, 10), ("speaker", 14, 16)),
+        viewport_top=5,
+        viewport_bottom=12,
+    )
+
+    assert above == ("title",)
+    assert below == ("speaker",)
+
+
+def test_tui_metadata_field_order_groups_required_before_optional_fields(tmp_path):
+    config = AppConfig(
+        vmix_storage=tmp_path / "vmix",
+        recordings_base=tmp_path / "Aufnahmen",
+        mp3_base=tmp_path / "Predigten",
+    )
+
+    predigt = service_type_by_name(config, "Predigt")
+    bibelstunde = service_type_by_name(config, "Bibelstunde")
+
+    assert tui_metadata_required_field_keys(predigt) == ("title", "bible", "speaker")
+    assert tui_metadata_optional_field_keys(predigt) == ("folder_note",)
+    assert tui_metadata_widget_order(predigt)[0:8] == (
+        "metadata_basic_heading",
+        "service_type_label",
+        "service_type",
+        "service_type_help",
+        "date_label",
+        "date_choice",
+        "sermon_date",
+        "metadata_required_heading",
+    )
+    assert tui_metadata_widget_order(predigt).index("title_label") < tui_metadata_widget_order(predigt).index(
+        "metadata_optional_heading"
+    )
+    assert tui_metadata_required_field_keys(bibelstunde) == ("bible", "speaker")
+    assert tui_metadata_optional_field_keys(bibelstunde)[0] == "title"
+    assert tui_metadata_widget_order(bibelstunde).index("bible_label") < tui_metadata_widget_order(
+        bibelstunde
+    ).index("title_label")
+    assert tui_metadata_widget_order(bibelstunde).index("speaker_label") < tui_metadata_widget_order(
+        bibelstunde
+    ).index("metadata_optional_heading")
+
+
+def test_tui_metadata_screen_scrolls_at_small_height_and_keeps_actions_visible(tmp_path, monkeypatch):
+    cut_folder = tmp_path / "Schnitt"
+    cut_folder.mkdir()
+    (cut_folder / "aufnahme.mp4").write_bytes(b"video")
+    config = AppConfig(
+        vmix_storage=tmp_path / "vmix",
+        recordings_base=tmp_path / "Aufnahmen",
+        mp3_base=tmp_path / "Predigten",
+        cut_mp4_folder=cut_folder,
+    )
+    monkeypatch.setattr(tui_module, "load_tui_config", lambda _path=None: config)
+
+    async def exercise() -> None:
+        from textual.containers import VerticalScroll
+        from textual.widgets import Button, Input, Static
+
+        app = build_tui_app()
+        async with app.run_test(size=(100, 32)) as pilot:
+            for selector in ("#new", "#confirm", "#cut", "#newest"):
+                app.screen.query_one(selector, Button).press()
+                await pilot.pause(0.05)
+            await pilot.pause(0.2)
+
+            form_scroll = app.screen.query_one("#metadata_form_scroll", VerticalScroll)
+            preview_scroll = app.screen.query_one("#metadata_preview_scroll", VerticalScroll)
+            actions = app.screen.query_one("#metadata_actions")
+            next_button = app.screen.query_one("#next", Button)
+            hint = app.screen.query_one("#metadata_scroll_hint", Static)
+
+            assert form_scroll.max_scroll_y > 0
+            assert form_scroll.show_vertical_scrollbar, (
+                form_scroll.max_scroll_y,
+                form_scroll.scrollable_size,
+                form_scroll.scrollable_content_region,
+                form_scroll.styles.overflow_y,
+                form_scroll.scrollbars_enabled,
+            )
+            assert preview_scroll is not form_scroll
+            assert actions.region.bottom <= app.screen.region.bottom
+            assert next_button.disabled
+            assert "weiter unten" in str(hint.render())
+
+            form_scroll.scroll_end(animate=False)
+            await pilot.pause()
+            assert "weiter oben" in str(hint.render())
+            app.screen.query_one("#service_type").focus()
+            await pilot.press("tab", "tab", "tab", "tab", "tab")
+            await pilot.pause()
+            assert app.focused.id == "speaker_input"
+            assert form_scroll.can_view_partial(app.screen.query_one("#speaker_input", Input))
+
+            app.screen.query_one("#title_input", Input).value = "Lehre statt Leere"
+            app.screen.query_one("#bible_input", Input).value = "Johannes 3,16"
+            app.screen.query_one("#speaker_input", Input).value = "Max Muster"
+            await pilot.pause()
+            assert not hint.display
+            assert not next_button.disabled
+
+    asyncio.run(exercise())
+
+
+def test_tui_metadata_screen_fields_are_reachable_at_large_height(tmp_path, monkeypatch):
+    cut_folder = tmp_path / "Schnitt"
+    cut_folder.mkdir()
+    (cut_folder / "aufnahme.mp4").write_bytes(b"video")
+    config = AppConfig(
+        vmix_storage=tmp_path / "vmix",
+        recordings_base=tmp_path / "Aufnahmen",
+        mp3_base=tmp_path / "Predigten",
+        cut_mp4_folder=cut_folder,
+    )
+    monkeypatch.setattr(tui_module, "load_tui_config", lambda _path=None: config)
+
+    async def exercise() -> None:
+        from textual.widgets import Button
+
+        app = build_tui_app()
+        async with app.run_test(size=(120, 50)) as pilot:
+            for selector in ("#new", "#confirm", "#cut", "#newest"):
+                app.screen.query_one(selector, Button).press()
+                await pilot.pause(0.05)
+            await pilot.pause(0.2)
+
+            required_heading = app.screen.query_one("#metadata_required_heading")
+            optional_heading = app.screen.query_one("#metadata_optional_heading")
+            actions = app.screen.query_one("#metadata_actions")
+            assert required_heading.region.y < optional_heading.region.y
+            assert actions.region.bottom <= app.screen.region.bottom
+
+            app.screen.query_one("#service_type").focus()
+            await pilot.press("tab", "tab", "tab")
+            assert app.focused.id == "title_input"
+
+    asyncio.run(exercise())
+
+
+def test_tui_target_folder_decision_switches_modes_at_small_height(tmp_path, monkeypatch):
+    cut_folder = tmp_path / "Schnitt"
+    cut_folder.mkdir()
+    (cut_folder / "aufnahme.mp4").write_bytes(b"video")
+    config = AppConfig(
+        vmix_storage=tmp_path / "vmix",
+        recordings_base=tmp_path / "Aufnahmen",
+        mp3_base=tmp_path / "Predigten",
+        cut_mp4_folder=cut_folder,
+    )
+    existing = suggest_folder(
+        config,
+        SermonInfo(sermon_date=date.today(), title="", bible_reference="", speaker=""),
+    )
+    existing.mkdir(parents=True)
+    monkeypatch.setattr(tui_module, "load_tui_config", lambda _path=None: config)
+
+    async def exercise() -> None:
+        from textual.containers import VerticalScroll
+        from textual.widgets import Button, Input, Static
+
+        app = build_tui_app()
+        async with app.run_test(size=(100, 32)) as pilot:
+            for selector in ("#new", "#confirm", "#cut", "#newest"):
+                app.screen.query_one(selector, Button).press()
+                await pilot.pause(0.05)
+            app.screen.query_one("#title_input", Input).value = "Lehre"
+            app.screen.query_one("#bible_input", Input).value = "Johannes 3,16"
+            app.screen.query_one("#speaker_input", Input).value = "Max Muster"
+            await pilot.pause()
+            app.screen.query_one("#next", Button).press()
+            await pilot.pause(0.2)
+
+            primary = app.screen.query_one("#target_folder_primary", Button)
+            secondary = app.screen.query_one("#create_with_note", Button)
+            status = app.screen.query_one("#target_folder_status_banner", Static)
+            actions = app.screen.query_one("#target_folder_actions")
+            scroll = app.screen.query_one("#target_folder_scroll", VerticalScroll)
+            assert "Vorhandenen Ordner verwenden" in str(primary.label)
+            assert "Vorhandener Tagesordner gefunden" in str(status.render())
+            assert actions.region.bottom <= app.screen.region.bottom
+
+            secondary.press()
+            await pilot.pause()
+            note_input = app.screen.query_one("#folder_note_override", Input)
+            assert note_input.display
+            assert app.focused is note_input
+            assert primary.disabled
+            assert str(primary.label) == "Neuen Ordner mit Zusatz verwenden"
+            assert str(secondary.label) == "Doch vorhandenen Tagesordner verwenden"
+            assert "Vorhandener Tagesordner gefunden" not in str(status.render())
+
+            note_input.value = "test"
+            await pilot.pause()
+            await pilot.wait_for_animation()
+            expected = existing.with_name(f"{existing.name} - test")
+            assert not primary.disabled
+            assert f"Neuer Zielordner: {expected}" in str(status.render())
+            assert scroll.can_view_partial(note_input), (
+                scroll.region,
+                scroll.scrollable_content_region,
+                scroll.scroll_y,
+                scroll.max_scroll_y,
+                note_input.region,
+            )
+            assert actions.region.bottom <= app.screen.region.bottom
+
+            expected.mkdir()
+            note_input.value = "test "
+            await pilot.pause()
+            assert "Dieser Zielordner existiert bereits." in str(status.render())
+            assert status.has_class("status-warning")
+
+            secondary.press()
+            await pilot.pause()
+            assert not note_input.display
+            assert "Vorhandenen Ordner verwenden" in str(primary.label)
+            assert "Vorhandener Tagesordner gefunden" in str(status.render())
+            assert not primary.disabled
+            primary.press()
+            await pilot.pause(0.2)
+            assert app.screen.plan.target_folder == existing
+            app.pop_screen()
+            await pilot.pause(0.2)
+            app.screen.query_one("#create_with_note", Button).press()
+            await pilot.pause()
+            app.screen.query_one("#folder_note_override", Input).value = "neu"
+            await pilot.pause()
+            app.screen.query_one("#target_folder_primary", Button).press()
+            await pilot.pause(0.2)
+            assert app.screen.plan.target_folder == existing.with_name(f"{existing.name} - neu")
+
+    asyncio.run(exercise())
+
+
+def test_tui_processing_conflicts_are_responsive_and_validate_new_names(tmp_path, monkeypatch):
+    cut_folder = tmp_path / "Schnitt"
+    cut_folder.mkdir()
+    source = cut_folder / "aufnahme.mp4"
+    source.write_bytes(b"video-neu")
+    config = AppConfig(
+        vmix_storage=tmp_path / "vmix",
+        recordings_base=tmp_path / "Aufnahmen",
+        mp3_base=tmp_path / "Predigten",
+        cut_mp4_folder=cut_folder,
+    )
+    service_name = default_tui_service_type_name(config, date.today())
+    info = build_tui_metadata_info(
+        config=config,
+        date_text=date.today().isoformat(),
+        service_type_name=service_name,
+        title="Lehre",
+        bible_reference="Johannes 3,16",
+        speaker="Max Muster",
+        folder_note="",
+    )
+    expected_plan = build_tui_processing_plan(
+        config=config,
+        source_mp4=source,
+        raw_recording=None,
+        already_cut=True,
+        info=info,
+    )
+    expected_plan.target_folder.mkdir(parents=True)
+    expected_plan.target_mp4.write_bytes(b"mp4-alt")
+    expected_plan.target_mp3.write_bytes(b"mp3-alt")
+    expected_plan.summary_path.write_text("summary-alt", encoding="utf-8")
+    monkeypatch.setattr(tui_module, "load_tui_config", lambda _path=None: config)
+
+    async def exercise() -> None:
+        from textual.containers import VerticalScroll
+        from textual.widgets import Button, Input, Static
+
+        app = build_tui_app()
+        async with app.run_test(size=(100, 32)) as pilot:
+            for selector in ("#new", "#confirm", "#cut", "#newest"):
+                app.screen.query_one(selector, Button).press()
+                await pilot.pause(0.05)
+            app.screen.query_one("#title_input", Input).value = "Lehre"
+            app.screen.query_one("#bible_input", Input).value = "Johannes 3,16"
+            app.screen.query_one("#speaker_input", Input).value = "Max Muster"
+            await pilot.pause()
+            app.screen.query_one("#next", Button).press()
+            await pilot.pause(0.2)
+            app.screen.query_one("#target_folder_primary", Button).press()
+            await pilot.pause(0.2)
+
+            scroll = app.screen.query_one("#processing_review_scroll", VerticalScroll)
+            actions = app.screen.query_one("#processing_actions")
+            warning = app.screen.query_one("#processing_warning_text", Static)
+            file_state = app.screen.query_one("#processing_file_state_text", Static)
+            back = app.screen.query_one("#back", Button)
+            rename = app.screen.query_one("#use_output_suffix", Button)
+            assert "STOPP" in str(warning.render())
+            assert warning.has_class("status-danger")
+            assert "MP4 | KONFLIKT" in str(file_state.render())
+            assert "MP3 | KONFLIKT" in str(file_state.render())
+            assert str(back.label) == "Zurueck und anderen Ordner waehlen"
+            assert actions.region.bottom <= app.screen.region.bottom
+            assert scroll.max_scroll_y > 0
+
+            rename.press()
+            await pilot.pause()
+            await pilot.wait_for_animation()
+            mp4_name = app.screen.query_one("#new_mp4_name", Input)
+            assert mp4_name.value.endswith(" (2).mp4")
+            assert scroll.can_view_partial(mp4_name), (
+                scroll.region,
+                scroll.scroll_y,
+                scroll.max_scroll_y,
+                mp4_name.region,
+            )
+
+            mp4_name.value = "ungueltig?.mp4"
+            await pilot.pause()
+            assert rename.disabled
+            mp4_name.value = expected_plan.target_mp4.name
+            await pilot.pause()
+            assert rename.disabled
+            mp4_name.value = "Eigener neuer Predigtname.mp4"
+            await pilot.pause()
+            assert not rename.disabled
+            assert expected_plan.target_mp4.read_bytes() == b"mp4-alt"
+            assert expected_plan.target_mp3.read_bytes() == b"mp3-alt"
+            assert expected_plan.summary_path.read_text(encoding="utf-8") == "summary-alt"
+
+            back.press()
+            await pilot.pause(0.2)
+            assert app.screen.query_one("#target_folder_primary", Button)
+
+    asyncio.run(exercise())
+
+
+def test_tui_processing_success_banner_is_green_and_clear(tmp_path):
+    source = tmp_path / "quelle.mp4"
+    source.write_bytes(b"video")
+    config = AppConfig(
+        vmix_storage=tmp_path / "vmix",
+        recordings_base=tmp_path / "Aufnahmen",
+        mp3_base=tmp_path / "Predigten",
+    )
+    info = build_tui_metadata_info(
+        config=config,
+        date_text="2026-05-24",
+        service_type_name="Predigt",
+        title="Lehre statt Leere",
+        bible_reference="Johannes 3,16",
+        speaker="Max Muster",
+        folder_note="",
+    )
+    plan = build_tui_processing_plan(
+        config=config,
+        source_mp4=source,
+        raw_recording=None,
+        already_cut=True,
+        info=info,
+    )
+
+    banner = build_tui_processing_success_banner(plan, opened_target_folder=True)
+
+    assert banner.startswith("Fertig vorbereitet")
+    assert "Die Dateien wurden erstellt und der Zielordner wurde geoeffnet." in banner
+
+
 def test_tui_steps_five_to_seven_keep_scroll_areas_and_completion_screen():
     source = (Path(__file__).resolve().parents[1] / "src" / "predigt_uploader" / "tui_app.py").read_text(
         encoding="utf-8"
     )
 
-    assert 'VerticalScroll(id="metadata_scroll")' in source
-    assert 'with Vertical(id="form", classes="panel-neutral")' in source
-    assert 'with Vertical(id="preview_box", classes="panel-info")' in source
+    assert 'yield Static("", id="metadata_validation", classes="status-info")' in source
+    assert 'with Vertical(id="metadata_form_pane")' in source
+    assert 'with Vertical(id="metadata_field_stack")' in source
+    assert 'MetadataFormScroll(id="metadata_form_scroll", classes="panel-neutral")' in source
+    assert 'VerticalScroll(id="metadata_preview_scroll", classes="panel-info")' in source
+    assert 'with Vertical(id="metadata_content")' in source
+    assert 'with Horizontal(id="metadata_body")' in source
+    assert 'with Horizontal(id="metadata_scroll_hint_row")' in source
+    assert 'yield Static("", id="metadata_scroll_hint", classes="scroll-hint")' in source
+    assert 'yield Static("Grunddaten", id="metadata_basic_heading", classes="metadata_section_heading")' in source
+    assert 'yield Static("Pflichtangaben", id="metadata_required_heading", classes="metadata_section_heading")' in source
+    assert 'yield Static("Optionale Angaben", id="metadata_optional_heading", classes="metadata_section_heading")' in source
     assert 'Horizontal(id="metadata_actions")' in source
     assert 'VerticalScroll(id="target_folder_scroll")' in source
     assert 'with Vertical(id="processing_plan_box", classes="panel-neutral")' in source
@@ -1759,12 +2265,66 @@ def test_tui_steps_five_to_seven_keep_scroll_areas_and_completion_screen():
     assert 'classes=tui_target_folder_status_class(self.resolution)' in source
     assert 'id="processing_warning_text"' in source
     assert 'classes=tui_processing_warning_class(conflicts)' in source
-    assert 'Button("Neue Dateien mit Zusatz speichern", id="use_output_suffix", variant="primary")' in source
-    assert 'Button("Vorhandene Dateien sichern und neue Dateien erstellen", id="backup_existing")' in source
+    assert 'Button("Neue Dateien umbenennen", id="use_output_suffix", variant="primary")' in source
+    assert 'Button("Vorhandene Dateien umbenennen und neue Dateien erstellen", id="backup_existing")' in source
     assert 'Button("Vorhandene Dateien ersetzen", id="confirm_overwrite", variant="error")' in source
     assert '"Zurueck und anderen Ordner waehlen" if conflicts else TUI_BACK_LABEL' in source
     assert ".navigation_actions Button" in source
     assert "margin-right: 1;" in source
+    assert 'yield Static(build_tui_processing_success_banner(self.plan, opened_target_folder=self.opened_target_folder), id="completion_banner", classes="status-ok")' in source
+    assert '#metadata_form_pane {' in source
+    assert '#metadata_field_stack {' in source
+    assert 'height: auto;' in source
+    assert '#metadata_form_scroll, #metadata_preview_scroll {' in source
+    assert 'overflow-y: auto;' in source
+    assert '#metadata_scroll_hint_row {' in source
+    assert '.scroll-hint {' in source
+    assert '.metadata_section_heading {' in source
+    assert '#completion_banner {' in source
+
+
+def test_tui_metadata_step_validation_banner_and_folder_note_button_are_visible():
+    source = (Path(__file__).resolve().parents[1] / "src" / "predigt_uploader" / "tui_app.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'yield Static("", id="metadata_validation", classes="status-info")' in source
+    assert 'validation_banner = self.query_one("#metadata_validation", Static)' in source
+    assert 'validation_banner.update(build_tui_metadata_validation_text(messages))' in source
+    assert 'validation_banner.set_classes("status-ok" if not messages else "status-warning")' in source
+    assert 'yield Button("Neuen Ordner mit Zusatz erstellen", id="create_with_note")' in source
+    assert 'note_input.focus()' in source
+    assert 'event.button.label = "Doch vorhandenen Tagesordner verwenden"' in source
+    assert 'primary.label = "Neuen Ordner mit Zusatz verwenden"' in source
+    assert 'primary.disabled = not note.strip()' in source
+    assert 'Bitte zuerst einen Zusatz eingeben.' in source
+
+
+def test_tui_metadata_step_contains_all_required_fields_and_fixed_actions():
+    source = (Path(__file__).resolve().parents[1] / "src" / "predigt_uploader" / "tui_app.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'yield Static(build_tui_step_title(5, "Metadaten erfassen"), id="screen_title")' in source
+    assert 'yield Static(build_tui_progress_text(5, skipped_steps), classes="workflow_progress")' in source
+    assert 'with MetadataFormScroll(id="metadata_form_scroll", classes="panel-neutral")' in source
+    assert 'stack.move_child(widget, after=previous_widget)' in source
+    assert 'with VerticalScroll(id="metadata_preview_scroll", classes="panel-info")' in source
+    assert 'yield Static("Grunddaten", id="metadata_basic_heading", classes="metadata_section_heading")' in source
+    assert 'yield Label("Art der Veranstaltung", id="service_type_label")' in source
+    assert 'yield Select(service_names, value=default_service, id="service_type")' in source
+    assert 'id="date_choice"' in source
+    assert 'yield Input(value=preferred_date.value.isoformat(), placeholder="YYYY-MM-DD", id="sermon_date")' in source
+    assert 'yield Static("Pflichtangaben", id="metadata_required_heading", classes="metadata_section_heading")' in source
+    assert 'yield Label("Titel", id="title_label")' in source
+    assert 'yield Label("Hauptbibelstelle", id="bible_label")' in source
+    assert 'yield Label("Redner / Leitung", id="speaker_label")' in source
+    assert 'yield Static("Optionale Angaben", id="metadata_optional_heading", classes="metadata_section_heading")' in source
+    assert 'yield Label("Besonderheit im Ordner", id="folder_note_label")' in source
+    assert 'yield Button(back_label, id="back")' in source
+    assert 'yield Button(cancel_label, id="cancel")' in source
+    assert 'yield Button(next_label, id="next", variant="primary")' in source
+    assert 'yield Static(build_tui_back_footnote(), classes="back_footnote")' in source
 
 
 def test_tui_metadata_validation_requires_only_fields_for_service_type(tmp_path):

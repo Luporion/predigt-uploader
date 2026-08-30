@@ -16,6 +16,8 @@ venv/
 
 # Local config and secrets
 config.toml
+secrets.toml
+*.secrets.toml
 .env
 *.log
 logs/

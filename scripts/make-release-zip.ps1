@@ -14,9 +14,13 @@ $DistDir = Join-Path $ProjectRoot "dist"
 
 $ReleaseItems = @(
     "src",
-    "scripts",
+    "scripts\setup-local.ps1",
+    "scripts\check-system.ps1",
+    "scripts\run-wizard.ps1",
+    "scripts\run-tui.ps1",
     "docs\install-v1-5.md",
     "docs\manual-test-v1-5.md",
+    "docs\publishing-architecture.md",
     "README.md",
     "pyproject.toml",
     "config.example.toml",
@@ -37,13 +41,15 @@ $ExcludedNames = @(
     ".pytest-tmp",
     "test-extract",
     "Windows PowerShell.txt",
-    "config.toml"
+    "config.toml",
+    "secrets.toml"
 )
 
 $ExcludedPatterns = @(
     "*.egg-info",
     "*.pyc",
-    "*.lnk"
+    "*.lnk",
+    "*.secrets.toml"
 )
 
 function Write-Step {
@@ -54,7 +60,7 @@ function Write-Step {
 function Get-PyprojectVersion {
     $PyprojectPath = Join-Path $ProjectRoot "pyproject.toml"
     if (-not (Test-Path -LiteralPath $PyprojectPath -PathType Leaf)) {
-        return "0.0.0"
+        throw "Versionsquelle fehlt: pyproject.toml"
     }
 
     $Content = Get-Content -LiteralPath $PyprojectPath -Raw
@@ -62,7 +68,7 @@ function Get-PyprojectVersion {
     if ($Match.Success) {
         return $Match.Groups[1].Value
     }
-    return "0.0.0"
+    throw "Keine gueltige Projektversion in pyproject.toml gefunden."
 }
 
 function Get-HeadReleaseTag {
@@ -72,14 +78,11 @@ function Get-HeadReleaseTag {
             return ""
         }
 
-        $MatchingTags = @($Tags | Where-Object { $_ -match '^v\d+\.\d+\.\d+' } | Sort-Object)
+        $Version = Get-PyprojectVersion
+        $VersionPattern = [regex]::Escape($Version)
+        $MatchingTags = @($Tags | Where-Object { $_ -match "^v$VersionPattern(?:-|$)" } | Sort-Object -Descending)
         if ($MatchingTags.Count -gt 0) {
             return $MatchingTags[0]
-        }
-
-        $AllTags = @($Tags | Sort-Object)
-        if ($AllTags.Count -gt 0) {
-            return $AllTags[0]
         }
     }
     catch {
@@ -88,13 +91,25 @@ function Get-HeadReleaseTag {
     return ""
 }
 
+function Assert-ReleaseTagMatchesVersion {
+    param([string]$Tag)
+
+    $Version = Get-PyprojectVersion
+    $VersionPattern = [regex]::Escape($Version)
+    if ($Tag -notmatch "^v$VersionPattern(?:-|$)") {
+        throw "Release-Tag '$Tag' passt nicht zur Projektversion $Version aus pyproject.toml."
+    }
+}
+
 function Resolve-ReleaseName {
     if (-not [string]::IsNullOrWhiteSpace($ReleaseName)) {
         return $ReleaseName.Trim()
     }
 
     if (-not [string]::IsNullOrWhiteSpace($ReleaseTag)) {
-        return "predigt-uploader-$($ReleaseTag.Trim())"
+        $NormalizedTag = $ReleaseTag.Trim()
+        Assert-ReleaseTagMatchesVersion -Tag $NormalizedTag
+        return "predigt-uploader-$NormalizedTag"
     }
 
     $HeadTag = Get-HeadReleaseTag
@@ -103,7 +118,7 @@ function Resolve-ReleaseName {
     }
 
     $Version = Get-PyprojectVersion
-    return "predigt-uploader-v$Version-local"
+    return "predigt-uploader-v$Version-local-workflow"
 }
 
 function Copy-ReleaseItem {

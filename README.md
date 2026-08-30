@@ -16,6 +16,7 @@ Version 1 automatisiert **noch nicht WordPress** und lädt **noch nicht zu Vimeo
 6. MP4 in den Zielordner verschieben/umbenennen
 7. gleichnamige MP3 per FFmpeg erzeugen
 8. `predigt-zusammenfassung.txt` für die manuelle Weiterarbeit anzeigen/speichern
+9. `predigt-workflow.json` als maschinenlesbaren lokalen Arbeitsstand speichern
 
 ## Phase 1.5: LosslessCut-Schnitt-Assistent
 
@@ -64,7 +65,7 @@ pytest
 python -m predigt_uploader --help
 python -m predigt_uploader
 python -m predigt_uploader wizard
-# optionaler UI-Spike, noch kein Ersatz fuer den Wizard:
+# funktionaler Textual-Workflow; der Wizard bleibt ebenfalls erhalten:
 python -m predigt_uploader tui
 ```
 
@@ -83,7 +84,13 @@ Kurzablauf in PowerShell:
 
 `setup-local.ps1` richtet `.venv` und die Python-Abhängigkeiten ein. `check-system.ps1` prüft Python, Wizard-Start, FFmpeg und optional den konfigurierten LosslessCut-Pfad. Der Doppelklick-Start öffnet zuerst ein einfaches Hauptmenü. Der Wizard arbeitet weiterhin nur lokal und lädt nichts zu Vimeo oder WordPress hoch. Abweichende Ordner und ein funktionierender LosslessCut-Pfad können auf Wunsch unter `%APPDATA%\PredigtUploader\config.toml` gemerkt werden.
 
-Der normale Terminal-Wizard bleibt der Standard für die Gemeinde-Nutzung. Eine experimentelle Textual-Oberfläche kann für Tests und Weiterentwicklung mit `python -m predigt_uploader tui`, `.\scripts\run-tui.ps1` oder `PredigtUploader Textual starten.cmd` gestartet werden, wenn das optionale Extra `tui` installiert ist. Sie zeigt bisher Startmenü mit Statusbereich, prominenter Sicherheitsseite für beendete vMix-Aufnahme und beendeten Stream, geführte MP4-/Rohaufnahme-Auswahl als Tabelle, echte Metadaten-Erfassung mit Pflichtfeldprüfung und Live-Vorschau, Zielordner- und Zieldateiprüfung, finale Verarbeitung und Abschlussstatus. Sie ersetzt den produktiven Workflow nicht.
+Der normale Terminal-Wizard bleibt weiterhin verfügbar und wird durch Textual nicht ersetzt. Die neue Textual-Oberfläche kann mit `python -m predigt_uploader tui`, `.\scripts\run-tui.ps1` oder `PredigtUploader Textual starten.cmd` gestartet werden, wenn das Extra `tui` installiert ist. Der lokale Textual-Workflow umfasst Startcheck, MP4-/Rohaufnahme-Auswahl, LosslessCut-Schritt, Exportbestätigung, Metadaten, Zielordner- und Konfliktentscheidung, finale MP4/MP3/Zusammenfassung und Abschlussstatus. Die Oberfläche bleibt vorerst die neuere, separat startbare Variante; Nutzer werden nicht zur Umstellung gezwungen.
+
+## Lokaler Workflow-Status und Publishing-Vorbereitung
+
+Nach erfolgreicher lokaler Verarbeitung liegt im Zielordner neben der menschlich lesbaren `predigt-zusammenfassung.txt` eine `predigt-workflow.json`. Sie enthält Metadaten, tatsächliche lokale Zielpfade und die Zustände `local_preparation`, `vimeo`, `wordpress_audio` und `wordpress_post`. Die lokalen Dateien stehen auf `complete`; die noch nicht implementierten Publishing-Schritte beginnen mit `pending`. Damit kann eine kommende Integration nach einem Neustart an bereits erledigte Arbeit anknüpfen und vorhandene Vimeo-/WordPress-IDs wiederverwenden.
+
+Die Datei enthält ausdrücklich keine Zugangsdaten. Vimeo-Token und WordPress-Zugangsdaten sollen in der nächsten Phase zunächst über Umgebungsvariablen oder eine separate lokale Datei außerhalb des Repositorys, bevorzugt unter `%APPDATA%\PredigtUploader`, bereitgestellt werden. Echte Uploads zu Vimeo oder WordPress sind noch nicht implementiert. Details stehen in [docs/publishing-architecture.md](docs/publishing-architecture.md).
 
 Für Gemeindemitarbeiter gibt es im Projektordner zusätzlich anklickbare Windows-Startdateien:
 
@@ -102,10 +109,10 @@ Release-ZIP bauen:
 ```powershell
 .\scripts\test.ps1
 .\scripts\make-release-zip.ps1
-.\scripts\make-release-zip.ps1 -ReleaseTag v0.1.9-textual-workflow-preview-r3
+.\scripts\make-release-zip.ps1 -ReleaseTag v0.2.0-local-workflow
 ```
 
-Empfohlener Ablauf: Tests ausfuehren, committen, Git-Tag setzen und danach `make-release-zip.ps1` starten. Wenn auf `HEAD` ein passender Tag wie `v0.1.9-textual-workflow-preview-r3` liegt, baut das Skript den ZIP-Namen automatisch daraus. Alternativ fuehrt `.\scripts\release.ps1 -ReleaseTag v0.1.9-textual-workflow-preview-r3` zuerst die Tests aus und erstellt nur bei gruenem Ergebnis das ZIP.
+Die numerische Version stammt ausschließlich aus `pyproject.toml`. Ohne Tag auf `HEAD` erzeugt das Skript für diese Baseline `predigt-uploader-v0.2.0-local-workflow.zip`. Liegt auf `HEAD` ein zur Projektversion passender Tag wie `v0.2.0-local-workflow`, wird dessen vollständiger Name verwendet; Tags anderer Versionen werden nicht automatisch übernommen und ein ausdrücklich übergebener unpassender `-ReleaseTag` wird abgelehnt. Alternativ führt `.\scripts\release.ps1 -ReleaseTag v0.2.0-local-workflow` zuerst die Tests aus und erstellt nur bei grünem Ergebnis das ZIP.
 
 ## Wichtige Dateien
 

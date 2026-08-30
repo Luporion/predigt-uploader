@@ -1,7 +1,18 @@
 from pathlib import Path
+import tomllib
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_pyproject_is_single_numeric_version_source_for_local_baseline() -> None:
+    pyproject = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    package_init = (PROJECT_ROOT / "src" / "predigt_uploader" / "__init__.py").read_text(encoding="utf-8")
+
+    assert pyproject["project"]["version"] == "0.2.0"
+    assert 'version("predigt-uploader")' in package_init
+    assert '__version__ = "0.1.0"' not in package_init
+    assert '__version__ = "0.2.0"' not in package_init
 
 
 def test_manual_test_guide_documents_phase_1_usage() -> None:
@@ -204,8 +215,12 @@ def test_release_zip_script_documents_included_and_excluded_paths() -> None:
     assert '[string]$ReleaseName' in content
     assert 'Resolve-ReleaseName' in content
     assert 'git -C $ProjectRoot tag --points-at HEAD' in content
-    assert 'predigt-uploader-$($ReleaseTag.Trim())' in content
-    assert 'predigt-uploader-v$Version-local' in content
+    assert 'predigt-uploader-$NormalizedTag' in content
+    assert 'predigt-uploader-v$Version-local-workflow' in content
+    assert '$VersionPattern = [regex]::Escape($Version)' in content
+    assert '"^v$VersionPattern(?:-|$)"' in content
+    assert "Assert-ReleaseTagMatchesVersion -Tag $NormalizedTag" in content
+    assert "passt nicht zur Projektversion" in content
     assert 'Release-Name:' in content
     assert 'ZIP-Ziel:' in content
     assert '$Version = "0.1.8"' not in content
@@ -213,9 +228,15 @@ def test_release_zip_script_documents_included_and_excluded_paths() -> None:
     assert "dist" in content
     assert "Compress-Archive" in content
     assert '"src"' in content
-    assert '"scripts"' in content
+    assert '"scripts\\setup-local.ps1"' in content
+    assert '"scripts\\check-system.ps1"' in content
+    assert '"scripts\\run-wizard.ps1"' in content
+    assert '"scripts\\run-tui.ps1"' in content
+    assert '"scripts\\test.ps1"' not in content
+    assert '"scripts\\release.ps1"' not in content
     assert '"docs\\install-v1-5.md"' in content
     assert '"docs\\manual-test-v1-5.md"' in content
+    assert '"docs\\publishing-architecture.md"' in content
     assert '"README.md"' in content
     assert '"pyproject.toml"' in content
     assert '"config.example.toml"' in content
@@ -235,6 +256,8 @@ def test_release_zip_script_documents_included_and_excluded_paths() -> None:
     assert '"test-extract"' in content
     assert '"Windows PowerShell.txt"' in content
     assert '"config.toml"' in content
+    assert '"secrets.toml"' in content
+    assert '"*.secrets.toml"' in content
     assert '"*.egg-info"' in content
     assert '"*.pyc"' in content
     assert '"*.lnk"' in content
@@ -263,14 +286,19 @@ def test_release_v1_5_guide_documents_zip_contents_and_target_setup() -> None:
 
     content = guide.read_text(encoding="utf-8")
 
-    assert "make-release-zip.ps1 -ReleaseTag v0.1.9-textual-workflow-preview-r3" in content
-    assert "predigt-uploader-v0.1.9-textual-workflow-preview-r3.zip" in content
-    assert "release.ps1 -ReleaseTag v0.1.9-textual-workflow-preview-r3" in content
+    assert "make-release-zip.ps1 -ReleaseTag v0.2.0-local-workflow" in content
+    assert "predigt-uploader-v0.2.0-local-workflow.zip" in content
+    assert "release.ps1 -ReleaseTag v0.2.0-local-workflow" in content
     assert "Git-Tag" in content
     assert "src/" in content
-    assert "scripts/" in content
+    assert "scripts/setup-local.ps1" in content
+    assert "scripts/check-system.ps1" in content
+    assert "scripts/run-wizard.ps1" in content
+    assert "scripts/run-tui.ps1" in content
+    assert "scripts/test.ps1" in content
     assert "docs/install-v1-5.md" in content
     assert "docs/manual-test-v1-5.md" in content
+    assert "docs/publishing-architecture.md" in content
     assert "README.md" in content
     assert "pyproject.toml" in content
     assert "config.example.toml" in content
@@ -286,5 +314,6 @@ def test_release_v1_5_guide_documents_zip_contents_and_target_setup() -> None:
     assert "*.pyc" in content
     assert "*.lnk" in content
     assert "config.toml" in content
+    assert "secrets.toml" in content
     assert "Gemeinderechner" in content
     assert "Doppelklick" in content

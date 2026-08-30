@@ -110,9 +110,10 @@ Windows-ungültige Zeichen müssen automatisch ersetzt werden:
 - MP3 aus MP4 per FFmpeg erzeugen
 - prüfen, dass MP4 und MP3 existieren
 - `predigt-zusammenfassung.txt` für die manuelle Weiterarbeit schreiben und anzeigen
+- `predigt-workflow.json` als maschinenlesbaren lokalen Arbeitsstand atomar schreiben
 - Logdatei schreiben
 
-Version 1 schreibt keine zusätzliche `predigt-info.json`. Strukturierte Übergabedaten können in einer späteren Phase bewusst neu entschieden werden.
+Die menschlich lesbare `predigt-zusammenfassung.txt` bleibt bestehen. Zusätzlich hält `predigt-workflow.json` Metadaten, tatsächliche lokale Dateipfade und den Status der lokalen Vorbereitung sowie künftiger Publishing-Schritte. Zugangsdaten, Tokens und Passwörter dürfen darin nie gespeichert werden.
 
 ## Version 1: Noch nicht enthalten
 

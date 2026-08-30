@@ -6,6 +6,11 @@ from .filename import build_folder_suffix
 from .models import AppConfig, FolderResolution, SermonInfo
 
 
+# No service currently adds an automatic marker such as "-1". Future rules
+# belong here so folder naming remains centralized instead of leaking into UIs.
+SERVICE_TYPE_FOLDER_MARKERS: dict[str, str] = {}
+
+
 def date_prefix(info: SermonInfo) -> str:
     return info.sermon_date.strftime("%Y-%m-%d")
 
@@ -23,11 +28,20 @@ def year_folder_name(config: AppConfig, info: SermonInfo) -> str:
 def suggest_folder(config: AppConfig, info: SermonInfo) -> Path:
     year_folder = config.recordings_base / year_folder_name(config, info)
     prefix = date_prefix(info)
+    marker = service_type_folder_marker(info.sermon_type)
     note = build_folder_suffix(info.folder_note)
     folder_name = prefix
-    if note:
-        folder_name = f"{prefix}{config.folder_suffix_separator}{note}"
+    suffix_parts = [part for part in (marker, note) if part]
+    if suffix_parts:
+        folder_name = f"{prefix}{config.folder_suffix_separator}{config.folder_suffix_separator.join(suffix_parts)}"
     return year_folder / folder_name
+
+
+def service_type_folder_marker(service_type: str) -> str:
+    normalized = service_type.strip().casefold()
+    if normalized == "gottesdienst":
+        normalized = "predigt"
+    return build_folder_suffix(SERVICE_TYPE_FOLDER_MARKERS.get(normalized, ""))
 
 
 def resolve_folder(config: AppConfig, info: SermonInfo) -> FolderResolution:

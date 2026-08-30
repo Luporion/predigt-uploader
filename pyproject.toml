@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "predigt-uploader"
-version = "0.1.0"
+version = "0.2.0"
 description = "Internes Windows-Tool zur Vereinfachung des Predigt-Workflows"
 readme = "README.md"
 requires-python = ">=3.11"

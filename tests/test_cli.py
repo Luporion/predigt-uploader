@@ -69,6 +69,7 @@ from predigt_uploader.mp3 import Mp3ConversionError
 from predigt_uploader.models import AppConfig, ProcessingPlan, SermonInfo, ServiceTypeConfig
 from predigt_uploader.report import build_summary_text
 from predigt_uploader.run_log import WorkflowLog
+from predigt_uploader.workflow_state import load_workflow_state
 
 
 @pytest.fixture(autouse=True)
@@ -1657,12 +1658,19 @@ def test_run_wizard_success_writes_summary_and_prints_final_state(monkeypatch, t
     target_mp4 = target_folder / "Predigt (Heiligkeit_Jesaja 6,1-3)_Eduard Wiebe.mp4"
     target_mp3 = target_folder / "Predigt (Heiligkeit_Jesaja 6,1-3)_Eduard Wiebe.mp3"
     summary_path = target_folder / "predigt-zusammenfassung.txt"
+    workflow_path = target_folder / "predigt-workflow.json"
     info_json_path = target_folder / "predigt-info.json"
     assert result == 0
     assert target_mp4.stat().st_size > 0
     assert target_mp3.stat().st_size > 0
     assert summary_path.exists()
+    assert workflow_path.exists()
     assert not info_json_path.exists()
+    workflow_state = load_workflow_state(workflow_path)
+    assert workflow_state.local_preparation.status == "complete"
+    assert workflow_state.paths.final_mp4 == target_mp4
+    assert workflow_state.paths.final_mp3 == target_mp3
+    assert workflow_state.vimeo.step.status == "pending"
     summary = summary_path.read_text(encoding="utf-8")
     assert "MP4-Dateiname: Predigt (Heiligkeit_Jesaja 6,1-3)_Eduard Wiebe.mp4" in summary
     assert "MP3-Dateiname: Predigt (Heiligkeit_Jesaja 6,1-3)_Eduard Wiebe.mp3" in summary
@@ -1671,6 +1679,7 @@ def test_run_wizard_success_writes_summary_and_prints_final_state(monkeypatch, t
     assert str(target_folder) in output
     assert str(target_mp4) in output
     assert str(target_mp3) in output
+    assert str(workflow_path) in output
     assert "Logdatei:" in output
     log_files = list((tmp_path / "logs").glob("predigt-uploader-*.log"))
     assert len(log_files) == 1

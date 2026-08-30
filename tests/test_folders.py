@@ -1,7 +1,7 @@
 from datetime import date
 from pathlib import Path
 
-from predigt_uploader.folders import resolve_folder, suggest_folder
+from predigt_uploader.folders import resolve_folder, service_type_folder_marker, suggest_folder
 from predigt_uploader.models import AppConfig, SermonInfo
 
 
@@ -34,6 +34,17 @@ def test_suggest_folder_uses_year_folder_template(tmp_path: Path):
     )
 
     assert suggest_folder(config, info) == tmp_path / "Aufnahmen" / "2026 Video+Audio" / "2026-05-17"
+
+
+def test_gottesdienst_has_no_unexplained_folder_marker(tmp_path: Path):
+    config = _config(tmp_path)
+    predigt = SermonInfo(date(2026, 5, 24), "Titel", "Text", "Redner", sermon_type="Predigt")
+    gottesdienst = SermonInfo(date(2026, 5, 24), "Titel", "Text", "Redner", sermon_type="Gottesdienst")
+
+    assert service_type_folder_marker("Predigt") == ""
+    assert service_type_folder_marker("Gottesdienst") == ""
+    assert suggest_folder(config, predigt) == suggest_folder(config, gottesdienst)
+    assert suggest_folder(config, gottesdienst).name == "2026-05-24"
 
 
 def test_resolve_folder_missing(tmp_path: Path):

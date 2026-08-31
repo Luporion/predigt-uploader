@@ -26,6 +26,13 @@ copy_instead_of_move = true
 open_target_folder = true
 raw_archive_mode = "move"
 
+[vimeo]
+# Nicht geheim: IDs nach dem Diagnosebefehl eindeutig eintragen, niemals aus URLs raten.
+team_owner_user_id = ""
+target_folder_id = ""
+# Optionaler Kontrollname. Wenn gesetzt, muss er zum gefundenen Ordner passen.
+target_folder_name = "Predigten"
+
 [service_types]
 # Zusätzliche Dienstarten für die lokale Benutzer-Config.
 # Format je Eintrag: "Name|Titel nötig|Bibelstelle nötig|Redner/Name nötig"

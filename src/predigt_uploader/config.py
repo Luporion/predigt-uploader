@@ -5,7 +5,7 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-from .models import AppConfig, ServiceTypeConfig
+from .models import AppConfig, ServiceTypeConfig, VimeoConfig
 
 
 class ConfigLoadError(RuntimeError):
@@ -123,6 +123,11 @@ def load_config(explicit_path: Path | None = None) -> AppConfig:
         copy_instead_of_move=bool(_get_nested(loaded, "workflow", "copy_instead_of_move", base.copy_instead_of_move)),
         open_target_folder=bool(_get_nested(loaded, "workflow", "open_target_folder", base.open_target_folder)),
         raw_archive_mode=str(_get_nested(loaded, "workflow", "raw_archive_mode", base.raw_archive_mode)),
+        vimeo=VimeoConfig(
+            team_owner_user_id=str(_get_nested(loaded, "vimeo", "team_owner_user_id", "")).strip(),
+            target_folder_id=str(_get_nested(loaded, "vimeo", "target_folder_id", "")).strip(),
+            target_folder_name=str(_get_nested(loaded, "vimeo", "target_folder_name", "")).strip(),
+        ),
     )
     custom_service_types = _parse_custom_service_types(_get_nested(loaded, "service_types", "additional", ()), config)
     return AppConfig(
@@ -199,6 +204,7 @@ def save_user_config_values(
     paths: dict[str, str] | None = None,
     naming: dict[str, str] | None = None,
     workflow: dict[str, str | bool] | None = None,
+    vimeo: dict[str, str] | None = None,
     service_types: list[str] | None = None,
 ) -> Path:
     path = user_config_path()
@@ -222,11 +228,13 @@ def save_user_config_values(
         data.setdefault("naming", {}).update(naming)
     if workflow:
         data.setdefault("workflow", {}).update(workflow)
+    if vimeo:
+        data.setdefault("vimeo", {}).update(vimeo)
     if service_types is not None:
         data.setdefault("service_types", {})["additional"] = service_types
 
     lines: list[str] = []
-    for section in ("paths", "naming", "workflow", "service_types"):
+    for section in ("paths", "naming", "workflow", "vimeo", "service_types"):
         values = data.get(section)
         if not isinstance(values, dict) or not values:
             continue

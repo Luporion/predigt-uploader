@@ -6,6 +6,16 @@ PredigtUploader soll den lokalen Predigt-Workflow einer Gemeinde unter Windows v
 
 ## Aktueller Entwicklungsstand
 
+### Phase 2: UI-unabhängiges Vimeo-Publishing (31.08.2026)
+
+Auf Basis des unveränderten Tags `v0.2.0-local-workflow` ist eine separat und nur bewusst startbare Vimeo-Publishing-Schicht hinzugekommen. Der normale Wizard und der Textual-Workflow bleiben lokal und starten keinen Upload. `publishing/vimeo.py` validiert Token, Team-Owner und eine explizite Folder-ID, überträgt große MP4-Dateien streamend per resumierbarem tus-Verfahren, ordnet das Video anschließend über die von Vimeo weiterhin „projects“ genannten Folder-Mitgliedschaftsendpunkte zu und verifiziert diese Zuordnung.
+
+Der Workflow-State speichert ohne Secrets Video-ID/-URI/-URL, Player-/Embed-Daten, Zielordner, Team-Owner sowie tus-Link, Offset und Größe. Eine bekannte Video-ID wird remote geprüft und wiederverwendet; `complete` blockiert Doppeluploads und `in_progress` ohne ID stoppt sicher. Vimeo wird erst nach bestätigter Übertragung, Remote-Prüfung, verifizierter Teamordner-Zuordnung und verfügbarem Embed-Code auf `complete` gesetzt. Bekannte Remote-IDs bleiben bei Folgefehlern erhalten.
+
+Die Kommandos `vimeo-diagnose` und `vimeo-check` führen keine Uploads aus. `vimeo-upload` braucht einen Workflow-State und zusätzlich `--confirm-vimeo-upload`. `vimeo-embed` kann Embed-Daten anhand einer gespeicherten Video-ID nachladen. Die produktive Prüfung am echten Gemeinde-Vimeo-Konto und ein echter Testupload wurden bewusst noch nicht ausgeführt. WordPress bleibt nicht implementiert.
+
+Die vollständige automatische Suite umfasst jetzt 345 bestandene Tests. Der Windows-Systemcheck ist einschließlich Wizard, Textual, Vimeo-HTTP-Abhängigkeit und FFmpeg grün.
+
 ### Stabile lokale Baseline (30.08.2026)
 
 Die Baseline trägt die Projektversion `0.2.0`; `pyproject.toml` ist die einzige numerische Versionsquelle. Der Release-Kanal heißt `local-workflow`, sodass der automatische ZIP-Name ohne passenden HEAD-Tag `predigt-uploader-v0.2.0-local-workflow.zip` lautet. Ein Git-Tag wird nicht automatisch erzeugt.
@@ -14,7 +24,7 @@ Der lokale Textual-Workflow ist durchgängig funktionsfähig: Startcheck, Quell-
 
 Nach erfolgreicher lokaler Verarbeitung schreiben Wizard und Textual zusätzlich `predigt-workflow.json` in den Zielordner. Das UI-unabhängige Modell verwendet die vorhandenen `SermonInfo`-Daten, speichert die tatsächlichen lokalen Pfade atomar und bereitet `vimeo`, `wordpress_audio` und `wordpress_post` mit Status, IDs und URLs vor. Lokale Vorbereitung steht dann auf `complete`, alle noch nicht implementierten Publishing-Schritte auf `pending`. `predigt-zusammenfassung.txt` bleibt unverändert als menschlich lesbarer Bericht erhalten.
 
-Vimeo-Upload, WordPress-MP3-Upload, WordPress-Beitrag und Vimeo-Embed sind weiterhin nicht automatisiert. Secrets werden weder im Workflow-State noch in der Beispielkonfiguration gespeichert; für die nächste Phase sind Umgebungsvariablen oder eine separate lokale Datei unter `%APPDATA%\PredigtUploader` vorgesehen.
+Vimeo ist nicht an den normalen Nutzerworkflow angebunden; WordPress-MP3-Upload und WordPress-Beitrag sind weiterhin nicht automatisiert. Secrets werden weder im Workflow-State noch in der Beispielkonfiguration gespeichert. Der Vimeo-Token wird aktuell ausschließlich aus `PREDIGT_UPLOADER_VIMEO_TOKEN` gelesen.
 
 Die vollständige automatische Suite umfasst für diese Baseline 310 bestandene Tests. Systemcheck, Wizard-Startbarkeit, Textual-Import/App-Aufbau und das Release-ZIP `predigt-uploader-v0.2.0-local-workflow.zip` wurden ebenfalls erfolgreich geprüft.
 
@@ -155,7 +165,8 @@ Textual-Schritt 7 zeigt Dateikonflikte nun als kompakte Datei-/Zustand-/Aktionsu
 
 ## Bewusst noch nicht enthalten
 
-- Vimeo-Upload.
+- automatischer Vimeo-Upload im Wizard oder in Textual.
+- echter Vimeo-Test am Gemeinde-Teamkonto (noch bewusst nicht ausgeführt).
 - WordPress-Automatisierung.
 - Login-, Token- oder API-Key-Verwaltung.
 - Automatische Predigt-Erkennung per KI.
@@ -164,7 +175,7 @@ Textual-Schritt 7 zeigt Dateikonflikte nun als kompakte Datei-/Zustand-/Aktionsu
 
 ## Nächster geplanter Schritt
 
-Vimeo-Upload vollständig und robust als UI-unabhängige Publishing-Fachlogik implementieren. Dabei zuerst Credential-Laden außerhalb von Git/Workflow-State, Upload-Fortschritt, verständliche Fehler, Doppelschutz und das atomare Speichern von Vimeo-ID/URL umsetzen und testen. Erst danach soll eine dünne Bedienebene in Textual ergänzt werden; der bestehende lokale Workflow und der normale Wizard bleiben erhalten.
+Zuerst `vimeo-diagnose` am echten Konto ausführen und Team-Owner-/Folder-ID verifizieren, danach `vimeo-check` mit einer fertigen lokalen Testaufnahme. Erst nach Kontrolle der Ausgabe einen kleinen bewussten Testupload mit `--confirm-vimeo-upload` ausführen und Folder-Mitgliedschaft, Privacy und Embed im Vimeo-Teamkonto manuell prüfen. Vor diesem Praxistest wird keine Textual-Anbindung begonnen.
 
 ## Sicherheits-Hinweis
 

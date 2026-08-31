@@ -13,38 +13,42 @@ Nach einer erfolgreichen lokalen Verarbeitung schreiben beide Oberflächen im Zi
 - Predigtdaten aus dem vorhandenen `SermonInfo`
 - Rohaufnahme, Schnittdatei, finale MP4, finale MP3, Zusammenfassung und Zielordner
 - `local_preparation`
-- `vimeo` mit späterer Video-ID und URL
+- `vimeo` mit Schrittstatus, Video-ID/-URI/-URL, Player-/Embed-Daten, Team-Owner, Zielordner und tus-Wiederaufnahmedaten
 - `wordpress_audio` mit späterer Medien-ID und URL
 - `wordpress_post` mit späterer Beitrags-ID und URL
 - Schema-Version und Änderungszeitpunkt
 
-Jeder Schritt verwendet die einfachen Zustände `pending`, `in_progress`, `complete` oder `failed`. Neue Publishing-Schritte stehen zunächst auf `pending`. Die Datei wird UTF-8-codiert über eine temporäre Datei im selben Ordner geschrieben und anschließend atomar ersetzt. Fehlende optionale Felder aus älteren Zuständen erhalten sichere Standardwerte.
+Jeder Schritt verwendet die einfachen Zustände `pending`, `in_progress`, `complete` oder `failed`. Neue Publishing-Schritte stehen zunächst auf `pending`. Schema 2 ergänzt die Vimeo-Felder; Schema-1-Dateien bleiben lesbar und werden beim nächsten Speichern auf den aktuellen Stand geschrieben. Die Datei wird UTF-8-codiert über eine temporäre Datei im selben Ordner geschrieben und anschließend atomar ersetzt. Fehlende optionale Felder aus älteren Zuständen erhalten sichere Standardwerte.
 
-## Geplante Modulkette
+## Modulkette
 
 Der nächste Ausbau soll schrittweise erfolgen:
 
 1. lokaler Workflow lädt oder erzeugt `WorkflowState`
-2. ein UI-unabhängiges Vimeo-Modul lädt die finale MP4 hoch
+2. `publishing/vimeo.py` validiert Konto und Teamordner und lädt die finale MP4 per tus hoch
 3. Vimeo-ID und Vimeo-URL werden sofort atomar gespeichert
 4. ein WordPress-Modul lädt die finale MP3 hoch und speichert Medien-ID/URL
 5. der Beitrag wird erstellt oder aktualisiert; Post-ID/URL werden gespeichert
 6. Textual und Wizard zeigen nur Status und Nutzerentscheidungen an
 
-Noch wurden keine leeren Publisher-Klassen oder abstrakten Interfaces angelegt. Vor dem ersten echten Vimeo-Aufruf wäre das nur ungenutzte Struktur. Das Vimeo-Modul soll stattdessen eine kleine, testbare Funktion oder einen Client erhalten, sobald Request-, Fortschritts- und Fehlerverhalten konkret feststehen.
+Die Vimeo-Schicht ist UI-unabhängig. `VimeoPublishingService` enthält die Ablauf- und Zustandslogik, ein kleines `VimeoTransport`-Protocol trennt HTTP für Tests ab. `RequestsVimeoTransport` implementiert die echten API- und tus-Anfragen. Wizard und Textual starten diesen Dienst noch nicht automatisch. Die späteren WordPress-Module bleiben offen, bis die Vimeo-Integration am echten Teamkonto geprüft ist.
 
 ## Wiederaufnahme und Doppelschutz
 
-Vor einem Upload liest die spätere Publishing-Schicht die Statusdatei. Eine vorhandene Vimeo-ID beziehungsweise WordPress-ID muss wiederverwendet und dem Nutzer angezeigt werden. Erneute Uploads dürfen nicht automatisch starten. Der Zustand `in_progress` allein gilt nach einem Programmabbruch nicht als Erfolgsnachweis; vor einem neuen Versuch muss der entfernte Dienst anhand einer bereits gespeicherten ID geprüft oder eine bewusste Nutzerentscheidung eingeholt werden.
+Vor einem Upload liest die Publishing-Schicht die Statusdatei. `local_preparation` muss `complete` sein und die finale MP4 muss als nichtleere Datei existieren. Ein als `complete` markiertes Vimeo-Video wird remote geprüft und nie automatisch erneut hochgeladen. Bei `in_progress` ohne Video-ID wird sicher gestoppt; mit Video-ID wird das Remote-Video wiederverwendet. Bei `failed` ist ein kontrollierter Wiederholungsversuch möglich. Sobald Vimeo eine Video-ID liefert, wird sie atomar gespeichert. Beim Resume ist der per tus-`HEAD` gelesene Remote-Offset maßgeblich, nicht nur der lokal gemerkte Offset.
+
+Vimeo gilt erst als `complete`, wenn die Übertragung bestätigt, das Remote-Video auffindbar, die Zuordnung zum konfigurierten Teamordner erfolgt und über dessen Videoliste verifiziert sowie ein verwendbarer Embed-Code ermittelt wurde. Ein Fehler nach dem Upload setzt den Schritt auf `failed`, behält aber Video-ID, tus-Link und bekannte Remote-Daten.
 
 ## Secrets
 
 Zugangsdaten gehören niemals in Git, `config.example.toml`, Release-ZIPs, Logs oder `predigt-workflow.json`.
 
-Für die nächste Phase wird empfohlen:
+Aktuell implementiert ist:
 
-- zuerst Umgebungsvariablen wie `PREDIGT_UPLOADER_VIMEO_TOKEN` für Entwicklung und automatisierte Tests verwenden;
-- alternativ eine lokale `secrets.toml` unter `%APPDATA%\PredigtUploader` zulassen, niemals im Projekt- oder Zielordner;
+- `PREDIGT_UPLOADER_VIMEO_TOKEN` als einzige aktive Token-Quelle;
+- nicht geheime Team-Owner-/Folder-IDs in `[vimeo]` der normalen lokalen Konfiguration;
+- Token-Bereinigung in HTTP-Fehlern und kein Speichern im Workflow-State;
+- eine spätere lokale `secrets.toml` unter `%APPDATA%\PredigtUploader` bleibt eine mögliche Komfortergänzung, ist aber noch nicht implementiert;
 - die lokale Datei nur mit restriktiven Benutzerrechten betreiben und ihre Werte nie protokollieren;
 - Windows Credential Manager erst dann ergänzen, wenn der Praxistest den zusätzlichen Installations- und Wartungsaufwand rechtfertigt.
 
@@ -52,11 +56,12 @@ Das Repository ignoriert `secrets.toml` und `*.secrets.toml`; das Release-Skript
 
 ## Noch nicht implementiert
 
-- Vimeo-API, OAuth oder Upload
+- automatische Vimeo-Ausführung im normalen Wizard oder in Textual
+- interaktiver OAuth-/Login-Flow und Windows Credential Manager
+- Prüfung am echten Gemeinde-Teamkonto und echter, bewusst gestarteter Testupload
 - WordPress REST API, Medien-Upload oder Beitrag
-- Netzwerk-Retry, Remote-Abgleich oder Statusbildschirm
-- automatische Fortsetzung eines abgebrochenen Publishing-Vorgangs
+- großer Publishing-Statusbildschirm
 
 ## Nächster Implementierungsschritt
 
-Als Nächstes sollte der Vimeo-Upload vollständig und robust als UI-unabhängiges Modul umgesetzt werden: Credential-Laden, Upload mit Fortschritt, verständliche Fehler, Wiederaufnahme-/Doppelschutz, Speicherung von Vimeo-ID/URL nach bestätigtem Erfolg und isolierte Tests mit einer lokalen HTTP-Testgrenze. Erst danach sollte die Textual-Oberfläche eine dünne Vimeo-Status- und Startaktion erhalten.
+Als Nächstes sollten Verbindung, Team-Owner und Ordner ausschließlich mit `vimeo-diagnose` am echten Konto geprüft werden. Danach folgt `vimeo-check` mit einem realen lokalen Workflow-State. Erst nach Kontrolle dieser Ergebnisse soll ein kleines Testvideo bewusst per `vimeo-upload --confirm-vimeo-upload` übertragen und seine Teamordner-Zuordnung in Vimeo gegengeprüft werden. Details stehen in `docs/vimeo-development.md`. Erst nach diesem Praxistest ist eine dünne Textual-Bedienebene sinnvoll.

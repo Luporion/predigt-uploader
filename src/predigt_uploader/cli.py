@@ -2196,10 +2196,167 @@ def run_tui_command(args: argparse.Namespace) -> int:
         return 7
 
 
+def _create_vimeo_service(args: argparse.Namespace):
+    from .publishing.vimeo import RequestsVimeoTransport, VimeoPublishingService, load_vimeo_token
+
+    config = load_config(Path(args.config) if args.config else None)
+    token = load_vimeo_token()
+    return VimeoPublishingService(config.vimeo, token, RequestsVimeoTransport(token))
+
+
+def _print_vimeo_error(exc: Exception) -> None:
+    from .publishing.vimeo import VimeoError
+
+    if isinstance(exc, VimeoError):
+        print(exc.user_message)
+        if exc.admin_hint:
+            print(f"Admin-Hinweis: {exc.admin_hint}")
+        return
+    print("Die Vimeo-Prüfung konnte nicht abgeschlossen werden.")
+    print(f"Admin-Hinweis: {type(exc).__name__}: {exc}")
+
+
+def _required_vimeo_state_path(args: argparse.Namespace) -> Path:
+    if args.state is None:
+        raise ValueError("Bitte mit --state den Pfad zu predigt-workflow.json angeben.")
+    return Path(args.state)
+
+
+def _format_file_size(size: int) -> str:
+    value = float(size)
+    for unit in ("Bytes", "KiB", "MiB", "GiB"):
+        if value < 1024 or unit == "GiB":
+            return f"{value:.1f} {unit}" if unit != "Bytes" else f"{int(value)} {unit}"
+        value /= 1024
+    return f"{size} Bytes"
+
+
+def run_vimeo_diagnose(args: argparse.Namespace) -> int:
+    """Read identity and folder data only; never creates a Vimeo video."""
+    try:
+        service = _create_vimeo_service(args)
+        report = service.diagnose()
+        print("Vimeo-Verbindung: OK")
+        print(f"Angemeldeter Benutzer: {report.authenticated_user_name} ({report.authenticated_user_uri})")
+        if not report.team_owner_user_id:
+            print("Team-Owner-ID: noch nicht konfiguriert")
+            print("Es wurden keine Teamordner abgefragt. Bitte die tatsächliche Team-Owner-User-ID konfigurieren.")
+            return 2
+        print(f"Team-Owner: {report.team_owner_name} (/users/{report.team_owner_user_id})")
+        print("Verfügbare Ordner der Team-Bibliothek:")
+        if not report.folders:
+            print("  (keine zugänglichen Ordner gefunden)")
+        for folder in report.folders:
+            parent = f", Elternordner: {folder.parent_folder_uri}" if folder.parent_folder_uri else ""
+            print(f"  - {folder.name}: ID {folder.folder_id}, URI {folder.uri}{parent}")
+        return 0
+    except (ConfigLoadError, OSError, ValueError) as exc:
+        _print_vimeo_error(exc)
+        return 2
+    except Exception as exc:
+        _print_vimeo_error(exc)
+        return 2
+
+
+def _print_vimeo_upload_preview(preview) -> None:
+    print("Vimeo-Verbindung und Zielkonfiguration: OK")
+    print(f"Team: {preview.team_owner_name}")
+    print(f"Zielordner: {preview.folder.name}")
+    print(f"Ordner-ID: {preview.folder.folder_id}")
+    print(f"Datei: {preview.file_path}")
+    print(f"Größe: {_format_file_size(preview.file_size)}")
+    print(f"Vimeo-Titel: {preview.title}")
+    print(f"Uploadverfahren: {preview.upload_approach}")
+
+
+def run_vimeo_check(args: argparse.Namespace) -> int:
+    """Validate a planned upload without creating a Vimeo video."""
+    try:
+        service = _create_vimeo_service(args)
+        preview = service.preview_upload(_required_vimeo_state_path(args))
+        _print_vimeo_upload_preview(preview)
+        print("Es wurde kein Upload gestartet.")
+        return 0
+    except Exception as exc:
+        _print_vimeo_error(exc)
+        return 2
+
+
+def _print_vimeo_progress(progress) -> None:
+    phase_labels = {
+        "preparing": "Vorbereitung",
+        "creating_remote_video": "Vimeo-Video wird angelegt",
+        "uploading": "MP4 wird übertragen",
+        "verifying_upload": "Upload wird geprüft",
+        "assigning_folder": "Video wird dem Zielordner zugeordnet",
+        "verifying_folder": "Zielordner wird geprüft",
+        "fetching_embed": "Einbettungscode wird abgerufen",
+        "complete": "Vimeo-Publishing abgeschlossen",
+    }
+    label = phase_labels.get(progress.phase, progress.phase)
+    if progress.total_bytes > 0:
+        print(f"{label}: {progress.percent:.1f}% ({_format_file_size(progress.uploaded_bytes)} / {_format_file_size(progress.total_bytes)})")
+    else:
+        print(label)
+
+
+def run_vimeo_upload(args: argparse.Namespace) -> int:
+    """Run an explicitly confirmed development upload; never called by the normal workflow."""
+    try:
+        service = _create_vimeo_service(args)
+        state_path = _required_vimeo_state_path(args)
+        preview = service.preview_upload(state_path)
+        _print_vimeo_upload_preview(preview)
+        if not args.confirm_vimeo_upload:
+            print()
+            print("Kein Upload gestartet. Für den bewussten Testupload zusätzlich --confirm-vimeo-upload angeben.")
+            return 2
+        result = service.publish(state_path, progress=_print_vimeo_progress)
+        print(f"Vimeo-Video: {result.video_url}")
+        print(f"Bestätigter Zielordner: {result.folder_uri}")
+        return 0
+    except Exception as exc:
+        _print_vimeo_error(exc)
+        return 2
+
+
+def run_vimeo_embed(args: argparse.Namespace) -> int:
+    """Refresh missing/stale embed data for a known Vimeo video in workflow state."""
+    try:
+        service = _create_vimeo_service(args)
+        embed = service.refresh_embed(_required_vimeo_state_path(args))
+        print("Der Vimeo-Einbettungscode wurde im Workflow-State aktualisiert.")
+        print(f"Video: {embed.video_url}")
+        return 0
+    except Exception as exc:
+        _print_vimeo_error(exc)
+        return 2
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="predigt-uploader")
-    parser.add_argument("command", nargs="?", default="menu", choices=["menu", "wizard", "tui", "textual"])
+    parser.add_argument(
+        "command",
+        nargs="?",
+        default="menu",
+        choices=[
+            "menu",
+            "wizard",
+            "tui",
+            "textual",
+            "vimeo-diagnose",
+            "vimeo-check",
+            "vimeo-upload",
+            "vimeo-embed",
+        ],
+    )
     parser.add_argument("--config", help="Pfad zu config.toml")
+    parser.add_argument("--state", help="Pfad zu predigt-workflow.json (nur Vimeo-Entwicklungskommandos)")
+    parser.add_argument(
+        "--confirm-vimeo-upload",
+        action="store_true",
+        help="bewusste Freigabe für den ausschließlich manuell gestarteten Vimeo-Testupload",
+    )
     return parser
 
 
@@ -2213,6 +2370,14 @@ def main(argv: list[str] | None = None) -> int:
             return run_wizard(args)
         if args.command in {"tui", "textual"}:
             return run_tui_command(args)
+        if args.command == "vimeo-diagnose":
+            return run_vimeo_diagnose(args)
+        if args.command == "vimeo-check":
+            return run_vimeo_check(args)
+        if args.command == "vimeo-upload":
+            return run_vimeo_upload(args)
+        if args.command == "vimeo-embed":
+            return run_vimeo_embed(args)
         parser.print_help()
         return 1
     except (KeyboardInterrupt, UserAbortError):

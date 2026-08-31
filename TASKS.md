@@ -132,16 +132,21 @@
 - [x] lokale Metadaten und tatsächliche Ausgabepfade atomar in `predigt-workflow.json` speichern
 - [x] Vimeo-/WordPress-Status sowie spätere IDs/URLs ohne Secrets vorbereiten
 - [x] Secrets- und Publishing-Architektur dokumentieren
-- [ ] Vimeo-Credentials außerhalb von Git und Statusdatei laden
-- [ ] Vimeo-Upload mit Fortschritt, Fehlerbehandlung und Doppelschutz implementieren
-- [ ] Vimeo-ID und Vimeo-URL nach bestätigtem Erfolg atomar speichern
+- [x] Vimeo-Credentials außerhalb von Git und Statusdatei aus Umgebungsvariable laden
+- [x] Vimeo-Upload per tus mit Fortschritt, Fehlerbehandlung, Resume und Doppelschutz implementieren
+- [x] Vimeo-ID, URL, Folder- und Resume-Daten atomar speichern
 
-- [ ] Vimeo API-Zugang dokumentieren
-- [ ] API-Token sicher speichern
-- [ ] Ordner „Predigten“ per API finden
-- [ ] MP4 hochladen
-- [ ] oEmbed-Code abrufen
-- [ ] Embed-Code anzeigen/kopieren
+- [x] Vimeo API-Zugang, Scopes und Upload Access dokumentieren
+- [x] API-Token zur Laufzeit sicher aus `PREDIGT_UPLOADER_VIMEO_TOKEN` lesen
+- [x] Team-Owner und Ordner per uploadfreier Diagnose mit IDs/URIs auflisten
+- [x] Zielordner vor Upload validieren und Schreibrechte prüfen
+- [x] MP4-Upload UI-unabhängig und explizit startbar implementieren
+- [x] Video dem konfigurierten Teamordner zuordnen und Mitgliedschaft verifizieren
+- [x] `embed.html`, `player_embed_url` und oEmbed-Fallback abrufen
+- [x] fehlenden Embed-Code anhand bekannter Video-ID nachladbar machen
+- [ ] Vimeo-Verbindung und Teamordner am echten Gemeindekonto diagnostizieren
+- [ ] kleinen bewussten Testupload durchführen und Folder-/Embed-Ergebnis manuell prüfen
+- [ ] nach erfolgreichem Praxistest dünne Vimeo-Bedienebene entwerfen
 
 ## Phase 5: WordPress optional
 

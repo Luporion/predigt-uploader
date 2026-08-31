@@ -27,6 +27,11 @@ year_folder_template = "{year} Video+Audio"
 
 [service_types]
 additional = ["Andacht|true|true|false"]
+
+[vimeo]
+team_owner_user_id = "12345"
+target_folder_id = "67890"
+target_folder_name = "Predigten"
 ''',
         encoding="utf-8",
     )
@@ -43,6 +48,9 @@ additional = ["Andacht|true|true|false"]
     assert config.custom_service_types[0].requires_title is True
     assert config.custom_service_types[0].requires_bible_reference is True
     assert config.custom_service_types[0].requires_speaker is False
+    assert config.vimeo.team_owner_user_id == "12345"
+    assert config.vimeo.target_folder_id == "67890"
+    assert config.vimeo.target_folder_name == "Predigten"
 
 
 def test_default_recordings_base_uses_current_user_desktop(monkeypatch, tmp_path: Path):
@@ -142,6 +150,25 @@ def test_save_user_config_values_writes_custom_service_types(monkeypatch, tmp_pa
     text = saved_path.read_text(encoding="utf-8")
     assert "[service_types]" in text
     assert 'additional = ["Andacht|true|true|false"]' in text
+
+
+def test_save_user_config_values_writes_non_secret_vimeo_target(monkeypatch, tmp_path: Path):
+    appdata = tmp_path / "AppData"
+    monkeypatch.setenv("APPDATA", str(appdata))
+
+    saved_path = save_user_config_values(
+        vimeo={
+            "team_owner_user_id": "12345",
+            "target_folder_id": "67890",
+            "target_folder_name": "Predigten",
+        }
+    )
+
+    text = saved_path.read_text(encoding="utf-8")
+    assert "[vimeo]" in text
+    assert 'team_owner_user_id = "12345"' in text
+    assert 'target_folder_id = "67890"' in text
+    assert "token" not in text.casefold()
 
 
 def test_describe_config_source_mentions_appdata(monkeypatch, tmp_path: Path):

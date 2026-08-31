@@ -21,6 +21,7 @@ $ReleaseItems = @(
     "docs\install-v1-5.md",
     "docs\manual-test-v1-5.md",
     "docs\publishing-architecture.md",
+    "docs\vimeo-development.md",
     "README.md",
     "pyproject.toml",
     "config.example.toml",

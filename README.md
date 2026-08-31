@@ -90,7 +90,21 @@ Der normale Terminal-Wizard bleibt weiterhin verfügbar und wird durch Textual n
 
 Nach erfolgreicher lokaler Verarbeitung liegt im Zielordner neben der menschlich lesbaren `predigt-zusammenfassung.txt` eine `predigt-workflow.json`. Sie enthält Metadaten, tatsächliche lokale Zielpfade und die Zustände `local_preparation`, `vimeo`, `wordpress_audio` und `wordpress_post`. Die lokalen Dateien stehen auf `complete`; die noch nicht implementierten Publishing-Schritte beginnen mit `pending`. Damit kann eine kommende Integration nach einem Neustart an bereits erledigte Arbeit anknüpfen und vorhandene Vimeo-/WordPress-IDs wiederverwenden.
 
-Die Datei enthält ausdrücklich keine Zugangsdaten. Vimeo-Token und WordPress-Zugangsdaten sollen in der nächsten Phase zunächst über Umgebungsvariablen oder eine separate lokale Datei außerhalb des Repositorys, bevorzugt unter `%APPDATA%\PredigtUploader`, bereitgestellt werden. Echte Uploads zu Vimeo oder WordPress sind noch nicht implementiert. Details stehen in [docs/publishing-architecture.md](docs/publishing-architecture.md).
+Die Datei enthält ausdrücklich keine Zugangsdaten. WordPress ist noch nicht integriert. Für Vimeo gibt es nun eine UI-unabhängige, ausschließlich manuell gestartete Entwicklungsschicht: Team-Owner-/Folder-Prüfung, resumierbarer tus-Upload, Doppelschutz, Folder-Zuordnung mit Verifikation und Embed-Abruf. Der normale Wizard und Textual laden weiterhin nichts automatisch hoch. Details stehen in [docs/publishing-architecture.md](docs/publishing-architecture.md) und [docs/vimeo-development.md](docs/vimeo-development.md).
+
+## Vimeo-Entwicklungskommandos
+
+Der Vimeo-Token wird nur aus `PREDIGT_UPLOADER_VIMEO_TOKEN` gelesen. Die nicht geheimen Werte `team_owner_user_id`, `target_folder_id` und optional `target_folder_name` stehen im Abschnitt `[vimeo]` der lokalen Konfiguration. Keine ID wird aus Namen oder URLs geraten.
+
+```powershell
+# Verbindung/Identität und – nach konfigurierter Owner-ID – Teamordner lesen; kein Upload:
+python -m predigt_uploader vimeo-diagnose --config "$env:APPDATA\PredigtUploader\config.toml"
+
+# konkrete fertige MP4 und Zielkonfiguration prüfen; kein Upload:
+python -m predigt_uploader vimeo-check --config "$env:APPDATA\PredigtUploader\config.toml" --state "C:\Pfad\predigt-workflow.json"
+```
+
+Ein Testupload ist absichtlich ein separates Entwicklungskommando und erfordert zusätzlich `--confirm-vimeo-upload`. Er wird nicht vom normalen 7-Schritt-Workflow aufgerufen. Einrichtung, benötigte Scopes und der sichere Testablauf sind in [docs/vimeo-development.md](docs/vimeo-development.md) beschrieben.
 
 Für Gemeindemitarbeiter gibt es im Projektordner zusätzlich anklickbare Windows-Startdateien:
 
@@ -122,6 +136,7 @@ Die numerische Version stammt ausschließlich aus `pyproject.toml`. Ohne Tag auf
 - `config.example.toml` – Beispielkonfiguration
 - `docs/install-v1-5.md` – Installation und erster Test auf einem Zielrechner
 - `docs/release-v1-5.md` – Inhalt und Erstellung der lokalen Release-ZIP
+- `docs/vimeo-development.md` – Vimeo-App, Teamordner-Diagnose und bewusster Testupload
 - `docs/dev-log/` – kurze Berichte nach KI-Aufgaben
 - `src/predigt_uploader/` – Programmcode
 - `tests/` – automatische Tests

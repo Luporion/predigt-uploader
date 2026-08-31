@@ -116,6 +116,19 @@ if (Test-Path -LiteralPath $VenvPython -PathType Leaf) {
     }
 
     try {
+        & $VenvPython -c "import requests" *> $null
+        if ($LASTEXITCODE -eq 0) {
+            Write-CheckOk "Die HTTP-Unterstuetzung fuer die manuell gestartete Vimeo-Phase ist verfuegbar."
+        }
+        else {
+            Write-CheckWarn "Das Python-Paket requests fehlt. Der lokale Workflow funktioniert weiter, Vimeo-Diagnose und -Upload benoetigen jedoch eine erneute Einrichtung."
+        }
+    }
+    catch {
+        Write-CheckWarn "Die Vimeo-HTTP-Unterstuetzung konnte nicht geprueft werden. Bitte `"PredigtUploader einrichten.cmd`" erneut ausfuehren."
+    }
+
+    try {
         & $VenvPython -c "from predigt_uploader.config import load_config; from predigt_uploader.mp3 import ffmpeg_available; raise SystemExit(0 if ffmpeg_available(load_config()) else 1)" *> $null
         if ($LASTEXITCODE -eq 0) {
             Write-CheckOk "FFmpeg ist fuer den Wizard verfuegbar."

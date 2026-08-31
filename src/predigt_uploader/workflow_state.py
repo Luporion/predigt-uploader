@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
@@ -10,7 +10,7 @@ from .models import SermonInfo
 
 
 WORKFLOW_STATE_FILENAME = "predigt-workflow.json"
-WORKFLOW_STATE_SCHEMA_VERSION = 1
+WORKFLOW_STATE_SCHEMA_VERSION = 2
 STEP_STATUSES = frozenset({"pending", "in_progress", "complete", "failed"})
 
 
@@ -29,7 +29,17 @@ class StepState:
 class VimeoState:
     step: StepState = field(default_factory=StepState)
     video_id: str | None = None
+    video_uri: str | None = None
     video_url: str | None = None
+    player_embed_url: str | None = None
+    embed_html: str | None = None
+    folder_id: str | None = None
+    folder_uri: str | None = None
+    folder_name: str | None = None
+    team_owner_user_id: str | None = None
+    upload_uri: str | None = None
+    upload_offset: int | None = None
+    upload_size: int | None = None
 
 
 @dataclass(frozen=True)
@@ -111,9 +121,14 @@ def save_workflow_state(state: WorkflowState, path: Path | None = None) -> Path:
     target = path or workflow_state_path(_required_target_folder(state.paths))
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_name(f".{target.name}.tmp")
+    stored_state = replace(
+        state,
+        schema_version=WORKFLOW_STATE_SCHEMA_VERSION,
+        updated_at=datetime.now(timezone.utc).isoformat(),
+    )
     try:
         temporary.write_text(
-            json.dumps(state.to_dict(), ensure_ascii=False, indent=2) + "\n",
+            json.dumps(stored_state.to_dict(), ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
         temporary.replace(target)
@@ -180,7 +195,17 @@ def _vimeo_from(value: object) -> VimeoState:
     return VimeoState(
         step=_step_from(data.get("step")),
         video_id=_optional_text(data.get("video_id")),
+        video_uri=_optional_text(data.get("video_uri")),
         video_url=_optional_text(data.get("video_url")),
+        player_embed_url=_optional_text(data.get("player_embed_url")),
+        embed_html=_optional_text(data.get("embed_html")),
+        folder_id=_optional_text(data.get("folder_id")),
+        folder_uri=_optional_text(data.get("folder_uri")),
+        folder_name=_optional_text(data.get("folder_name")),
+        team_owner_user_id=_optional_text(data.get("team_owner_user_id")),
+        upload_uri=_optional_text(data.get("upload_uri")),
+        upload_offset=_optional_int(data.get("upload_offset")),
+        upload_size=_optional_int(data.get("upload_size")),
     )
 
 

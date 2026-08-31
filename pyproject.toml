@@ -11,6 +11,7 @@ requires-python = ">=3.11"
 authors = [{ name = "Gemeindetechnik" }]
 dependencies = [
   "questionary>=2.0",
+  "requests>=2.32,<3",
 ]
 
 [project.optional-dependencies]

@@ -1,0 +1,2 @@
+"""UI-unabhängige Publishing-Fachlogik."""
+

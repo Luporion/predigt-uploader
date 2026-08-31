@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
@@ -31,6 +31,13 @@ class SermonInfo:
 
 
 @dataclass(frozen=True)
+class VimeoConfig:
+    team_owner_user_id: str = ""
+    target_folder_id: str = ""
+    target_folder_name: str = ""
+
+
+@dataclass(frozen=True)
 class AppConfig:
     vmix_storage: Path
     recordings_base: Path
@@ -49,6 +56,7 @@ class AppConfig:
     copy_instead_of_move: bool = True
     open_target_folder: bool = True
     raw_archive_mode: str = "move"
+    vimeo: VimeoConfig = field(default_factory=VimeoConfig)
 
 
 @dataclass(frozen=True)

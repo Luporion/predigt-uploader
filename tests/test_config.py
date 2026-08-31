@@ -2,7 +2,14 @@ from pathlib import Path
 
 import pytest
 
-from predigt_uploader.config import ConfigLoadError, default_config, load_config
+from predigt_uploader.config import (
+    DEFAULT_VIMEO_TARGET_FOLDER_ID,
+    DEFAULT_VIMEO_TARGET_FOLDER_NAME,
+    DEFAULT_VIMEO_TEAM_OWNER_USER_ID,
+    ConfigLoadError,
+    default_config,
+    load_config,
+)
 from predigt_uploader.config import describe_config_source, save_user_config_values
 
 
@@ -60,6 +67,23 @@ def test_default_recordings_base_uses_current_user_desktop(monkeypatch, tmp_path
     config = default_config()
 
     assert config.recordings_base == home / "Desktop" / "Aufnahmen"
+    assert config.vimeo.team_owner_user_id == DEFAULT_VIMEO_TEAM_OWNER_USER_ID
+    assert config.vimeo.target_folder_id == DEFAULT_VIMEO_TARGET_FOLDER_ID
+    assert config.vimeo.target_folder_name == DEFAULT_VIMEO_TARGET_FOLDER_NAME
+
+
+def test_existing_config_without_vimeo_section_uses_safe_non_secret_defaults_without_rewrite(tmp_path: Path):
+    config_path = tmp_path / "config.toml"
+    original = '[paths]\nrecordings_base = "D:\\\\Aufnahmen"\n'
+    config_path.write_text(original, encoding="utf-8")
+
+    config = load_config(config_path)
+
+    assert config.recordings_base == Path(r"D:\Aufnahmen")
+    assert config.vimeo.team_owner_user_id == "59930802"
+    assert config.vimeo.target_folder_id == "1320477"
+    assert config.vimeo.target_folder_name == "Predigten"
+    assert config_path.read_text(encoding="utf-8") == original
 
 
 def test_load_config_ignores_removed_write_summary_file_option(tmp_path: Path):
@@ -179,3 +203,47 @@ def test_describe_config_source_mentions_appdata(monkeypatch, tmp_path: Path):
     config_path.write_text("[paths]\n", encoding="utf-8")
 
     assert "%APPDATA%" in describe_config_source()
+
+
+def test_settings_round_trip_preserves_general_and_vimeo_values(monkeypatch, tmp_path: Path):
+    appdata = tmp_path / "AppData"
+    monkeypatch.setenv("APPDATA", str(appdata))
+    saved = save_user_config_values(
+        paths={
+            "mp3_base": str(tmp_path / "Ziel"),
+            "vmix_storage": str(tmp_path / "Roh"),
+            "losslesscut_path": str(tmp_path / "LosslessCut.exe"),
+        },
+        naming={"year_folder_template": "{year} Video+Audio"},
+        workflow={"raw_archive_mode": "copy"},
+        vimeo={
+            "team_owner_user_id": "59930802",
+            "target_folder_id": "1320477",
+            "target_folder_name": "Predigten",
+        },
+    )
+
+    loaded = load_config(saved)
+
+    assert loaded.mp3_base == tmp_path / "Ziel"
+    assert loaded.vmix_storage == tmp_path / "Roh"
+    assert loaded.losslesscut_path == str(tmp_path / "LosslessCut.exe")
+    assert loaded.year_folder_template == "{year} Video+Audio"
+    assert loaded.raw_archive_mode == "copy"
+    assert loaded.vimeo.target_folder_id == "1320477"
+    assert "token" not in saved.read_text(encoding="utf-8").casefold()
+
+
+def test_save_does_not_overwrite_invalid_existing_config(monkeypatch, tmp_path: Path):
+    appdata = tmp_path / "AppData"
+    monkeypatch.setenv("APPDATA", str(appdata))
+    path = appdata / "PredigtUploader" / "config.toml"
+    path.parent.mkdir(parents=True)
+    original = "[paths\nungueltig"
+    path.write_text(original, encoding="utf-8")
+
+    with pytest.raises(ConfigLoadError) as error:
+        save_user_config_values(paths={"mp3_base": "X"})
+
+    assert "nicht überschrieben" in error.value.user_message
+    assert path.read_text(encoding="utf-8") == original

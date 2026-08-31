@@ -129,7 +129,7 @@
 ## Phase 4: Vimeo
 
 - [x] UI-unabhängigen Workflow-State mit Schema-Version vorbereiten
-- [x] lokale Metadaten und tatsächliche Ausgabepfade atomar in `predigt-workflow.json` speichern
+- [x] lokale Metadaten und tatsächliche Ausgabepfade atomar in einem aufnahmespezifischen `<MP4-Stem>.predigt-workflow.json` speichern
 - [x] Vimeo-/WordPress-Status sowie spätere IDs/URLs ohne Secrets vorbereiten
 - [x] Secrets- und Publishing-Architektur dokumentieren
 - [x] Vimeo-Credentials außerhalb von Git und Statusdatei aus Umgebungsvariable laden
@@ -139,14 +139,27 @@
 - [x] Vimeo API-Zugang, Scopes und Upload Access dokumentieren
 - [x] API-Token zur Laufzeit sicher aus `PREDIGT_UPLOADER_VIMEO_TOKEN` lesen
 - [x] Team-Owner und Ordner per uploadfreier Diagnose mit IDs/URIs auflisten
-- [x] Zielordner vor Upload validieren und Schreibrechte prüfen
+- [x] Zielordner vor Upload auf Existenz, Identität und Team-Owner prüfen; nicht destruktiv unbeweisbare Schreibrechte klar kennzeichnen
+- [x] unzuverlässiges `metadata.connections.videos.options` aus dem harten Upload-Check entfernen
+- [x] tus-Platzhalter über den dokumentierten Endpoint `POST /me/videos` erstellen
 - [x] MP4-Upload UI-unabhängig und explizit startbar implementieren
 - [x] Video dem konfigurierten Teamordner zuordnen und Mitgliedschaft verifizieren
 - [x] `embed.html`, `player_embed_url` und oEmbed-Fallback abrufen
 - [x] fehlenden Embed-Code anhand bekannter Video-ID nachladbar machen
-- [ ] Vimeo-Verbindung und Teamordner am echten Gemeindekonto diagnostizieren
-- [ ] kleinen bewussten Testupload durchführen und Folder-/Embed-Ergebnis manuell prüfen
-- [ ] nach erfolgreichem Praxistest dünne Vimeo-Bedienebene entwerfen
+- [x] Vimeo-Verbindung und Teamordner am echten Gemeindekonto diagnostizieren
+- [x] isoliertes, bestätigungspflichtiges `vimeo-smoke-test`-Kommando mit FFmpeg-Testclip, Transkodierungs-/Privacy-Diagnose und optionaler ID-genauer Löschung implementieren
+- [x] kleinen bewussten Testupload durchführen und Folder-/Embed-Ergebnis manuell prüfen
+- [x] Textual um einen expliziten achten Vimeo-Schritt auf Basis des vorhandenen Publishing-Service erweitern
+- [x] Vimeo-Upload im Textual-Thread-Worker mit bytegenauem Fortschrittsbalken, Größen-, Geschwindigkeits- und Restzeitanzeige ausführen
+- [x] Vimeo-Erfolg, Überspringen und Fehler im Abschlussstatus unterscheiden
+- [x] bestätigte nicht geheime Team-/Folderwerte als rückwärtskompatible Config-Defaults bereitstellen
+- [x] Vimeo-Token mit Environment-Vorrang sicher im Windows Credential Manager speicherbar machen
+- [x] Textual-Einstellungen für lokale Pfade, Vimeo-Ziel, Token und Prediger produktiv machen
+- [x] fertige MP4 samt vorhandenem/neu erzeugtem State direkt aus dem Textual-Startmenü an Schritt 8 übergeben
+- [x] mehrere Aufnahmen pro Tagesordner durch aufnahmespezifische Summary-/State-Dateien trennen
+- [x] Prediger-Historie lokal persistieren und als freie Eingabevorschläge anbieten
+- [ ] unvollständige produktive Vimeo-States ohne vorherige MP4-Auswahl automatisch im Startmenü auflisten
+- [ ] produktiven Textual-Vimeo-Schritt mit einer kleinen bewussten Aufnahme manuell prüfen
 
 ## Phase 5: WordPress optional
 

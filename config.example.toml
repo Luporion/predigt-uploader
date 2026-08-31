@@ -27,10 +27,11 @@ open_target_folder = true
 raw_archive_mode = "move"
 
 [vimeo]
-# Nicht geheim: IDs nach dem Diagnosebefehl eindeutig eintragen, niemals aus URLs raten.
-team_owner_user_id = ""
-target_folder_id = ""
-# Optionaler Kontrollname. Wenn gesetzt, muss er zum gefundenen Ordner passen.
+# Nicht geheim: fest bestätigtes Vimeo-Teamziel der Gemeinde.
+# Bestehende Benutzer-configs ohne diesen Abschnitt erhalten dieselben Laufzeit-Standards automatisch.
+team_owner_user_id = "59930802"
+target_folder_id = "1320477"
+# Kontrollname: Er muss zur gefundenen Folder-ID passen.
 target_folder_name = "Predigten"
 
 [service_types]

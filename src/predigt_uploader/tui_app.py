@@ -2,11 +2,18 @@ from __future__ import annotations
 
 import subprocess
 import re
+import webbrowser
 from dataclasses import dataclass, replace
 from datetime import date, datetime
 from pathlib import Path
+from typing import Callable
 
-from .config import default_service_types, load_config
+from .companion_files import recording_summary_path, recording_workflow_state_path
+from .config import ConfigLoadError, default_service_types, load_config, save_user_config_values
+from .credentials import (
+    CredentialError,
+    VimeoCredentialManager,
+)
 from .filename import build_filename_preview, build_media_filename, sanitize_filename_part, service_type_config_for
 from .folders import resolve_folder, suggest_folder
 from .models import AppConfig, FolderResolution, ProcessingPlan, SermonInfo, ServiceTypeConfig
@@ -24,8 +31,22 @@ from .processing import (
     unique_output_name_suggestions,
     validate_windows_filename,
 )
-from .report import summary_file_path
-from .workflow_state import workflow_state_path
+from .publishing.vimeo import (
+    VimeoError,
+    VimeoProgress,
+    VimeoPublishingService,
+    build_vimeo_title,
+)
+from .speaker_history import SpeakerHistory
+from .workflow_state import (
+    StepState,
+    VimeoState,
+    WorkflowPaths,
+    WorkflowState,
+    load_workflow_state,
+    resolve_workflow_state_path,
+    save_workflow_state,
+)
 
 TUI_MP4_PREVIEW_LIMIT = 5
 TUI_FILE_CHOICE_LIMIT = 500
@@ -42,13 +63,23 @@ TUI_START_SAFETY_CONFIRM_LABEL = "Ja, Aufnahme und Stream sind beendet"
 TUI_PROCESSING_EXECUTE_LABEL = "Finale Dateien jetzt erstellen"
 TUI_PROCESSING_RUNNING_LABEL = "Verarbeitung laeuft..."
 TUI_PROCESSING_DONE_LABEL = "Fertig vorbereitet"
-TUI_TOTAL_WORKFLOW_STEPS = 7
+TUI_TOTAL_WORKFLOW_STEPS = 8
 TUI_BACK_LABEL = "Zurueck"
 TUI_GOTTESDIENST_EXPLANATION = (
     "Gottesdienst bedeutet: normale Aufnahme eines Gottesdienstes. "
     "Die finale Predigtdatei wird trotzdem als Predigt benannt."
 )
-TUI_WORKFLOW_STEP_NAMES = ("Start", "Quelle", "Schnitt", "MP4", "Metadaten", "Ordner", "Final")
+TUI_WORKFLOW_STEP_NAMES = ("Start", "Quelle", "Schnitt", "MP4", "Metadaten", "Ordner", "Dateien", "Vimeo")
+
+TUI_VIMEO_STAGE_LABELS = (
+    ("connection", "Vimeo-Verbindung geprüft"),
+    ("remote_video", "Video auf Vimeo angelegt"),
+    ("upload", "Video wird hochgeladen"),
+    ("verify_upload", "Upload wird geprüft"),
+    ("folder", "Ordner „Predigten“ wird zugeordnet"),
+    ("processing", "Vimeo verarbeitet das Video"),
+    ("embed", "Embed-Code wird abgerufen"),
+)
 
 
 @dataclass(frozen=True)
@@ -157,6 +188,78 @@ def load_tui_config(config_path: str | None = None) -> AppConfig:
     return load_config(explicit_config)
 
 
+def create_tui_vimeo_service(
+    config: AppConfig,
+    credential_manager: VimeoCredentialManager | None = None,
+) -> VimeoPublishingService:
+    """Build the shared Vimeo backend only after the user starts publishing."""
+    from .publishing.vimeo import RequestsVimeoTransport, load_vimeo_token
+
+    token = load_vimeo_token(credential_manager=credential_manager)
+    return VimeoPublishingService(config.vimeo, token, RequestsVimeoTransport(token))
+
+
+def validate_direct_vimeo_mp4(path: Path) -> Path:
+    candidate = path.expanduser()
+    if candidate.suffix.casefold() != ".mp4":
+        raise ValueError("Bitte eine MP4-Datei auswählen.")
+    if not candidate.is_file():
+        raise ValueError("Die ausgewählte MP4-Datei wurde nicht gefunden.")
+    try:
+        if candidate.stat().st_size <= 0:
+            raise ValueError("Die ausgewählte MP4-Datei ist leer.")
+        with candidate.open("rb") as handle:
+            handle.read(1)
+    except OSError as exc:
+        raise ValueError(f"Die ausgewählte MP4-Datei ist nicht lesbar: {exc}") from exc
+    return candidate
+
+
+def load_or_create_direct_vimeo_state(final_mp4: Path) -> tuple[Path, bool]:
+    final_mp4 = validate_direct_vimeo_mp4(final_mp4)
+    existing = resolve_workflow_state_path(final_mp4)
+    if existing is not None:
+        state = load_workflow_state(existing)
+        if state.local_preparation.status != "complete":
+            raise ValueError("Der gefundene Workflow-Status meldet die lokale Vorbereitung noch nicht als abgeschlossen.")
+        return existing, False
+
+    detected_date = detect_tui_recording_date_from_filename(final_mp4) or tui_file_modified_date(final_mp4) or date.today()
+    summary = recording_summary_path(final_mp4)
+    mp3 = final_mp4.with_suffix(".mp3")
+    state = WorkflowState(
+        sermon=SermonInfo(
+            sermon_date=detected_date,
+            title=final_mp4.stem,
+            bible_reference="",
+            speaker="",
+            sermon_type="Direkt-Vimeo",
+        ),
+        paths=WorkflowPaths(
+            final_mp4=final_mp4,
+            final_mp3=mp3 if mp3.is_file() else None,
+            summary=summary if summary.is_file() else None,
+            target_folder=final_mp4.parent,
+        ),
+        local_preparation=StepState("complete"),
+    )
+    return save_workflow_state(state), True
+
+
+def build_direct_vimeo_plan(final_mp4: Path, state: WorkflowState) -> PreparedRecordingPlan:
+    return PreparedRecordingPlan(
+        source_mp4=final_mp4,
+        raw_recording=None,
+        target_folder=final_mp4.parent,
+        target_mp4=final_mp4,
+        target_mp3=state.paths.final_mp3 or final_mp4.with_suffix(".mp3"),
+        summary_path=state.paths.summary or recording_summary_path(final_mp4),
+        info=state.sermon,
+        raw_action="none",
+        mp4_action=MP4_ACTION_KEEP,
+    )
+
+
 GERMAN_MONTHS = {
     "januar": 1,
     "jan": 1,
@@ -188,7 +291,7 @@ GERMAN_MONTHS = {
 def build_tui_preview_text(info: SermonInfo, config: AppConfig) -> str:
     preview = build_filename_preview(info, config)
     target_folder = suggest_folder(config, info)
-    summary_path = summary_file_path(target_folder)
+    summary_path = recording_summary_path(target_folder / preview.mp4)
     return "\n".join(
         [
             f"Zielordner: {target_folder}",
@@ -218,7 +321,7 @@ def build_tui_preparation(
         target_folder=target_folder,
         target_mp4=target_mp4,
         target_mp3=target_mp3,
-        summary_path=summary_file_path(target_folder),
+        summary_path=recording_summary_path(target_mp4),
     )
 
 
@@ -383,6 +486,15 @@ def detect_tui_target_conflicts(plan: PreparedRecordingPlan) -> tuple[TuiTargetC
                 message=f"Zusammenfassung existiert bereits: {plan.summary_path}",
             )
         )
+    if plan.workflow_state_path.exists():
+        conflicts.append(
+            TuiTargetConflict(
+                path=plan.workflow_state_path,
+                kind="state",
+                severity="warning",
+                message=f"Workflow-Status existiert bereits: {plan.workflow_state_path}",
+            )
+        )
     return tuple(conflicts)
 
 
@@ -393,6 +505,7 @@ def build_tui_target_conflict_text(conflicts: tuple[TuiTargetConflict, ...]) -> 
         "mp4": "MP4",
         "mp3": "MP3",
         "summary": "Zusammenfassung",
+        "state": "Workflow-Status",
     }
     lines = ["Vorhandene Zieldateien:"]
     lines.extend(f"- {labels.get(conflict.kind, conflict.kind)}: {conflict.path}" for conflict in conflicts)
@@ -411,12 +524,17 @@ def build_tui_target_file_plan_text(
         ("mp4", "MP4", plan.target_mp4),
         ("mp3", "MP3", plan.target_mp3),
         ("summary", "Zusammenfassung", plan.summary_path),
+        ("state", "Workflow-Status", plan.workflow_state_path),
     )
     lines = ["Datei | Zustand | geplante Aktion"]
     for kind, label, path in rows:
         if kind in conflict_kinds:
             if proposed_names:
-                action = f"Neue Datei: {proposed_names[kind]}"
+                action = (
+                    f"Neue Datei: {proposed_names[kind]}"
+                    if kind in proposed_names
+                    else "wird aus dem neuen MP4-Namen abgeleitet"
+                )
             elif path in existing_renames:
                 action = f"Vorhandene Datei -> {existing_renames[path].name}; neue Datei -> {path.name}"
             elif plan.overwrite_existing_outputs:
@@ -1175,15 +1293,202 @@ def build_tui_processing_started_status() -> str:
     )
 
 
-def build_tui_processing_success_status(plan: PreparedRecordingPlan, *, opened_target_folder: bool = True) -> str:
+def build_tui_vimeo_plan_text(plan: PreparedRecordingPlan, config: AppConfig) -> str:
+    return "\n".join(
+        [
+            f"Lokale MP4: {plan.target_mp4}",
+            f"Vimeo-Team / Konto: Team-Owner {config.vimeo.team_owner_user_id}",
+            f"Zielordner: {config.vimeo.target_folder_name} (ID {config.vimeo.target_folder_id})",
+            f"Vimeo-Titel: {build_vimeo_title(plan.info, plan.target_mp4)}",
+        ]
+    )
+
+
+def build_tui_vimeo_initial_status(state: VimeoState | None) -> str:
+    if state is None:
+        return "Der lokale Workflow-Status fehlt. Vimeo kann noch nicht sicher gestartet werden."
+    if state.step.status == "complete" and state.video_id:
+        return "Vimeo-Upload abgeschlossen. Die vorhandene Video-ID wird weiterverwendet."
+    if state.video_id:
+        return (
+            "Ein Vimeo-Video ist bereits bekannt. Beim Fortsetzen wird diese Video-ID wiederverwendet; "
+            "es wird kein zweiter Platzhalter angelegt."
+        )
+    if state.step.status == "failed":
+        return "Der letzte Vimeo-Versuch ist fehlgeschlagen. Die lokalen Dateien sind sicher fertig."
+    return "Bereit. Erst der blaue Button startet die Vimeo-Veröffentlichung."
+
+
+def build_tui_vimeo_progress_text(
+    phase: str | None = None,
+    *,
+    percent: float = 0.0,
+    transcode_status: str | None = None,
+    failed_phase: str | None = None,
+) -> str:
+    active_by_phase = {
+        "checking_connection": "connection",
+        "creating_remote_video": "remote_video",
+        "uploading": "upload",
+        "verifying_upload": "verify_upload",
+        "assigning_folder": "folder",
+        "verifying_folder": "folder",
+        "processing_video": "processing",
+        "fetching_embed": "embed",
+    }
+    completed_before = {
+        "preparing": {"connection"},
+        "creating_remote_video": {"connection"},
+        "uploading": {"connection", "remote_video"},
+        "verifying_upload": {"connection", "remote_video", "upload"},
+        "assigning_folder": {"connection", "remote_video", "upload", "verify_upload"},
+        "verifying_folder": {"connection", "remote_video", "upload", "verify_upload"},
+        "processing_video": {"connection", "remote_video", "upload", "verify_upload", "folder"},
+        "fetching_embed": {"connection", "remote_video", "upload", "verify_upload", "folder"},
+        "complete": {key for key, _label in TUI_VIMEO_STAGE_LABELS},
+    }
+    completed = set(completed_before.get(phase or "", set()))
+    active = active_by_phase.get(phase or "")
+    normalized_transcode = (transcode_status or "").lower()
+    if phase == "complete" and normalized_transcode not in {"complete", "completed"}:
+        completed.discard("processing")
+        active = "processing"
+    failed = active_by_phase.get(failed_phase or "")
+    lines: list[str] = []
+    for key, label in TUI_VIMEO_STAGE_LABELS:
+        if key == failed:
+            marker = "✗"
+        elif key in completed:
+            marker = "✓"
+        elif key == active:
+            marker = "⟳"
+        else:
+            marker = "○"
+        if key == "upload" and key == active:
+            label = f"{label}: {percent:.1f} %"
+        if key == "processing" and normalized_transcode:
+            label = f"{label} …  Status: {normalized_transcode.upper()}"
+        lines.append(f"{marker} {label}")
+    return "\n".join(lines)
+
+
+def format_tui_vimeo_upload_details(progress: VimeoProgress) -> str:
+    transferred = _format_vimeo_bytes(progress.uploaded_bytes)
+    total = _format_vimeo_bytes(progress.total_bytes)
+    lines = [f"{transferred} / {total}"]
+    if progress.bytes_per_second and progress.bytes_per_second > 0:
+        speed = f"{_format_vimeo_bytes(progress.bytes_per_second)}/s"
+        if progress.eta_seconds is not None:
+            lines.append(f"{speed} · ca. {_format_vimeo_eta(progress.eta_seconds)} verbleibend")
+        else:
+            lines.append(speed)
+    return "\n".join(lines)
+
+
+def _format_vimeo_bytes(value: float | int) -> str:
+    amount = max(0.0, float(value))
+    units = ("B", "KB", "MB", "GB", "TB")
+    unit = units[0]
+    for candidate in units:
+        unit = candidate
+        if amount < 1024 or candidate == units[-1]:
+            break
+        amount /= 1024
+    if unit == "B":
+        rendered = f"{amount:.0f}"
+    elif amount >= 100:
+        rendered = f"{amount:.0f}"
+    elif amount >= 10:
+        rendered = f"{amount:.1f}"
+    else:
+        rendered = f"{amount:.2f}"
+    return f"{rendered.replace('.', ',')} {unit}"
+
+
+def _format_vimeo_eta(seconds: float) -> str:
+    remaining = max(0, int(round(seconds)))
+    hours, remainder = divmod(remaining, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes}:{secs:02d}"
+
+
+def build_tui_vimeo_success_text(plan: PreparedRecordingPlan, state: VimeoState) -> str:
+    return "\n".join(
+        [
+            "Vimeo-Upload abgeschlossen",
+            f"Vimeo-Titel: {build_vimeo_title(plan.info, plan.target_mp4)}",
+            f"Zielordner: {state.target_folder_name or 'Predigten'}",
+            f"Vimeo-URL: {state.video_url or '(noch nicht gemeldet)'}",
+            f"Transkodierung: {(state.transcode_status or 'unbekannt').upper()}",
+            f"Player-URL: {'vorhanden' if state.player_embed_url else 'noch nicht vorhanden'}",
+            f"Embed-Code: {'abgerufen' if state.embed_html else 'noch nicht vorhanden'}",
+        ]
+    )
+
+
+def build_tui_vimeo_error_text(error: Exception, state: VimeoState | None) -> str:
+    if isinstance(error, VimeoError):
+        message = error.user_message
+        admin = f"\nAdmin-Hinweis: {error.admin_hint}" if error.admin_hint else ""
+    else:
+        message = "Die Vimeo-Veröffentlichung konnte nicht abgeschlossen werden."
+        admin = f"\nAdmin-Hinweis: {type(error).__name__}: {error}"
+    known = ""
+    if state and state.video_id:
+        known = f"\nBekannte Vimeo-Video-ID: {state.video_id}\nDiese ID wird beim nächsten Versuch wiederverwendet."
+    return (
+        "Vimeo-Veröffentlichung noch nicht abgeschlossen.\n"
+        "Die lokale MP4, MP3 und Zusammenfassung sind sicher fertig.\n"
+        f"Ursache: {message}{known}{admin}"
+    )
+
+
+def build_tui_processing_success_status(
+    plan: PreparedRecordingPlan,
+    *,
+    opened_target_folder: bool = True,
+    vimeo_state: VimeoState | None = None,
+) -> str:
     folder_status = (
         "Der Zielordner wurde geoeffnet."
         if opened_target_folder
         else "Der Zielordner konnte nicht automatisch geoeffnet werden. Bitte nutze den Button zum erneuten Oeffnen oder oeffne den Pfad manuell."
     )
+    vimeo_complete = bool(vimeo_state and vimeo_state.step.status == "complete" and vimeo_state.video_id)
+    vimeo_lines = (
+        [
+            "✓ Video zu Vimeo hochgeladen.",
+            f"✓ Ordner {vimeo_state.target_folder_name or 'Predigten'}.",
+            f"✓ Embed-Code {'abgerufen' if vimeo_state.embed_html else 'noch nicht abgerufen'}.",
+            f"Vimeo-URL: {vimeo_state.video_url or '(noch nicht gemeldet)'}",
+        ]
+        if vimeo_complete
+        else ["○ Vimeo-Upload noch ausstehend."]
+    )
+    manual_steps = (
+        [
+            "1. Zielordner kontrollieren.",
+            "2. MP3 in WordPress hochladen.",
+            "3. Predigtinformationen in WordPress eintragen.",
+            "4. Gespeicherten Vimeo-Embed-Code in WordPress ergaenzen.",
+            "5. Danach kann der PredigtUploader geschlossen oder eine neue Aufnahme vorbereitet werden.",
+        ]
+        if vimeo_complete
+        else [
+            "1. Zielordner kontrollieren.",
+            "2. Vimeo-Upload spaeter im PredigtUploader fortsetzen.",
+            "3. MP3 in WordPress hochladen.",
+            "4. Predigtinformationen in WordPress eintragen.",
+            "5. Vimeo/Embed-Code in WordPress ergaenzen.",
+            "6. Danach kann der PredigtUploader geschlossen oder eine neue Aufnahme vorbereitet werden.",
+        ]
+    )
     return "\n".join(
         [
             "Lokale Vorbereitung abgeschlossen.",
+            "✓ Lokale Dateien erstellt.",
             folder_status,
             "Vorhandene Ziel-Dateien wurden ersetzt." if plan.overwrite_existing_outputs else "",
             "Vorhandene Ziel-Dateien wurden gesichert." if plan.backup_existing_outputs else "",
@@ -1192,16 +1497,13 @@ def build_tui_processing_success_status(plan: PreparedRecordingPlan, *, opened_t
             f"Finale MP4: {plan.target_mp4}",
             f"Finale MP3: {plan.target_mp3}",
             f"Zusammenfassung: {plan.summary_path}",
-            f"Workflow-Status: {workflow_state_path(plan.target_folder)}",
+            f"Workflow-Status: {recording_workflow_state_path(plan.target_mp4)}",
             f"Rohaufnahme-Aktion: {raw_action_label(plan.raw_action, plan.raw_recording)}",
             "",
-            "Naechste Schritte:",
-            "1. Zielordner kontrollieren.",
-            "2. MP3 in WordPress hochladen.",
-            "3. Predigtinformationen in WordPress eintragen.",
-            "4. Video in Vimeo hochladen.",
-            "5. Vimeo/Embed-Code in WordPress ergaenzen, solange die Video-Automation noch nicht eingebaut ist.",
-            "6. Danach kann der PredigtUploader geschlossen oder eine neue Aufnahme vorbereitet werden.",
+            *vimeo_lines,
+            "",
+            "Naechste manuelle Schritte:",
+            *manual_steps,
         ]
     ).replace("\n\n\n", "\n\n")
 
@@ -1400,8 +1702,11 @@ def tui_metadata_optional_field_keys(service_type: ServiceTypeConfig) -> tuple[s
     return tuple(keys)
 
 
-def tui_metadata_section_field_ids(field_key: str) -> tuple[str, str]:
-    return f"{field_key}_label", f"{field_key}_input"
+def tui_metadata_section_field_ids(field_key: str) -> tuple[str, ...]:
+    ids = (f"{field_key}_label", f"{field_key}_input")
+    if field_key == "speaker":
+        return ids + ("speaker_suggestions",)
+    return ids
 
 
 def tui_metadata_widget_order(service_type: ServiceTypeConfig) -> tuple[str, ...]:
@@ -1423,23 +1728,39 @@ def tui_metadata_widget_order(service_type: ServiceTypeConfig) -> tuple[str, ...
     return tuple(order)
 
 
-def build_tui_app(config_path: str | None = None):
+def build_tui_app(
+    config_path: str | None = None,
+    *,
+    vimeo_service_factory: Callable[[AppConfig], VimeoPublishingService] | None = None,
+    credential_manager: VimeoCredentialManager | None = None,
+    speaker_store: SpeakerHistory | None = None,
+):
     try:
         from textual.app import App, ComposeResult
         from textual.containers import Horizontal, Vertical, VerticalScroll
+        from textual.dom import NoScreen
         from textual.screen import Screen
-        from textual.widgets import Button, DataTable, Footer, Header, Input, Label, Select, Static
+        from textual.widgets import Button, DataTable, Footer, Header, Input, Label, OptionList, ProgressBar, Select, Static
     except ImportError as exc:
         raise ImportError("Textual ist nicht installiert.") from exc
 
     config = load_tui_config(config_path)
+    credentials = credential_manager or VimeoCredentialManager()
+    speakers = speaker_store or SpeakerHistory.for_current_user()
+    make_vimeo_service = vimeo_service_factory or (
+        lambda app_config: create_tui_vimeo_service(app_config, credentials)
+    )
 
     class MetadataFormScroll(VerticalScroll):
         def watch_scroll_y(self, old_value: float, new_value: float) -> None:
             super().watch_scroll_y(old_value, new_value)
             if round(old_value) == round(new_value) or not self.is_mounted:
                 return
-            update_hint = getattr(self.screen, "_update_metadata_scroll_hint", None)
+            try:
+                screen = self.screen
+            except NoScreen:
+                return
+            update_hint = getattr(screen, "_update_metadata_scroll_hint", None)
             if update_hint is not None:
                 self.call_after_refresh(update_hint)
 
@@ -1450,6 +1771,12 @@ def build_tui_app(config_path: str | None = None):
             with Horizontal():
                 with Vertical(id="start_actions"):
                     yield Button("Neue Aufnahme vorbereiten", id="new", variant="primary")
+                    yield Button("Direkt zu Vimeo hochladen (Admin / Sonderfall)", id="direct_vimeo")
+                    yield Static(
+                        "Nur für bereits fertig geschnittene, korrekt benannte MP4-Dateien am endgültigen Speicherort. "
+                        "Normalerweise 'Neue Aufnahme vorbereiten' verwenden.",
+                        id="direct_vimeo_note",
+                    )
                     yield Button("MP4-Dateien ansehen", id="files")
                     yield Button("Einstellungen", id="settings")
                     yield Button("Systemcheck-Hinweis", id="systemcheck")
@@ -1460,15 +1787,20 @@ def build_tui_app(config_path: str | None = None):
 
         def on_button_pressed(self, event: Button.Pressed) -> None:
             if event.button.id == "new":
-                self.app.push_screen(StartSafetyScreen(config))
+                self.app.push_screen(StartSafetyScreen(self.app.app_config))
+            elif event.button.id == "direct_vimeo":
+                self.app.push_screen(DirectVimeoSelectionScreen(self.app.app_config))
             elif event.button.id == "files":
-                self.app.push_screen(FileCandidatesScreen(config))
+                self.app.push_screen(FileCandidatesScreen(self.app.app_config))
             elif event.button.id == "settings":
-                self.app.push_screen(SettingsScreen(config))
+                self.app.push_screen(SettingsScreen(self.app.app_config))
             elif event.button.id == "systemcheck":
                 self.notify("Bitte PredigtUploader Systemcheck.cmd ausführen.")
             elif event.button.id == "quit":
                 self.app.exit()
+
+        def on_screen_resume(self) -> None:
+            self.query_one("#start_status", Static).update(build_tui_start_status_text(self.app.app_config))
 
     class StartSafetyScreen(Screen[None]):
         def __init__(self, app_config: AppConfig) -> None:
@@ -1922,6 +2254,7 @@ def build_tui_app(config_path: str | None = None):
                                 yield Input(placeholder="Bibelstelle", id="bible_input")
                                 yield Label("Redner / Leitung", id="speaker_label")
                                 yield Input(placeholder="Redner oder Leitung", id="speaker_input")
+                                yield OptionList(id="speaker_suggestions")
                                 yield Static("Optionale Angaben", id="metadata_optional_heading", classes="metadata_section_heading")
                                 yield Label("Besonderheit im Ordner", id="folder_note_label")
                                 yield Input(placeholder="optional, z. B. Taufe oder Gastredner", id="folder_note_input")
@@ -1941,6 +2274,7 @@ def build_tui_app(config_path: str | None = None):
             yield Footer()
 
         def on_mount(self) -> None:
+            self.query_one("#speaker_suggestions", OptionList).display = False
             self._update_preview()
 
         def on_descendant_focus(self, event) -> None:
@@ -1960,7 +2294,38 @@ def build_tui_app(config_path: str | None = None):
         def on_input_changed(self, _event: Input.Changed) -> None:
             if _event.input.id == "sermon_date":
                 self._sync_service_type_for_date()
+            elif _event.input.id == "speaker_input":
+                self._update_speaker_suggestions(_event.input.value)
             self._update_preview()
+
+        def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+            if event.option_list.id != "speaker_suggestions":
+                return
+            suggestions = getattr(self, "_visible_speaker_suggestions", ())
+            if event.option_index >= len(suggestions):
+                return
+            speaker_input = self.query_one("#speaker_input", Input)
+            speaker_input.value = suggestions[event.option_index]
+            event.option_list.display = False
+            speaker_input.focus()
+
+        def on_key(self, event) -> None:
+            if event.key != "down" or self.app.focused is not self.query_one("#speaker_input", Input):
+                return
+            suggestions = self.query_one("#speaker_suggestions", OptionList)
+            if suggestions.display and suggestions.option_count:
+                suggestions.focus()
+                event.prevent_default()
+
+        def _update_speaker_suggestions(self, text: str) -> None:
+            widget = self.query_one("#speaker_suggestions", OptionList)
+            try:
+                values = speakers.suggest(text) if text.strip() else ()
+            except OSError:
+                values = ()
+            self._visible_speaker_suggestions = values
+            widget.set_options(values)
+            widget.display = bool(values)
 
         def on_select_changed(self, _event: Select.Changed) -> None:
             if _event.select.id == "service_type" and not self._syncing_service_type:
@@ -2388,7 +2753,7 @@ def build_tui_app(config_path: str | None = None):
         def compose(self) -> ComposeResult:
             conflicts = detect_tui_target_conflicts(self.plan)
             yield Header(show_clock=False)
-            yield Static(build_tui_step_title(7, "Finale Dateien erstellen / Abschluss"), id="screen_title")
+            yield Static(build_tui_step_title(7, "Lokale Dateien erstellen"), id="screen_title")
             skipped_steps = {3} if self.plan.raw_recording is None else set()
             yield Static(build_tui_progress_text(7, skipped_steps), classes="workflow_progress")
             yield Static(
@@ -2492,6 +2857,7 @@ def build_tui_app(config_path: str | None = None):
                     event.button.label = "Neue Dateinamen verwenden"
                     self.call_after_refresh(self._scroll_to_output_names)
                     self.set_timer(0.05, self._scroll_to_output_names)
+                    self.set_timer(0.2, self._scroll_to_output_names)
                     self._update_output_name_preview()
                     return
                 try:
@@ -2593,6 +2959,8 @@ def build_tui_app(config_path: str | None = None):
             self.query_one("#processing_review_scroll", VerticalScroll).scroll_to_widget(
                 self.query_one("#new_mp4_name", Input),
                 top=False,
+                origin_visible=False,
+                force=True,
                 immediate=True,
             )
 
@@ -2634,12 +3002,15 @@ def build_tui_app(config_path: str | None = None):
                 return
 
             if result.success:
-                self.app.push_screen(
-                    CompletionScreen(
-                        self.app_config,
-                        self.plan,
-                        opened_target_folder=result.opened_target_folder,
-                    )
+                if self.plan.info.speaker.strip():
+                    try:
+                        speakers.add(self.plan.info.speaker)
+                    except OSError as exc:
+                        self.notify(f"Prediger-Historie konnte nicht gespeichert werden: {exc}", severity="warning")
+                self.app.open_vimeo_publishing(
+                    self.plan,
+                    state_path=result.workflow_state_path or recording_workflow_state_path(self.plan.target_mp4),
+                    opened_target_folder=result.opened_target_folder,
                 )
                 self.notify("Dateien wurden vorbereitet.")
                 return
@@ -2682,6 +3053,275 @@ def build_tui_app(config_path: str | None = None):
                 except Exception:
                     return
 
+    class VimeoPublishingScreen(Screen[None]):
+        def __init__(
+            self,
+            app_config: AppConfig,
+            plan: PreparedRecordingPlan,
+            *,
+            state_path: Path,
+            opened_target_folder: bool,
+            direct_mode: bool = False,
+        ) -> None:
+            super().__init__()
+            self.app_config = app_config
+            self.plan = plan
+            self.state_path = state_path
+            self.opened_target_folder = opened_target_folder
+            self.direct_mode = direct_mode
+            self.vimeo_state = self._load_vimeo_state()
+            self.running = False
+            self.last_progress: VimeoProgress | None = None
+
+        def compose(self) -> ComposeResult:
+            complete = bool(
+                self.vimeo_state
+                and self.vimeo_state.step.status == "complete"
+                and self.vimeo_state.video_id
+            )
+            yield Header(show_clock=False)
+            yield Static(build_tui_step_title(8, "Vimeo veröffentlichen"), id="screen_title")
+            skipped_steps = {3} if self.plan.raw_recording is None else set()
+            yield Static(build_tui_progress_text(8, skipped_steps), classes="workflow_progress")
+            yield Static(
+                "Die lokalen Dateien sind sicher fertig. Ein Vimeo-Upload startet erst nach Klick auf den blauen Button.",
+                id="vimeo_local_safe",
+                classes="status-ok",
+            )
+            with VerticalScroll(id="vimeo_scroll"):
+                with Horizontal(id="vimeo_body"):
+                    with Vertical(id="vimeo_plan_box", classes="panel-neutral"):
+                        yield Label("Plan / Auswahl")
+                        yield Static(build_tui_vimeo_plan_text(self.plan, self.app_config), id="vimeo_plan_text")
+                    with Vertical(id="vimeo_status_box", classes="panel-info"):
+                        yield Label("Status / Entscheidung", id="vimeo_status_heading")
+                        yield Static(
+                            build_tui_vimeo_initial_status(self.vimeo_state),
+                            id="vimeo_status_banner",
+                            classes="status-ok" if complete else "status-info",
+                        )
+                        yield Static(
+                            build_tui_vimeo_progress_text(
+                                "complete" if complete else None,
+                                transcode_status=self.vimeo_state.transcode_status if self.vimeo_state else None,
+                            ),
+                            id="vimeo_progress",
+                        )
+                        yield ProgressBar(
+                            total=100,
+                            show_eta=False,
+                            id="vimeo_upload_bar",
+                        )
+                        yield Static("", id="vimeo_upload_details")
+            with Vertical(id="vimeo_actions"):
+                yield Button(
+                    "Video jetzt auf Vimeo hochladen",
+                    id="vimeo_upload",
+                    variant="primary",
+                    disabled=self.vimeo_state is None or complete,
+                )
+                with Horizontal(classes="navigation_actions"):
+                    yield Button("Vimeo öffnen", id="vimeo_open", disabled=not complete)
+                    yield Button("Embed-Code kopieren", id="vimeo_copy_embed", disabled=not complete)
+                    yield Button("Weiter zum Abschluss", id="vimeo_continue", variant="primary", disabled=not complete)
+                    yield Button("Vimeo überspringen / später erledigen", id="vimeo_skip", disabled=complete)
+            yield Footer()
+
+        def on_mount(self) -> None:
+            self.query_one("#vimeo_upload_bar", ProgressBar).display = False
+            self.query_one("#vimeo_upload_details", Static).display = False
+            if self.vimeo_state and self.vimeo_state.step.status == "complete" and self.vimeo_state.video_id:
+                self._show_success(self.vimeo_state)
+                self.query_one("#vimeo_continue", Button).focus()
+            else:
+                self.query_one("#vimeo_upload", Button).focus()
+
+        def on_button_pressed(self, event: Button.Pressed) -> None:
+            if event.button.id == "vimeo_upload":
+                self._start_publish()
+                return
+            if event.button.id == "vimeo_skip":
+                self._open_completion()
+                return
+            if event.button.id == "vimeo_continue":
+                self._open_completion()
+                return
+            if event.button.id == "vimeo_open":
+                self._open_vimeo()
+                return
+            if event.button.id == "vimeo_copy_embed":
+                self._copy_embed()
+
+        def _start_publish(self) -> None:
+            if self.running:
+                return
+            self.running = True
+            self._set_controls_running(True)
+            self.query_one("#vimeo_status_banner", Static).update(
+                "Vimeo-Veröffentlichung gestartet. Die lokalen Dateien bleiben unverändert."
+            )
+            self.query_one("#vimeo_status_banner", Static).set_classes("status-info")
+            self.run_worker(
+                self._publish_in_thread,
+                thread=True,
+                exclusive=True,
+                group="vimeo-publish",
+                exit_on_error=False,
+            )
+
+        def _publish_in_thread(self) -> None:
+            try:
+                service = make_vimeo_service(self.app_config)
+                self.app.call_from_thread(
+                    self._show_progress,
+                    VimeoProgress("checking_connection"),
+                )
+                preview = service.preview_upload(self.state_path)
+                self.app.call_from_thread(self._show_preview, preview)
+
+                def report_progress(progress: VimeoProgress) -> None:
+                    self.app.call_from_thread(self._show_progress, progress)
+
+                service.publish(self.state_path, progress=report_progress)
+                state = load_workflow_state(self.state_path).vimeo
+                self.app.call_from_thread(self._show_success, state)
+            except Exception as exc:
+                state = self._load_vimeo_state()
+                self.app.call_from_thread(self._show_error, exc, state)
+
+        def _show_preview(self, preview) -> None:
+            self.query_one("#vimeo_plan_text", Static).update(
+                "\n".join(
+                    [
+                        f"Lokale MP4: {preview.file_path}",
+                        f"Vimeo-Team / Konto: {preview.team_owner_name}",
+                        f"Zielordner: {preview.folder.name} (ID {preview.folder.folder_id})",
+                        f"Vimeo-Titel: {preview.title}",
+                    ]
+                )
+            )
+            self.query_one("#vimeo_progress", Static).update(build_tui_vimeo_progress_text("preparing"))
+
+        def _show_progress(self, progress: VimeoProgress) -> None:
+            self.last_progress = progress
+            current = self._load_vimeo_state()
+            self.query_one("#vimeo_progress", Static).update(
+                build_tui_vimeo_progress_text(
+                    progress.phase,
+                    percent=progress.percent,
+                    transcode_status=current.transcode_status if current else None,
+                )
+            )
+            bar = self.query_one("#vimeo_upload_bar", ProgressBar)
+            details = self.query_one("#vimeo_upload_details", Static)
+            if progress.phase == "uploading":
+                bar.display = True
+                details.display = True
+                bar.update(total=100, progress=progress.percent)
+                details.update(format_tui_vimeo_upload_details(progress))
+            elif progress.phase == "verifying_upload":
+                bar.display = True
+                details.display = True
+                bar.update(total=100, progress=100)
+                details.update(
+                    format_tui_vimeo_upload_details(
+                        VimeoProgress("uploading", progress.total_bytes, progress.total_bytes)
+                    )
+                )
+
+        def _show_success(self, state: VimeoState) -> None:
+            self.vimeo_state = state
+            self.running = False
+            banner = self.query_one("#vimeo_status_banner", Static)
+            banner.update(build_tui_vimeo_success_text(self.plan, state))
+            banner.set_classes("status-ok")
+            self.query_one("#vimeo_progress", Static).update(
+                build_tui_vimeo_progress_text("complete", transcode_status=state.transcode_status)
+            )
+            bar = self.query_one("#vimeo_upload_bar", ProgressBar)
+            if self.last_progress and self.last_progress.total_bytes > 0:
+                bar.display = True
+                bar.update(total=100, progress=100)
+            self._set_controls_running(False)
+            self.query_one("#vimeo_upload", Button).label = "Vimeo-Upload abgeschlossen"
+            self.query_one("#vimeo_upload", Button).disabled = True
+            self.query_one("#vimeo_skip", Button).disabled = True
+            self.query_one("#vimeo_open", Button).disabled = not bool(state.video_url)
+            self.query_one("#vimeo_copy_embed", Button).disabled = not bool(state.embed_html)
+            self.query_one("#vimeo_continue", Button).disabled = False
+            self.query_one("#vimeo_continue", Button).focus()
+            self.notify("Vimeo-Upload abgeschlossen.")
+
+        def _show_error(self, error: Exception, state: VimeoState | None) -> None:
+            self.vimeo_state = state
+            self.running = False
+            banner = self.query_one("#vimeo_status_banner", Static)
+            banner.update(build_tui_vimeo_error_text(error, state))
+            banner.set_classes("status-danger")
+            if self.last_progress is not None:
+                self.query_one("#vimeo_progress", Static).update(
+                    build_tui_vimeo_progress_text(
+                        self.last_progress.phase,
+                        percent=self.last_progress.percent,
+                        transcode_status=state.transcode_status if state else None,
+                        failed_phase=self.last_progress.phase,
+                    )
+                )
+            self._set_controls_running(False)
+            self.query_one("#vimeo_upload", Button).label = "Vimeo-Veröffentlichung erneut versuchen"
+            self.query_one("#vimeo_upload", Button).disabled = state is None
+            self.query_one("#vimeo_skip", Button).disabled = False
+            self.query_one("#vimeo_open", Button).disabled = not bool(state and state.video_url)
+            self.query_one("#vimeo_copy_embed", Button).disabled = not bool(state and state.embed_html)
+            self.notify("Vimeo ist noch nicht abgeschlossen. Die lokalen Dateien sind sicher.", severity="error")
+
+        def _set_controls_running(self, running: bool) -> None:
+            self.query_one("#vimeo_upload", Button).disabled = running
+            self.query_one("#vimeo_skip", Button).disabled = running
+            if running:
+                self.query_one("#vimeo_upload", Button).label = "Vimeo-Upload läuft..."
+                self.query_one("#vimeo_open", Button).disabled = True
+                self.query_one("#vimeo_copy_embed", Button).disabled = True
+                self.query_one("#vimeo_continue", Button).disabled = True
+
+        def _load_vimeo_state(self) -> VimeoState | None:
+            try:
+                return load_workflow_state(self.state_path).vimeo
+            except (OSError, ValueError):
+                return None
+
+        def _open_vimeo(self) -> None:
+            if not self.vimeo_state or not self.vimeo_state.video_url:
+                self.notify("Vimeo hat noch keine verwendbare Video-URL geliefert.", severity="warning")
+                return
+            if not webbrowser.open(self.vimeo_state.video_url):
+                self.notify("Vimeo konnte nicht automatisch geöffnet werden.", severity="warning")
+
+        def _copy_embed(self) -> None:
+            if not self.vimeo_state or not self.vimeo_state.embed_html:
+                self.notify("Der Embed-Code ist noch nicht verfügbar.", severity="warning")
+                return
+            try:
+                self.app.copy_to_clipboard(self.vimeo_state.embed_html)
+            except Exception as exc:
+                self.notify(f"Embed-Code konnte nicht kopiert werden: {exc}", severity="warning")
+                return
+            self.notify("Embed-Code wurde in die Zwischenablage kopiert.")
+
+        def _open_completion(self) -> None:
+            if self.direct_mode:
+                self.app.pop_screen()
+                self.app.pop_screen()
+                return
+            self.app.push_screen(
+                CompletionScreen(
+                    self.app_config,
+                    self.plan,
+                    opened_target_folder=self.opened_target_folder,
+                    vimeo_state=self._load_vimeo_state(),
+                )
+            )
+
     class CompletionScreen(Screen[None]):
         def __init__(
             self,
@@ -2689,23 +3329,28 @@ def build_tui_app(config_path: str | None = None):
             plan: PreparedRecordingPlan,
             *,
             opened_target_folder: bool,
+            vimeo_state: VimeoState | None = None,
         ) -> None:
             super().__init__()
             self.app_config = app_config
             self.plan = plan
             self.opened_target_folder = opened_target_folder
+            self.vimeo_state = vimeo_state
 
         def compose(self) -> ComposeResult:
             yield Header(show_clock=False)
             yield Static("Fertig vorbereitet", id="screen_title")
             skipped_steps = {3} if self.plan.raw_recording is None else set()
-            yield Static(build_tui_progress_text(7, skipped_steps), classes="workflow_progress")
+            if not (self.vimeo_state and self.vimeo_state.step.status == "complete"):
+                skipped_steps.add(8)
+            yield Static(build_tui_progress_text(9, skipped_steps), classes="workflow_progress")
             yield Static(build_tui_processing_success_banner(self.plan, opened_target_folder=self.opened_target_folder), id="completion_banner", classes="status-ok")
             with VerticalScroll(id="completion_scroll"):
                 yield Static(
                     build_tui_processing_success_status(
                         self.plan,
                         opened_target_folder=self.opened_target_folder,
+                        vimeo_state=self.vimeo_state,
                     ),
                     id="completion_status",
                     classes="panel-info",
@@ -2723,7 +3368,11 @@ def build_tui_app(config_path: str | None = None):
                     subprocess.Popen(["explorer", str(self.plan.target_folder)])
                 except OSError as exc:
                     self.query_one("#completion_status", Static).update(
-                        build_tui_processing_success_status(self.plan, opened_target_folder=False)
+                        build_tui_processing_success_status(
+                            self.plan,
+                            opened_target_folder=False,
+                            vimeo_state=self.vimeo_state,
+                        )
                         + f"\n\nAdmin-Hinweis: {exc}"
                     )
                 return
@@ -2762,6 +3411,120 @@ def build_tui_app(config_path: str | None = None):
             if event.button.id == "back":
                 self.app.pop_screen()
 
+    class DirectVimeoSelectionScreen(Screen[None]):
+        def __init__(self, app_config: AppConfig) -> None:
+            super().__init__()
+            self.app_config = app_config
+            self.current_folder = app_config.recordings_base
+            self._visible_candidates: tuple[Path, ...] = ()
+
+        def compose(self) -> ComposeResult:
+            yield Header(show_clock=False)
+            yield Static("Direkt zu Vimeo hochladen", id="screen_title")
+            yield Static(
+                "Admin / Sonderfall: Nur eine fertig geschnittene, korrekt benannte MP4 am endgültigen Speicherort wählen. "
+                "Der Upload startet erst auf dem folgenden Vimeo-Screen.",
+                id="direct_vimeo_warning",
+                classes="status-warning",
+            )
+            with VerticalScroll(id="direct_vimeo_selection_scroll"):
+                yield Static(f"Ordner: {self.current_folder}", id="direct_vimeo_folder")
+                yield Input(placeholder="Dateiname filtern", id="direct_vimeo_search")
+                yield DataTable(id="direct_vimeo_table")
+                yield Input(placeholder="MP4-Datei oder Ordner manuell eingeben", id="direct_vimeo_path")
+                yield Static("Noch keine Datei ausgewählt.", id="direct_vimeo_status", classes="panel-info")
+            with Horizontal(id="direct_vimeo_actions", classes="navigation_actions"):
+                yield Button("Zurück", id="direct_vimeo_back")
+                yield Button("Pfad verwenden", id="direct_vimeo_manual")
+                yield Button("Ausgewählte MP4 prüfen", id="direct_vimeo_select", variant="primary")
+            yield Footer()
+
+        def on_mount(self) -> None:
+            table = self.query_one("#direct_vimeo_table", DataTable)
+            table.cursor_type = "row"
+            table.zebra_stripes = True
+            table.add_columns("Dateiname", "Geändert", "Größe")
+            self._refresh_table()
+            table.focus()
+
+        def on_input_changed(self, event: Input.Changed) -> None:
+            if event.input.id == "direct_vimeo_search":
+                self._refresh_table()
+
+        def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+            try:
+                selected = self._visible_candidates[int(str(event.row_key.value))]
+            except (ValueError, IndexError):
+                return
+            self._prepare(selected)
+
+        def on_button_pressed(self, event: Button.Pressed) -> None:
+            if event.button.id == "direct_vimeo_back":
+                self.app.pop_screen()
+                return
+            if event.button.id == "direct_vimeo_manual":
+                text = self.query_one("#direct_vimeo_path", Input).value.strip()
+                if not text:
+                    self.notify("Bitte eine MP4-Datei oder einen Ordner eingeben.", severity="warning")
+                    return
+                path = Path(text).expanduser()
+                if path.is_dir():
+                    self.current_folder = path
+                    self._refresh_table()
+                    return
+                self._prepare(path)
+                return
+            if event.button.id == "direct_vimeo_select":
+                table = self.query_one("#direct_vimeo_table", DataTable)
+                if not self._visible_candidates or table.cursor_row >= len(self._visible_candidates):
+                    self.notify("Bitte zuerst eine MP4-Datei auswählen.", severity="warning")
+                    return
+                self._prepare(self._visible_candidates[table.cursor_row])
+
+        def _refresh_table(self) -> None:
+            rows = build_tui_mp4_file_rows(
+                self.current_folder,
+                search_text=self.query_one("#direct_vimeo_search", Input).value,
+                limit=TUI_FILE_CHOICE_LIMIT,
+            )
+            self._visible_candidates = tuple(row.path for row in rows)
+            table = self.query_one("#direct_vimeo_table", DataTable)
+            table.clear()
+            for index, row in enumerate(rows):
+                table.add_row(row.filename, row.modified, row.size, key=str(index))
+            self.query_one("#direct_vimeo_folder", Static).update(f"Ordner: {self.current_folder}")
+
+        def _prepare(self, candidate: Path) -> None:
+            status = self.query_one("#direct_vimeo_status", Static)
+            try:
+                final_mp4 = validate_direct_vimeo_mp4(candidate)
+                state_path, created = load_or_create_direct_vimeo_state(final_mp4)
+                state = load_workflow_state(state_path)
+                plan = build_direct_vimeo_plan(final_mp4, state)
+            except (OSError, ValueError, FileExistsError) as exc:
+                status.update(str(exc))
+                status.set_classes("status-danger")
+                return
+            status.update(
+                "\n".join(
+                    [
+                        f"Lokale MP4: {final_mp4}",
+                        f"Vimeo-Team-ID: {self.app_config.vimeo.team_owner_user_id}",
+                        f"Zielordner: {self.app_config.vimeo.target_folder_name} (ID {self.app_config.vimeo.target_folder_id})",
+                        f"Geplanter Titel: {build_vimeo_title(state.sermon, final_mp4)}",
+                        "Workflow-Status: " + ("neu und isoliert angelegt" if created else "vorhanden und wiederverwendet"),
+                        "Es wurde noch kein Upload gestartet.",
+                    ]
+                )
+            )
+            status.set_classes("status-ok")
+            self.app.open_vimeo_publishing(
+                plan,
+                state_path=state_path,
+                opened_target_folder=False,
+                direct_mode=True,
+            )
+
     class SettingsScreen(Screen[None]):
         def __init__(self, app_config: AppConfig) -> None:
             super().__init__()
@@ -2770,18 +3533,168 @@ def build_tui_app(config_path: str | None = None):
         def compose(self) -> ComposeResult:
             yield Header(show_clock=False)
             yield Static("Einstellungen", id="screen_title")
-            yield Static(
-                "Nur Anzeige im Prototyp. Ändern bitte weiterhin über den normalen Wizard.",
-                id="screen_note",
-            )
-            for line in build_tui_settings_lines(self.app_config):
-                yield Static(line)
-            yield Button("Zurück", id="back")
+            with VerticalScroll(id="settings_scroll"):
+                yield Label("Allgemein", classes="settings_heading")
+                yield Label("Ziel-Basisordner")
+                yield Input(value=str(self.app_config.recordings_base), id="settings_recordings_base")
+                yield Label("Rohaufnahme-Ordner")
+                yield Input(value=str(self.app_config.vmix_storage), id="settings_vmix_storage")
+                yield Label("Jahresordner-Format")
+                yield Input(value=self.app_config.year_folder_template, id="settings_year_template")
+                yield Label("Schneiden", classes="settings_heading")
+                yield Label("LosslessCut-Pfad")
+                yield Input(value=self.app_config.losslesscut_path, id="settings_losslesscut")
+                yield Label("Verhalten der Rohaufnahme")
+                yield Select(
+                    (("verschieben", "move"), ("kopieren", "copy"), ("liegen lassen", "keep")),
+                    value=self.app_config.raw_archive_mode,
+                    id="settings_raw_mode",
+                )
+                yield Button("Allgemeine Einstellungen speichern", id="settings_save_general", variant="primary")
+                yield Label("Vimeo", classes="settings_heading")
+                yield Label("Team-Owner-ID")
+                yield Input(value=self.app_config.vimeo.team_owner_user_id, id="settings_vimeo_owner")
+                yield Label("Zielordner-ID")
+                yield Input(value=self.app_config.vimeo.target_folder_id, id="settings_vimeo_folder_id")
+                yield Label("Zielordner-Name")
+                yield Input(value=self.app_config.vimeo.target_folder_name, id="settings_vimeo_folder_name")
+                yield Static(f"Token-Status: {credentials.status_text()}", id="settings_token_status", classes="panel-info")
+                yield Input(placeholder="Vimeo-Token sicher speichern", password=True, id="settings_vimeo_token")
+                with Horizontal(classes="settings_button_row"):
+                    yield Button("Vimeo-Token einrichten / ersetzen", id="settings_save_token", variant="primary")
+                    yield Button("Vimeo-Verbindung prüfen", id="settings_check_vimeo")
+                    yield Button("Gespeicherten Token entfernen", id="settings_remove_token")
+                yield Static("Noch keine Verbindungsprüfung ausgeführt.", id="settings_vimeo_result")
+                yield Label("Gespeicherte Prediger", classes="settings_heading")
+                yield DataTable(id="settings_speaker_table")
+                yield Input(placeholder="Prediger hinzufügen", id="settings_speaker_name")
+                with Horizontal(classes="settings_button_row"):
+                    yield Button("Hinzufügen", id="settings_add_speaker")
+                    yield Button("Ausgewählten entfernen", id="settings_remove_speaker")
+            with Horizontal(id="settings_actions", classes="navigation_actions"):
+                yield Button("Zurück", id="back")
             yield Footer()
+
+        def on_mount(self) -> None:
+            table = self.query_one("#settings_speaker_table", DataTable)
+            table.cursor_type = "row"
+            table.add_column("Name")
+            self._refresh_speakers()
+
+        def _refresh_speakers(self) -> None:
+            table = self.query_one("#settings_speaker_table", DataTable)
+            table.clear()
+            try:
+                values = speakers.list()
+            except OSError as exc:
+                self.query_one("#settings_vimeo_result", Static).update(str(exc))
+                values = ()
+            for index, name in enumerate(values):
+                table.add_row(name, key=str(index))
+
+        def _refresh_token_status(self) -> None:
+            self.query_one("#settings_token_status", Static).update(f"Token-Status: {credentials.status_text()}")
 
         def on_button_pressed(self, event: Button.Pressed) -> None:
             if event.button.id == "back":
                 self.app.pop_screen()
+                return
+            if event.button.id == "settings_save_general":
+                self._save_general()
+                return
+            if event.button.id == "settings_save_token":
+                try:
+                    credentials.store(self.query_one("#settings_vimeo_token", Input).value)
+                except CredentialError as exc:
+                    self.notify(str(exc), severity="error")
+                    return
+                self.query_one("#settings_vimeo_token", Input).value = ""
+                self._refresh_token_status()
+                self.notify("Der Vimeo-Token wurde sicher gespeichert.")
+                return
+            if event.button.id == "settings_remove_token":
+                try:
+                    credentials.remove_stored()
+                except CredentialError as exc:
+                    self.notify(str(exc), severity="error")
+                    return
+                self._refresh_token_status()
+                self.notify("Der lokal gespeicherte Vimeo-Token wurde entfernt.")
+                return
+            if event.button.id == "settings_check_vimeo":
+                self._check_vimeo()
+                return
+            if event.button.id == "settings_add_speaker":
+                try:
+                    speakers.add(self.query_one("#settings_speaker_name", Input).value)
+                except OSError as exc:
+                    self.notify(str(exc), severity="error")
+                    return
+                self.query_one("#settings_speaker_name", Input).value = ""
+                self._refresh_speakers()
+                return
+            if event.button.id == "settings_remove_speaker":
+                table = self.query_one("#settings_speaker_table", DataTable)
+                values = speakers.list()
+                if values and table.cursor_row < len(values):
+                    speakers.remove(values[table.cursor_row])
+                    self._refresh_speakers()
+
+        def _save_general(self) -> None:
+            raw_mode = self.query_one("#settings_raw_mode", Select).value
+            try:
+                saved_path = save_user_config_values(
+                    paths={
+                        "recordings_base": self.query_one("#settings_recordings_base", Input).value.strip(),
+                        "vmix_storage": self.query_one("#settings_vmix_storage", Input).value.strip(),
+                        "losslesscut_path": self.query_one("#settings_losslesscut", Input).value.strip(),
+                    },
+                    naming={"year_folder_template": self.query_one("#settings_year_template", Input).value.strip()},
+                    workflow={"raw_archive_mode": str(raw_mode)},
+                    vimeo={
+                        "team_owner_user_id": self.query_one("#settings_vimeo_owner", Input).value.strip(),
+                        "target_folder_id": self.query_one("#settings_vimeo_folder_id", Input).value.strip(),
+                        "target_folder_name": self.query_one("#settings_vimeo_folder_name", Input).value.strip(),
+                    },
+                )
+                refreshed = load_config(saved_path)
+            except ConfigLoadError as exc:
+                self.notify(f"{exc.user_message} Admin-Hinweis: {exc.admin_hint}", severity="error")
+                return
+            self.app.app_config = refreshed
+            self.app_config = refreshed
+            self.notify("Die Einstellungen wurden gespeichert.")
+
+        def _check_vimeo(self) -> None:
+            result = self.query_one("#settings_vimeo_result", Static)
+            result.update("Vimeo-Verbindung wird geprüft …")
+            self.query_one("#settings_check_vimeo", Button).disabled = True
+
+            def work() -> None:
+                try:
+                    service = make_vimeo_service(self.app_config)
+                    preflight = service.preflight()
+                    message = (
+                        f"Vimeo-Verbindung: OK\nTeam: {preflight.team_owner_name}\n"
+                        f"Zielordner: {preflight.folder.name} (ID {preflight.folder.folder_id})"
+                    )
+                    self.app.call_from_thread(self._finish_vimeo_check, message, False)
+                except Exception as exc:
+                    if isinstance(exc, VimeoError):
+                        message = exc.user_message
+                        if exc.admin_hint and exc.admin_hint != exc.user_message:
+                            message += f"\nAdmin-Hinweis: {exc.admin_hint}"
+                    else:
+                        message = str(exc)
+                    self.app.call_from_thread(self._finish_vimeo_check, message, True)
+
+            self.run_worker(work, thread=True, exclusive=True, group="settings-vimeo-check", exit_on_error=False)
+
+        def _finish_vimeo_check(self, message: str, failed: bool) -> None:
+            result = self.query_one("#settings_vimeo_result", Static)
+            result.update(message)
+            result.set_classes("status-danger" if failed else "status-ok")
+            self.query_one("#settings_check_vimeo", Button).disabled = False
 
     class PredigtUploaderTui(App[None]):
         CSS = """
@@ -2836,6 +3749,11 @@ def build_tui_app(config_path: str | None = None):
         #metadata_preview_scroll {
             padding: 1;
         }
+        #speaker_suggestions {
+            height: auto;
+            max-height: 6;
+            margin-bottom: 1;
+        }
         #metadata_validation {
             margin-bottom: 1;
         }
@@ -2879,9 +3797,35 @@ def build_tui_app(config_path: str | None = None):
             height: auto;
             margin-top: 1;
         }
-        #target_folder_scroll, #processing_review_scroll, #completion_scroll {
+        #target_folder_scroll, #processing_review_scroll, #vimeo_scroll, #completion_scroll {
             height: 1fr;
             min-height: 0;
+        }
+        #settings_scroll, #direct_vimeo_selection_scroll {
+            height: 1fr;
+            min-height: 0;
+        }
+        #settings_actions, #direct_vimeo_actions {
+            height: auto;
+            margin-top: 1;
+        }
+        #direct_vimeo_table {
+            height: 10;
+        }
+        #settings_speaker_table {
+            height: 8;
+        }
+        .settings_heading {
+            text-style: bold;
+            margin-top: 1;
+            margin-bottom: 1;
+        }
+        .settings_button_row {
+            height: auto;
+        }
+        .settings_button_row > Button {
+            width: 1fr;
+            margin-right: 1;
         }
         #target_folder_body {
             height: auto;
@@ -2896,6 +3840,40 @@ def build_tui_app(config_path: str | None = None):
         }
         #processing_review_body > Vertical, #output_rename_fields {
             height: auto;
+        }
+        #vimeo_body {
+            height: auto;
+            min-height: 0;
+        }
+        #vimeo_body > Vertical {
+            width: 1fr;
+            height: auto;
+        }
+        #vimeo_plan_box {
+            margin-right: 1;
+        }
+        #vimeo_status_heading {
+            text-style: bold;
+            margin-bottom: 1;
+        }
+        #vimeo_progress {
+            padding: 1;
+        }
+        #vimeo_upload_bar {
+            height: auto;
+            margin: 0 1;
+        }
+        #vimeo_upload_details {
+            height: auto;
+            color: $text-muted;
+            margin: 0 1 1 1;
+        }
+        #vimeo_actions {
+            height: auto;
+            margin-top: 1;
+        }
+        #vimeo_actions > #vimeo_upload {
+            width: 100%;
         }
         #metadata_actions, #target_folder_actions, #completion_actions {
             height: auto;
@@ -3035,8 +4013,30 @@ def build_tui_app(config_path: str | None = None):
         }
         """
 
+        def __init__(self) -> None:
+            super().__init__()
+            self.app_config = config
+
         def on_mount(self) -> None:
             self.push_screen(StartScreen())
+
+        def open_vimeo_publishing(
+            self,
+            plan: PreparedRecordingPlan,
+            *,
+            state_path: Path,
+            opened_target_folder: bool,
+            direct_mode: bool = False,
+        ) -> None:
+            self.push_screen(
+                VimeoPublishingScreen(
+                    self.app_config,
+                    plan,
+                    state_path=state_path,
+                    opened_target_folder=opened_target_folder,
+                    direct_mode=direct_mode,
+                )
+            )
 
     return PredigtUploaderTui()
 

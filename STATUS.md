@@ -6,15 +6,35 @@ PredigtUploader soll den lokalen Predigt-Workflow einer Gemeinde unter Windows v
 
 ## Aktueller Entwicklungsstand
 
-### Phase 2: UI-unabhängiges Vimeo-Publishing (31.08.2026)
+### Produktive lokale Datenhaltung und Bedienbarkeit (31.08.2026)
 
-Auf Basis des unveränderten Tags `v0.2.0-local-workflow` ist eine separat und nur bewusst startbare Vimeo-Publishing-Schicht hinzugekommen. Der normale Wizard und der Textual-Workflow bleiben lokal und starten keinen Upload. `publishing/vimeo.py` validiert Token, Team-Owner und eine explizite Folder-ID, überträgt große MP4-Dateien streamend per resumierbarem tus-Verfahren, ordnet das Video anschließend über die von Vimeo weiterhin „projects“ genannten Folder-Mitgliedschaftsendpunkte zu und verifiziert diese Zuordnung.
+Zusammenfassung und Workflow-State sind jetzt eindeutig an die finale MP4 gebunden: `<MP4-Stem> - Zusammenfassung.txt` und `<MP4-Stem>.predigt-workflow.json`. Mehrere Aufnahmen im selben Tagesordner bleiben getrennt. Ein alter generischer `predigt-workflow.json` wird nur übernommen, wenn sein gespeicherter `paths.final_mp4` exakt zur ausgewählten MP4 passt; fremde States werden nicht beansprucht oder überschrieben.
+
+Vimeo-Credentials werden zentral aufgelöst. `PREDIGT_UPLOADER_VIMEO_TOKEN` behält Vorrang für Entwicklung und CI; im normalen Windows-Betrieb speichert `keyring` den Token im Windows Credential Manager. Textual besitzt nun editierbare Einstellungen für Pfade, Jahresformat, LosslessCut, Rohaufnahmeverhalten und nicht geheime Vimeo-Zielwerte sowie maskiertes Token-Einrichten, Entfernen und eine lesende Verbindungsprüfung. Tokens gelangen nicht in Config, Workflow-State oder Logs.
+
+Das Textual-Hauptmenü enthält einen ausdrücklich sekundären Direkteinstieg zu Vimeo für bereits fertige MP4-Dateien. Er validiert die Datei, verwendet einen passenden vorhandenen (auch alten) State oder legt einen minimalen aufnahmespezifischen State an und öffnet denselben Schritt-8-Screen. Weder Auswahl noch Screen-Aufruf starten einen Upload. Die gemeinsame `VimeoPublishingService`-Logik bleibt die einzige Uploadimplementierung.
+
+Erfolgreich lokal verwendete Prediger werden normalisiert und case-insensitiv dedupliziert unter `%APPDATA%\PredigtUploader\speakers.json` gespeichert. Schritt 5 zeigt während der Eingabe freie, tastaturbedienbare Vorschläge; Einstellungen erlauben Anzeigen, Hinzufügen und Entfernen. WordPress bleibt unverändert nicht implementiert.
+
+### Phase 2: Vimeo-Publishing im Textual-Workflow (31.08.2026)
+
+Auf Basis des unveränderten Tags `v0.2.0-local-workflow` ist eine UI-unabhängige Vimeo-Publishing-Schicht hinzugekommen. `publishing/vimeo.py` validiert Token, Team-Owner und eine explizite Folder-ID, überträgt große MP4-Dateien streamend per resumierbarem tus-Verfahren, ordnet das Video anschließend über die von Vimeo weiterhin „projects“ genannten Folder-Mitgliedschaftsendpunkte zu und verifiziert diese Zuordnung. Der normale Wizard bleibt rein lokal.
 
 Der Workflow-State speichert ohne Secrets Video-ID/-URI/-URL, Player-/Embed-Daten, Zielordner, Team-Owner sowie tus-Link, Offset und Größe. Eine bekannte Video-ID wird remote geprüft und wiederverwendet; `complete` blockiert Doppeluploads und `in_progress` ohne ID stoppt sicher. Vimeo wird erst nach bestätigter Übertragung, Remote-Prüfung, verifizierter Teamordner-Zuordnung und verfügbarem Embed-Code auf `complete` gesetzt. Bekannte Remote-IDs bleiben bei Folgefehlern erhalten.
 
-Die Kommandos `vimeo-diagnose` und `vimeo-check` führen keine Uploads aus. `vimeo-upload` braucht einen Workflow-State und zusätzlich `--confirm-vimeo-upload`. `vimeo-embed` kann Embed-Daten anhand einer gespeicherten Video-ID nachladen. Die produktive Prüfung am echten Gemeinde-Vimeo-Konto und ein echter Testupload wurden bewusst noch nicht ausgeführt. WordPress bleibt nicht implementiert.
+Die Kommandos `vimeo-diagnose` und `vimeo-check` führen keine Uploads aus. `vimeo-upload` braucht einen Workflow-State und zusätzlich `--confirm-vimeo-upload`. `vimeo-embed` kann Embed-Daten anhand einer gespeicherten Video-ID nachladen. Der echte isolierte Smoke-Test hat Authentifizierung, Team-Owner „Immanuelgemeinde Wolfsburg“, Zielordner „Predigten“ (ID `1320477`), `/me/videos`, tus-Upload, Uploadverifikation, Folder-Zuordnung, erneutes Laden, abgeschlossene Transkodierung und Embed-Abruf praktisch bestätigt. Gemeldet wurden `privacy.view=unlisted` und `privacy.embed=public`; externe Einbettung, Player-URL und vollständiger iframe-Code waren verfügbar. WordPress bleibt nicht implementiert.
 
-Die vollständige automatische Suite umfasst jetzt 345 bestandene Tests. Der Windows-Systemcheck ist einschließlich Wizard, Textual, Vimeo-HTTP-Abhängigkeit und FFmpeg grün.
+Das Admin-Kommando `vimeo-smoke-test` bleibt als isolierter Regressionstest erhalten. Ohne `--confirm-vimeo-upload` lädt es weder Konfiguration/Token noch erzeugt es einen Clip oder Netzwerkzugriff. Mit Freigabe erzeugt es per FFmpeg einen viersekündigen 320×180-Testclip und verwendet dieselbe Publishing-Schicht. Lokale Testdaten werden immer entfernt; das Remote-Testvideo bleibt standardmäßig zur Kontrolle erhalten. `--delete-after-test` löscht nur nach erfolgreichem Lauf exakt die gespeicherte Video-ID.
+
+Der reale Kontotest hat gezeigt, dass `metadata.connections.videos.options` bei `/me` und Team-Owner nur `GET` meldet, obwohl Vimeo einen authentifizierten `POST /me/videos` verarbeitet und den absichtlich ungültigen Ansatz korrekt mit 2204/2230 ablehnt. Dieser Metadatenwert ist daher kein harter Upload-Capability-Test mehr. `vimeo-check` validiert weiterhin Identität, Team-Owner und Teamfolder vollständig per GET und erklärt, dass die eigentliche Upload-Berechtigung erst beim ausdrücklich bestätigten Upload geprüft wird. Der tus-Platzhalter wird nun gemäß offizieller Vimeo-Dokumentation über `/me/videos` erstellt; Folder-Zuordnung und -Verifikation verwenden weiterhin den konfigurierten Team-Owner.
+
+Workflow-State-Schema 4 speichert zusätzlich `transcode_status` und `folder_status`; Schema 3 ergänzte bereits `upload_status`, `uploaded_at` und die eindeutigen `target_folder_*`-Felder. Ältere Zustände und Schema-2-Foldernamen bleiben lesbar. Schon eine vorhandene Video-URI verhindert einen zweiten Platzhalter; nach bestätigtem Remote-Upload bleiben Status, URI, ID, URL und Zeitpunkt auch dann erhalten, wenn erst die Folder-Zuordnung oder der Embed-Abruf scheitert.
+
+Textual besitzt nun einen achten Schritt „Vimeo veröffentlichen“. Er erscheint erst nach erfolgreicher lokaler Verarbeitung, zeigt MP4, Team/Foldersoll, Titel und State, startet beim Betreten aber keinerlei Vimeo-Zugriff. Erst der blaue Uploadbutton erzeugt den Service und startet Upload/Resume in einem Textual-Thread-Worker. Der tus-Dateistream meldet innerhalb der großen Uploadblöcke fortlaufend echte Bytes; Textual zeigt daraus einen determinierten Balken, Prozent, übertragene/Gesamtgröße, Sitzungsgeschwindigkeit und geschätzte Restzeit. Verbindung, Remote-Anlage, Uploadprüfung, Folder, Verarbeitung und Embed bleiben als markierte Stufen sichtbar. Vimeos Transkodierungsstatus wird ohne erfundenen Prozentwert dargestellt. Erfolg aktiviert Vimeo öffnen, Embed-Code kopieren und Abschluss; Überspringen oder Fehler lassen die lokalen Dateien unangetastet und markieren Vimeo im Abschluss als offen. Eine bereits gespeicherte ID wird durch den bestehenden Service wiederverwendet. Der manuelle Direkteinstieg über eine fertige MP4 nutzt exakt denselben Screen und Callback; offen bleibt nur eine automatische Übersicht aller unvollständigen States.
+
+Fehlende nicht geheime Vimeo-Zielwerte in bestehenden `config.toml`-Dateien erhalten zur Laufzeit die bestätigten Projektdefaults für Team-Owner `59930802`, Folder `1320477` und Name `Predigten`, ohne die bestehende Datei umzuschreiben oder andere Einstellungen zu verändern. Der Token kommt aus der Umgebungsvariable oder dem Windows Credential Manager.
+
+Die vollständige automatische Suite umfasst jetzt 386 bestandene Tests. Der Windows-Systemcheck ist einschließlich Wizard, Textual, Vimeo-HTTP-Abhängigkeit, Windows-Credential-Zugriff und FFmpeg grün. CLI-Hilfe und der bestätigungslose Smoke-Test-Vorschauweg wurden ebenfalls ohne Netzwerk-Upload geprüft.
 
 ### Stabile lokale Baseline (30.08.2026)
 
@@ -22,9 +42,9 @@ Die Baseline trägt die Projektversion `0.2.0`; `pyproject.toml` ist die einzige
 
 Der lokale Textual-Workflow ist durchgängig funktionsfähig: Startcheck, Quell- oder Rohaufnahmeauswahl, LosslessCut-Aufruf, Exporterkennung und -bestätigung, Metadaten, Zielordnerentscheidung, sichere Dateikonfliktbehandlung, finale MP4/MP3/Zusammenfassung sowie Abschlussbildschirm. Der responsive Aufbau der Schritte 5 bis 7 und die Bottom-Actions bleiben erhalten. Der normale Terminal-Wizard bleibt parallel verfügbar und wird nicht entfernt oder zwangsweise durch Textual ersetzt.
 
-Nach erfolgreicher lokaler Verarbeitung schreiben Wizard und Textual zusätzlich `predigt-workflow.json` in den Zielordner. Das UI-unabhängige Modell verwendet die vorhandenen `SermonInfo`-Daten, speichert die tatsächlichen lokalen Pfade atomar und bereitet `vimeo`, `wordpress_audio` und `wordpress_post` mit Status, IDs und URLs vor. Lokale Vorbereitung steht dann auf `complete`, alle noch nicht implementierten Publishing-Schritte auf `pending`. `predigt-zusammenfassung.txt` bleibt unverändert als menschlich lesbarer Bericht erhalten.
+Die damalige Baseline schrieb zusätzlich die generischen Dateien `predigt-workflow.json` und `predigt-zusammenfassung.txt` in den Zielordner. Dieser historische Stand bleibt lesekompatibel; der aktuelle Stand verwendet die oben beschriebenen aufnahmespezifischen Namen.
 
-Vimeo ist nicht an den normalen Nutzerworkflow angebunden; WordPress-MP3-Upload und WordPress-Beitrag sind weiterhin nicht automatisiert. Secrets werden weder im Workflow-State noch in der Beispielkonfiguration gespeichert. Der Vimeo-Token wird aktuell ausschließlich aus `PREDIGT_UPLOADER_VIMEO_TOKEN` gelesen.
+Zum Baseline-Zeitpunkt war Vimeo noch nicht angebunden. Aktuell ist Vimeo in Textual verfügbar; der normale Wizard bleibt lokal und WordPress-MP3-Upload sowie WordPress-Beitrag sind weiterhin nicht automatisiert.
 
 Die vollständige automatische Suite umfasst für diese Baseline 310 bestandene Tests. Systemcheck, Wizard-Startbarkeit, Textual-Import/App-Aufbau und das Release-ZIP `predigt-uploader-v0.2.0-local-workflow.zip` wurden ebenfalls erfolgreich geprüft.
 
@@ -68,7 +88,7 @@ Textual hat nun einen eigenen Doppelklick-Starter `PredigtUploader Textual start
 Die lokale Einrichtung installiert nun standardmaessig auch die optionale Textual-Abhaengigkeit (`.[tui]`, im Dev-Fall `.[dev,tui]`). Der Systemcheck prueft `import textual` und `run-tui.ps1` meldet bei fehlendem Textual konkret, dass `PredigtUploader einrichten.cmd` erneut gestartet werden soll.
 Der Release-ZIP-Prozess ist nun tag-basiert und nicht mehr an hart codierte Preview-Suffixe gebunden: `make-release-zip.ps1` akzeptiert `-ReleaseTag` oder `-ReleaseName`, liest sonst einen passenden Git-Tag auf `HEAD` und faellt ohne Tag auf einen lokalen Namen aus `pyproject.toml` zurueck. `scripts/release.ps1` fuehrt erst die Tests aus und baut nur bei Erfolg das ZIP.
 Der Textual-Verarbeitungsabschluss ist nun klarer: Beim Start der finalen Verarbeitung zeigt der Status, dass Dateien erstellt, kopiert oder verschoben werden, waehrend gefaehrliche Aktionen gesperrt sind. Nach Erfolg zeigt die rechte Seite Zielpfade, Rohaufnahme-Aktion und nummerierte naechste Schritte; Fehler nennen verstaendlich, dass nichts still ueberschrieben wurde.
-Nach dem Blindtest verwendet Textual fuer die normale Veranstaltung den sichtbaren Begriff `Gottesdienst`, behaelt intern aber den kompatiblen Wert `Predigt` und damit das bestehende Predigt-Dateinamenschema. Die sieben Workflow-Schritte sind nummeriert, Zurueck-Hilfe und Zurueck-Buttons sind vereinheitlicht, konkrete Aktionsnamen ersetzen Ja/Nein- und allgemeine Weiter-Texte. Rohaufnahmen bleiben in Textual standardmaessig sicher am Quellort; Verschieben muss bewusst ausgewaehlt werden. Eine automatische Gottesdienst-Ordnerkennung wie `-1` existiert nicht und wird nicht erfunden; kuenftige Markerregeln sind zentral in `folders.py` vorgesehen.
+Nach dem Blindtest verwendet Textual fuer die normale Veranstaltung den sichtbaren Begriff `Gottesdienst`, behaelt intern aber den kompatiblen Wert `Predigt` und damit das bestehende Predigt-Dateinamenschema. Die inzwischen acht Workflow-Schritte sind nummeriert, Zurueck-Hilfe und Zurueck-Buttons sind vereinheitlicht, konkrete Aktionsnamen ersetzen Ja/Nein- und allgemeine Weiter-Texte. Rohaufnahmen bleiben in Textual standardmaessig sicher am Quellort; Verschieben muss bewusst ausgewaehlt werden. Eine automatische Gottesdienst-Ordnerkennung wie `-1` existiert nicht und wird nicht erfunden; kuenftige Markerregeln sind zentral in `folders.py` vorgesehen.
 Die Textual-Schritte 5 bis 7 sind nun fuer kleinere Terminalgroessen stabiler: lange Inhalte liegen in scrollbaren Bereichen, waehrend Aktionsleisten ausserhalb sichtbar bleiben. Schritt 6 zeigt je nach Ordnerstatus genau eine empfohlene Primaeraktion und blendet das Zusatzfeld erst bei Bedarf ein. Schritt 7 ist als kompakte Checkliste aufgebaut; nach Erfolg erscheint ein eigener `CompletionScreen` mit Zielpfaden, naechsten Schritten und den Aktionen Zielordner oeffnen, neue Aufnahme oder beenden.
 Die aktuelle UI-Politur fuer die Textual-Oberflaeche hebt Fortschritt, Navigation und Status bunter und klarer hervor, verwendet neutrale Info-Panels statt Warnfarben fuer normale Infobloecke und laeuft auch im Textual-Startcheck wieder sauber an. Schritt 5 zeigt eine feste Validierungszeile, einen kleinen lokalen Scroll-Hinweis im Formularbereich und eine klarere Aufteilung zwischen Eingaben und Vorschau; Schritt 6 fuehrt die Zusatz-Ordnerwahl eindeutiger und Schritt 7 endet mit einem eigenen gruenen Abschlussbanner.
 Der linke Formularbereich in Textual-Schritt 5 ist wieder ein eigener, hoehenbegrenzter Scrollcontainer mit sichtbarer Scrollbar bei Ueberlauf. Fokusnavigation scrollt verdeckte Felder in den sichtbaren Bereich; der lokale Pflichtfeld-Hinweis unterscheidet fehlende Felder oberhalb und unterhalb des Viewports. Pilot-Tests decken 100x32 und 120x50 Terminalzellen ab.
@@ -97,7 +117,7 @@ Textual-Schritt 7 zeigt Dateikonflikte nun als kompakte Datei-/Zustand-/Aktionsu
 - Bei Fehlern in der MP3-Erzeugung verständlich erklären, wo die vorbereitete MP4 liegt und wie man manuell weitermacht.
 - MP4 und MP3 vor der Erfolgsmeldung nochmal auf Existenz und Dateigröße prüfen.
 - Den erfolgreichen lokalen Abschluss mit Zielordner, finaler MP4 und finaler MP3 anzeigen.
-- Eine kurze `predigt-zusammenfassung.txt` im Zielordner schreiben.
+- Eine kurze aufnahmespezifische `<MP4-Stem> - Zusammenfassung.txt` im Zielordner schreiben.
 - Keine zusätzliche `predigt-info.json` schreiben.
 - Schreibfehler beim Erstellen der Zusammenfassung nutzerfreundlich melden.
 - Pro Wizard-Lauf eine einfache Logdatei unter `logs/` schreiben.
@@ -152,11 +172,11 @@ Textual-Schritt 7 zeigt Dateikonflikte nun als kompakte Datei-/Zustand-/Aktionsu
 - Lokale Einrichtung und Systemcheck so erweitern, dass die Textual-Oberflaeche nach `PredigtUploader einrichten.cmd` startbar ist.
 - Release-ZIP-Namen dynamisch aus Parameter, Git-Tag oder lokalem Fallback ableiten und optionalen Release-Ablauf mit Tests bereitstellen.
 - Textual-Verarbeitung mit klarer Laufmeldung, Abschlussstatus, Folgeaktionen und verstaendlichem Fehlerstatus nachschaerfen.
-- Textual-Begriffe, siebenstufige Nutzerfuehrung, Zurueck-Navigation und sichere Rohaufnahme-Standards anhand des Blindtests verbessern.
+- Textual-Begriffe, nummerierte Nutzerfuehrung, Zurueck-Navigation und sichere Rohaufnahme-Standards anhand des Blindtests verbessern.
 - Textual-Schritte 5 bis 7 scrollfest gestalten, Zielordnerentscheidung vereinfachen und eigenen Abschlussscreen einfuehren. Der offene Scroll-Hinweis fuer Schritt 5 ist als kleine lokale Badge im Formularbereich umgesetzt.
-- Textual-Standardweg auf Rohaufnahme ausrichten, alle sieben Schritte mit einer kompakten Fortschrittsanzeige versehen und Aktionsleisten fuer kleine Terminalfenster fest sichtbar halten.
+- Textual-Standardweg auf Rohaufnahme ausrichten, alle Schritte mit einer kompakten Fortschrittsanzeige versehen und Aktionsleisten fuer kleine Terminalfenster fest sichtbar halten.
 - Textual-Zieldateikonflikte wahlweise durch eindeutige neue Dateinamen, Sicherung vorhandener Dateien oder bewusst bestaetigtes Ersetzen aufloesen.
-- Textual-Statusbereiche mit einheitlichen Info-, Warn-, Fehler- und Erfolgsmeldungen hervorheben; Vimeo bleibt ausschliesslich ein manueller Folgeschritt.
+- Textual-Statusbereiche mit einheitlichen Info-, Warn-, Fehler- und Erfolgsmeldungen hervorheben; Vimeo wird im achten Schritt ausschließlich nach bewusster Nutzeraktion gestartet.
 - Vor neuen Aufnahmen in Textual und im normalen Hauptmenue bewusst bestaetigen lassen, dass vMix-Aufnahme und Stream beendet sind.
 - Den Textual-Startcheck als prominente Sicherheitsseite mit Standardfokus auf "Nein" anzeigen.
 - Die Textual-Startcheck-Fragen als getrennte grosse Warnbloecke darstellen.
@@ -165,8 +185,8 @@ Textual-Schritt 7 zeigt Dateikonflikte nun als kompakte Datei-/Zustand-/Aktionsu
 
 ## Bewusst noch nicht enthalten
 
-- automatischer Vimeo-Upload im Wizard oder in Textual.
-- echter Vimeo-Test am Gemeinde-Teamkonto (noch bewusst nicht ausgeführt).
+- automatischer Vimeo-Upload ohne ausdrücklichen Nutzerklick oder eine Vimeo-Anbindung des normalen Wizards.
+- Wiederaufnahme eines unvollständigen produktiven Vimeo-States direkt aus dem Textual-Startmenü.
 - WordPress-Automatisierung.
 - Login-, Token- oder API-Key-Verwaltung.
 - Automatische Predigt-Erkennung per KI.
@@ -175,7 +195,7 @@ Textual-Schritt 7 zeigt Dateikonflikte nun als kompakte Datei-/Zustand-/Aktionsu
 
 ## Nächster geplanter Schritt
 
-Zuerst `vimeo-diagnose` am echten Konto ausführen und Team-Owner-/Folder-ID verifizieren, danach `vimeo-check` mit einer fertigen lokalen Testaufnahme. Erst nach Kontrolle der Ausgabe einen kleinen bewussten Testupload mit `--confirm-vimeo-upload` ausführen und Folder-Mitgliedschaft, Privacy und Embed im Vimeo-Teamkonto manuell prüfen. Vor diesem Praxistest wird keine Textual-Anbindung begonnen.
+Als Nächstes den neuen achten Textual-Schritt manuell mit einer kleinen, bewusst gewählten lokalen Aufnahme prüfen: zunächst Vimeo überspringen und den offenen Abschluss kontrollieren, danach in einem separaten Lauf den Upload bewusst starten, Fortschritt, Vimeo-URL, Embed-Kopieren und erfolgreichen Abschluss prüfen. Anschließend ist der WordPress-MP3-/Beitragsworkflow der nächste große fachliche Schritt; eine Startmenü-Wiederaufnahme für unvollständige Vimeo-States kann davor als kleine eigene UX-Aufgabe ergänzt werden.
 
 ## Sicherheits-Hinweis
 

@@ -8,6 +8,11 @@ from typing import Any
 from .models import AppConfig, ServiceTypeConfig, VimeoConfig
 
 
+DEFAULT_VIMEO_TEAM_OWNER_USER_ID = "59930802"
+DEFAULT_VIMEO_TARGET_FOLDER_ID = "1320477"
+DEFAULT_VIMEO_TARGET_FOLDER_NAME = "Predigten"
+
+
 class ConfigLoadError(RuntimeError):
     def __init__(self, user_message: str, admin_hint: str) -> None:
         super().__init__(admin_hint)
@@ -20,6 +25,11 @@ def default_config() -> AppConfig:
         vmix_storage=Path(r"V:\vMixStorage"),
         recordings_base=Path.home() / "Desktop" / "Aufnahmen",
         mp3_base=Path(r"V:\Predigten\Predigten"),
+        vimeo=VimeoConfig(
+            team_owner_user_id=DEFAULT_VIMEO_TEAM_OWNER_USER_ID,
+            target_folder_id=DEFAULT_VIMEO_TARGET_FOLDER_ID,
+            target_folder_name=DEFAULT_VIMEO_TARGET_FOLDER_NAME,
+        ),
     )
 
 
@@ -124,9 +134,15 @@ def load_config(explicit_path: Path | None = None) -> AppConfig:
         open_target_folder=bool(_get_nested(loaded, "workflow", "open_target_folder", base.open_target_folder)),
         raw_archive_mode=str(_get_nested(loaded, "workflow", "raw_archive_mode", base.raw_archive_mode)),
         vimeo=VimeoConfig(
-            team_owner_user_id=str(_get_nested(loaded, "vimeo", "team_owner_user_id", "")).strip(),
-            target_folder_id=str(_get_nested(loaded, "vimeo", "target_folder_id", "")).strip(),
-            target_folder_name=str(_get_nested(loaded, "vimeo", "target_folder_name", "")).strip(),
+            team_owner_user_id=str(
+                _get_nested(loaded, "vimeo", "team_owner_user_id", base.vimeo.team_owner_user_id)
+            ).strip(),
+            target_folder_id=str(
+                _get_nested(loaded, "vimeo", "target_folder_id", base.vimeo.target_folder_id)
+            ).strip(),
+            target_folder_name=str(
+                _get_nested(loaded, "vimeo", "target_folder_name", base.vimeo.target_folder_name)
+            ).strip(),
         ),
     )
     custom_service_types = _parse_custom_service_types(_get_nested(loaded, "service_types", "additional", ()), config)
@@ -219,8 +235,16 @@ def save_user_config_values(
         try:
             with path.open("rb") as handle:
                 data = tomllib.load(handle)
-        except (tomllib.TOMLDecodeError, OSError):
-            data = {}
+        except tomllib.TOMLDecodeError as exc:
+            raise ConfigLoadError(
+                "Die vorhandenen Einstellungen sind ungültig und wurden nicht überschrieben.",
+                f"Ungültiges TOML in {path}: {exc}",
+            ) from exc
+        except OSError as exc:
+            raise ConfigLoadError(
+                "Die vorhandenen Einstellungen konnten nicht gelesen und wurden nicht überschrieben.",
+                f"Benutzer-config.toml konnte nicht gelesen werden: {path}. Details: {exc}",
+            ) from exc
 
     if paths:
         data.setdefault("paths", {}).update(paths)
@@ -251,10 +275,16 @@ def save_user_config_values(
 
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("\n".join(lines), encoding="utf-8")
+        temporary = path.with_name(f".{path.name}.tmp")
+        temporary.write_text("\n".join(lines), encoding="utf-8")
+        temporary.replace(path)
     except OSError as exc:
         raise ConfigLoadError(
             "Die Einstellungen konnten nicht gespeichert werden.",
             f"Benutzer-config.toml konnte nicht geschrieben werden: {path}. Details: {exc}",
         ) from exc
+    finally:
+        temporary = path.with_name(f".{path.name}.tmp")
+        if temporary.exists():
+            temporary.unlink()
     return path

@@ -4,6 +4,8 @@ import subprocess
 
 import pytest
 
+from predigt_uploader.companion_files import recording_summary_path, recording_workflow_state_path
+
 from predigt_uploader.cli import (
     MP4_TRANSFER_COPY,
     MP4_TRANSFER_KEEP,
@@ -1594,7 +1596,7 @@ def test_validate_local_workflow_result_reports_empty_mp4(tmp_path):
 
 def test_print_local_workflow_success_shows_final_paths(tmp_path, capsys):
     plan = _plan(tmp_path)
-    summary_path = plan.target_mp4.parent / "predigt-zusammenfassung.txt"
+    summary_path = recording_summary_path(plan.target_mp4)
 
     _print_local_workflow_success(plan, summary_path)
 
@@ -1607,6 +1609,7 @@ def test_print_local_workflow_success_shows_final_paths(tmp_path, capsys):
 
 
 def test_run_wizard_success_writes_summary_and_prints_final_state(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "AppData"))
     source = tmp_path / "quelle.mp4"
     source.write_bytes(b"video")
     config_path = tmp_path / "config.toml"
@@ -1657,8 +1660,8 @@ def test_run_wizard_success_writes_summary_and_prints_final_state(monkeypatch, t
     target_folder = recordings_base / "2026" / "2026-05-24"
     target_mp4 = target_folder / "Predigt (Heiligkeit_Jesaja 6,1-3)_Eduard Wiebe.mp4"
     target_mp3 = target_folder / "Predigt (Heiligkeit_Jesaja 6,1-3)_Eduard Wiebe.mp3"
-    summary_path = target_folder / "predigt-zusammenfassung.txt"
-    workflow_path = target_folder / "predigt-workflow.json"
+    summary_path = recording_summary_path(target_mp4)
+    workflow_path = recording_workflow_state_path(target_mp4)
     info_json_path = target_folder / "predigt-info.json"
     assert result == 0
     assert target_mp4.stat().st_size > 0
@@ -1671,6 +1674,7 @@ def test_run_wizard_success_writes_summary_and_prints_final_state(monkeypatch, t
     assert workflow_state.paths.final_mp4 == target_mp4
     assert workflow_state.paths.final_mp3 == target_mp3
     assert workflow_state.vimeo.step.status == "pending"
+    assert "Eduard Wiebe" in (tmp_path / "AppData" / "PredigtUploader" / "speakers.json").read_text(encoding="utf-8")
     summary = summary_path.read_text(encoding="utf-8")
     assert "MP4-Dateiname: Predigt (Heiligkeit_Jesaja 6,1-3)_Eduard Wiebe.mp4" in summary
     assert "MP3-Dateiname: Predigt (Heiligkeit_Jesaja 6,1-3)_Eduard Wiebe.mp3" in summary

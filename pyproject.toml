@@ -12,6 +12,7 @@ authors = [{ name = "Gemeindetechnik" }]
 dependencies = [
   "questionary>=2.0",
   "requests>=2.32,<3",
+  "keyring>=25,<26",
 ]
 
 [project.optional-dependencies]

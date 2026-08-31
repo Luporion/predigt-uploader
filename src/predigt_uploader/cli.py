@@ -17,8 +17,10 @@ from .filename import build_filename_preview, build_media_filename, sanitize_fil
 from .folders import ensure_folder, resolve_folder
 from .models import AppConfig, ProcessingPlan, SermonInfo, ServiceTypeConfig
 from .mp3 import Mp3ConversionError, convert_mp4_to_mp3, ffmpeg_available
+from .companion_files import recording_summary_path
 from .report import build_summary_text, write_summary_file
 from .run_log import WorkflowLog
+from .speaker_history import SpeakerHistory
 from .ui import BACK, MenuOption, UserAbortError, ask_file_path, ask_yes_no, choose_from_options, search_from_options
 from .workflow_state import completed_local_workflow_state, save_workflow_state
 
@@ -1522,7 +1524,7 @@ def _write_summary_file_safely(plan: ProcessingPlan) -> Path:
         raise SummaryWriteError(
             f"Zusammenfassung konnte nicht in {plan.target_mp4.parent} geschrieben werden. Details: {exc}"
         ) from exc
-    return plan.target_mp4.parent / "predigt-zusammenfassung.txt"
+    return recording_summary_path(plan.target_mp4)
 
 
 def _print_summary_write_error(plan: ProcessingPlan, exc: SummaryWriteError) -> None:
@@ -2100,7 +2102,7 @@ def run_wizard(args: argparse.Namespace) -> int:
 
     try:
         summary_path = _write_summary_file_safely(plan)
-        print("Die Zusammenfassung wurde geschrieben: predigt-zusammenfassung.txt")
+        print(f"Die Zusammenfassung wurde geschrieben: {summary_path.name}")
         log.event(f"Zusammenfassung geschrieben: {summary_path}")
     except SummaryWriteError as exc:
         log.error("Zusammenfassung konnte nicht geschrieben werden.", admin_hint=exc.admin_hint)
@@ -2139,6 +2141,11 @@ def run_wizard(args: argparse.Namespace) -> int:
         log.error("Workflow-Status konnte nicht gespeichert werden.", admin_hint=str(exc))
         print("Der Workflow-Status konnte nicht gespeichert werden. Die erstellten Mediendateien bleiben erhalten.")
         print(f"Admin-Hinweis: {exc}")
+    if plan.info.speaker.strip():
+        try:
+            SpeakerHistory.for_current_user().add(plan.info.speaker)
+        except OSError as exc:
+            log.error("Prediger-Historie konnte nicht gespeichert werden.", admin_hint=str(exc))
     _print_local_workflow_success(plan, summary_path, workflow_path)
     _open_target_folder_safely(config, plan.target_mp4.parent, log)
     if log.enabled:
@@ -2197,11 +2204,16 @@ def run_tui_command(args: argparse.Namespace) -> int:
 
 
 def _create_vimeo_service(args: argparse.Namespace):
+    _config, service = _create_vimeo_runtime(args)
+    return service
+
+
+def _create_vimeo_runtime(args: argparse.Namespace):
     from .publishing.vimeo import RequestsVimeoTransport, VimeoPublishingService, load_vimeo_token
 
     config = load_config(Path(args.config) if args.config else None)
     token = load_vimeo_token()
-    return VimeoPublishingService(config.vimeo, token, RequestsVimeoTransport(token))
+    return config, VimeoPublishingService(config.vimeo, token, RequestsVimeoTransport(token))
 
 
 def _print_vimeo_error(exc: Exception) -> None:
@@ -2218,7 +2230,7 @@ def _print_vimeo_error(exc: Exception) -> None:
 
 def _required_vimeo_state_path(args: argparse.Namespace) -> Path:
     if args.state is None:
-        raise ValueError("Bitte mit --state den Pfad zu predigt-workflow.json angeben.")
+        raise ValueError("Bitte mit --state den Pfad zur aufnahmespezifischen Workflow-Statusdatei angeben.")
     return Path(args.state)
 
 
@@ -2267,6 +2279,7 @@ def _print_vimeo_upload_preview(preview) -> None:
     print(f"Größe: {_format_file_size(preview.file_size)}")
     print(f"Vimeo-Titel: {preview.title}")
     print(f"Uploadverfahren: {preview.upload_approach}")
+    print(preview.permission_note)
 
 
 def run_vimeo_check(args: argparse.Namespace) -> int:
@@ -2290,6 +2303,7 @@ def _print_vimeo_progress(progress) -> None:
         "verifying_upload": "Upload wird geprüft",
         "assigning_folder": "Video wird dem Zielordner zugeordnet",
         "verifying_folder": "Zielordner wird geprüft",
+        "processing_video": "Vimeo-Verarbeitung wird geprüft",
         "fetching_embed": "Einbettungscode wird abgerufen",
         "complete": "Vimeo-Publishing abgeschlossen",
     }
@@ -2333,6 +2347,93 @@ def run_vimeo_embed(args: argparse.Namespace) -> int:
         return 2
 
 
+def _embed_permission_summary(privacy_embed: str, domains: tuple[str, ...]) -> str:
+    if privacy_embed == "public":
+        return "JA (laut Vimeo auf beliebigen Domains)"
+    if privacy_embed == "private":
+        return "NEIN (laut Vimeo nicht extern einbettbar)"
+    if privacy_embed == "whitelist":
+        suffix = ", ".join(domains) if domains else "keine Domains gemeldet"
+        return f"EINGESCHRÄNKT ({suffix})"
+    return "UNBEKANNT – Embed-Code und Ziel-Domain manuell prüfen"
+
+
+def _print_vimeo_smoke_result(result) -> None:
+    processing = "ZEITLIMIT" if result.processing_timed_out else result.transcode_status.upper()
+    print()
+    print("Vimeo Smoke-Test")
+    print("----------------")
+    print("Authentifizierung:       OK")
+    print(f"Team-Owner:              OK ({result.team_owner_name})")
+    print(f"Zielordner {result.target_folder_name}:    OK (ID {result.target_folder_id})")
+    print("Video-Erstellung:        OK")
+    print("TUS-Upload:              OK")
+    print(f"Upload verifiziert:      {'OK' if result.upload_status == 'complete' else result.upload_status.upper()}")
+    print("Folder-Zuordnung:        OK")
+    print("Video erneut abrufbar:   OK")
+    print(f"Transkodierung:          {processing}")
+    print(f"Embed-Code:              {'OK' if result.embed_available else 'NOCH NICHT VERFÜGBAR'}")
+    print(f"Privacy (Video):         {result.privacy_view}")
+    print(f"Privacy (Embed):         {result.privacy_embed}")
+    print(f"Extern einbettbar:       {_embed_permission_summary(result.privacy_embed, result.embed_domains)}")
+    print(f"Vimeo-URL:               {result.video_url}")
+    print(f"Video-ID:                {result.video_id}")
+    print(f"Video-URI:               {result.video_uri}")
+    print(f"Remote-Name:             {result.remote_name}")
+    print(f"Testclip:                {result.clip_duration_seconds} s, {_format_file_size(result.clip_size)}")
+    print(f"Testvideo behalten:      {'NEIN (gelöscht)' if result.deleted else 'JA'}")
+    if result.player_embed_url:
+        print(f"Player-URL:              {result.player_embed_url}")
+    if result.embed_html:
+        preview = " ".join(result.embed_html.split())
+        print(f"Embed-Vorschau:          {preview[:240]}{'…' if len(preview) > 240 else ''}")
+    if result.embed_domains_note:
+        print(f"Hinweis Embed-Domains:   {result.embed_domains_note}")
+    if result.processing_timed_out:
+        print("Hinweis: Vimeo verarbeitet das Video noch. Das Testvideo kann später erneut geprüft werden.")
+
+
+def run_vimeo_smoke_test_command(args: argparse.Namespace) -> int:
+    """Run the isolated E2E smoke test only after an explicit destructive-network confirmation."""
+    if not args.confirm_vimeo_upload:
+        print("Vimeo-Smoke-Test: Vorschau")
+        print("Das Kommando würde einen etwa 4 Sekunden langen schwarzen MP4-Testclip mit stiller Tonspur erzeugen.")
+        print("Anschließend würde es TUS-Upload, Teamordner-Zuordnung, Verarbeitung, Privacy und Embed-Code prüfen.")
+        print("Ohne --confirm-vimeo-upload wurden weder ein Testclip noch ein Vimeo-Video erzeugt.")
+        print("Das Testvideo bleibt standardmäßig in Vimeo; --delete-after-test löscht nur die dabei gespeicherte Video-ID.")
+        return 2
+    try:
+        from .publishing.vimeo_smoke import VimeoSmokeTestError, run_vimeo_smoke_test
+
+        config, service = _create_vimeo_runtime(args)
+        result = run_vimeo_smoke_test(
+            service,
+            config,
+            delete_after_test=args.delete_after_test,
+            progress=_print_vimeo_progress,
+        )
+        _print_vimeo_smoke_result(result)
+        return 0 if result.embed_available else 3
+    except Exception as exc:
+        from .publishing.vimeo_smoke import VimeoSmokeTestError
+
+        print()
+        print("Vimeo Smoke-Test")
+        print("----------------")
+        if isinstance(exc, VimeoSmokeTestError):
+            print(f"Fehlgeschlagene Stufe:   {exc.stage}")
+            if exc.video_id:
+                print(f"Bekannte Video-ID:       {exc.video_id}")
+            if exc.video_uri:
+                print(f"Bekannte Video-URI:      {exc.video_uri}")
+            if exc.video_url:
+                print(f"Bekannte Vimeo-URL:      {exc.video_url}")
+            if exc.video_id:
+                print("Testvideo behalten:      JA (bei Fehlern wird nicht automatisch gelöscht)")
+        _print_vimeo_error(exc)
+        return 2
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="predigt-uploader")
     parser.add_argument(
@@ -2348,14 +2449,23 @@ def build_parser() -> argparse.ArgumentParser:
             "vimeo-check",
             "vimeo-upload",
             "vimeo-embed",
+            "vimeo-smoke-test",
         ],
     )
     parser.add_argument("--config", help="Pfad zu config.toml")
-    parser.add_argument("--state", help="Pfad zu predigt-workflow.json (nur Vimeo-Entwicklungskommandos)")
+    parser.add_argument(
+        "--state",
+        help="Pfad zu <MP4-Stem>.predigt-workflow.json oder passendem Legacy-State (nur Vimeo-Entwicklungskommandos)",
+    )
     parser.add_argument(
         "--confirm-vimeo-upload",
         action="store_true",
         help="bewusste Freigabe für den ausschließlich manuell gestarteten Vimeo-Testupload",
+    )
+    parser.add_argument(
+        "--delete-after-test",
+        action="store_true",
+        help="löscht nach einem erfolgreichen Vimeo-Smoke-Test ausschließlich dessen gespeicherte Video-ID",
     )
     return parser
 
@@ -2378,6 +2488,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_vimeo_upload(args)
         if args.command == "vimeo-embed":
             return run_vimeo_embed(args)
+        if args.command == "vimeo-smoke-test":
+            return run_vimeo_smoke_test_command(args)
         parser.print_help()
         return 1
     except (KeyboardInterrupt, UserAbortError):

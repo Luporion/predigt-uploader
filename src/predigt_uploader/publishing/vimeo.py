@@ -1,17 +1,22 @@
 from __future__ import annotations
 
 import html
-import os
 import time
 from dataclasses import dataclass, replace
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, BinaryIO, Callable, Mapping, Protocol
 
+from ..credentials import (
+    VIMEO_TOKEN_ENV,
+    CredentialNotConfiguredError,
+    CredentialStoreError,
+    VimeoCredentialManager,
+)
 from ..models import SermonInfo, VimeoConfig
 from ..workflow_state import StepState, VimeoState, WorkflowState, load_workflow_state, save_workflow_state
 
 
-VIMEO_TOKEN_ENV = "PREDIGT_UPLOADER_VIMEO_TOKEN"
 VIMEO_API_BASE = "https://api.vimeo.com"
 VIMEO_OEMBED_URL = "https://vimeo.com/api/oembed.json"
 VIMEO_API_ACCEPT = "application/vnd.vimeo.*+json;version=3.4"
@@ -62,15 +67,55 @@ class VimeoProgress:
     phase: str
     uploaded_bytes: int = 0
     total_bytes: int = 0
+    bytes_per_second: float | None = None
+    eta_seconds: float | None = None
 
     @property
     def percent(self) -> float:
         if self.total_bytes <= 0:
             return 0.0
-        return min(100.0, self.uploaded_bytes * 100.0 / self.total_bytes)
+        return max(0.0, min(100.0, self.uploaded_bytes * 100.0 / self.total_bytes))
 
 
 ProgressCallback = Callable[[VimeoProgress], None]
+UploadReadCallback = Callable[[int], None]
+
+
+class _UploadProgressReporter:
+    """Report byte-accurate session progress without persisting unconfirmed offsets."""
+
+    def __init__(
+        self,
+        callback: ProgressCallback | None,
+        *,
+        initial_offset: int,
+        total_bytes: int,
+        clock: Callable[[], float],
+    ) -> None:
+        self.callback = callback
+        self.initial_offset = initial_offset
+        self.total_bytes = total_bytes
+        self.clock = clock
+        self.started_at = clock()
+
+    def report(self, uploaded_bytes: int) -> None:
+        uploaded_bytes = min(max(0, uploaded_bytes), self.total_bytes)
+        elapsed = self.clock() - self.started_at
+        session_bytes = max(0, uploaded_bytes - self.initial_offset)
+        bytes_per_second = session_bytes / elapsed if elapsed > 0 and session_bytes > 0 else None
+        eta_seconds = None
+        if bytes_per_second:
+            eta_seconds = max(0.0, (self.total_bytes - uploaded_bytes) / bytes_per_second)
+        if self.callback is not None:
+            self.callback(
+                VimeoProgress(
+                    "uploading",
+                    uploaded_bytes,
+                    self.total_bytes,
+                    bytes_per_second,
+                    eta_seconds,
+                )
+            )
 
 
 @dataclass(frozen=True)
@@ -98,6 +143,7 @@ class VimeoPreflightResult:
     authenticated_user_name: str
     team_owner_name: str
     folder: VimeoFolder
+    permission_note: str
 
 
 @dataclass(frozen=True)
@@ -114,6 +160,7 @@ class VimeoPublishResult:
     video_url: str
     embed_html: str
     folder_uri: str
+    transcode_status: str | None = None
 
 
 @dataclass(frozen=True)
@@ -123,6 +170,7 @@ class VimeoUploadPreview:
     title: str
     team_owner_name: str
     folder: VimeoFolder
+    permission_note: str
     upload_approach: str = "tus"
 
 
@@ -130,6 +178,7 @@ class VimeoTransport(Protocol):
     def get_json(self, path_or_url: str, *, params: Mapping[str, Any] | None = None) -> Mapping[str, Any]: ...
     def post_json(self, path: str, payload: Mapping[str, Any]) -> Mapping[str, Any]: ...
     def post_empty(self, path: str, payload: Mapping[str, Any]) -> None: ...
+    def delete(self, path: str) -> None: ...
     def head_upload(self, upload_url: str) -> tuple[int, int]: ...
     def patch_upload(
         self,
@@ -139,17 +188,26 @@ class VimeoTransport(Protocol):
         source: BinaryIO,
         length: int,
         read_size: int,
+        progress: UploadReadCallback | None = None,
     ) -> int: ...
     def get_oembed(self, video_url: str) -> Mapping[str, Any]: ...
 
 
 class _BoundedReader:
-    def __init__(self, source: BinaryIO, length: int, read_size: int) -> None:
+    def __init__(
+        self,
+        source: BinaryIO,
+        length: int,
+        read_size: int,
+        progress: UploadReadCallback | None = None,
+    ) -> None:
         self.source = source
         self.length = length
         self.remaining = length
         self.read_size = read_size
         self.max_read_size = 0
+        self.bytes_read = 0
+        self.progress = progress
 
     def __len__(self) -> int:
         return self.length
@@ -162,6 +220,9 @@ class _BoundedReader:
         self.max_read_size = max(self.max_read_size, requested)
         data = self.source.read(requested)
         self.remaining -= len(data)
+        self.bytes_read += len(data)
+        if data and self.progress is not None:
+            self.progress(self.bytes_read)
         return data
 
 
@@ -198,6 +259,9 @@ class RequestsVimeoTransport:
     def post_empty(self, path: str, payload: Mapping[str, Any]) -> None:
         self._request("POST", path, json=dict(payload), expected=(200, 201, 204))
 
+    def delete(self, path: str) -> None:
+        self._request("DELETE", path, expected=(204,))
+
     def head_upload(self, upload_url: str) -> tuple[int, int]:
         response = self._request(
             "HEAD",
@@ -221,8 +285,9 @@ class RequestsVimeoTransport:
         source: BinaryIO,
         length: int,
         read_size: int,
+        progress: UploadReadCallback | None = None,
     ) -> int:
-        reader = _BoundedReader(source, length, read_size)
+        reader = _BoundedReader(source, length, read_size, progress)
         response = self._request(
             "PATCH",
             upload_url,
@@ -320,6 +385,7 @@ class VimeoPublishingService:
         read_size: int = DEFAULT_STREAM_READ_SIZE,
         max_retries: int = 3,
         sleep: Callable[[float], None] = time.sleep,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         token = require_vimeo_token(token)
         self.config = config
@@ -329,6 +395,7 @@ class VimeoPublishingService:
         self.read_size = read_size
         self.max_retries = max_retries
         self.sleep = sleep
+        self.clock = clock
 
     def diagnose(self) -> VimeoConnectionReport:
         me = self.transport.get_json("/me", params={"fields": "uri,name"})
@@ -375,23 +442,20 @@ class VimeoPublishingService:
         validate_vimeo_config(self.config)
         me = self.transport.get_json("/me", params={"fields": "uri,name"})
         owner = self._get_owner()
-        video_options = _connection_options(owner, "videos")
-        if "POST" not in video_options:
+        expected_owner_uri = f"/users/{self.config.team_owner_user_id}"
+        actual_owner_uri = _required_text(owner, "uri", VimeoConfigurationError)
+        if actual_owner_uri != expected_owner_uri:
             raise VimeoConfigurationError(
-                "Der Vimeo-Token darf im konfigurierten Teamkonto keine Videos hochladen.",
-                "metadata.connections.videos.options enthält kein POST. Benötigt: upload/edit und passende Teamrolle.",
+                "Vimeo hat nicht den konfigurierten Team-Owner zurückgegeben.",
+                f"Erwartet {expected_owner_uri}, erhalten {actual_owner_uri}.",
             )
         folder = self._get_target_folder()
-        if "POST" not in folder.item_options:
-            raise VimeoFolderError(
-                "Der Vimeo-Token darf dem Zielordner keine Videos hinzufügen.",
-                "metadata.connections.items.options enthält kein POST. Benötigt: interact und passende Ordnerrechte.",
-            )
         return VimeoPreflightResult(
             authenticated_user_uri=_required_text(me, "uri", VimeoCredentialError),
             authenticated_user_name=str(me.get("name") or "(ohne Namen)"),
             team_owner_name=str(owner.get("name") or "(ohne Namen)"),
             folder=folder,
+            permission_note="Die eigentliche Upload-Berechtigung wird beim Upload geprüft.",
         )
 
     def preview_upload(self, state_path: Path) -> VimeoUploadPreview:
@@ -399,8 +463,9 @@ class VimeoPublishingService:
         state = load_workflow_state(state_path)
         video_path = _validate_local_state(state)
         _guard_duplicate_state(state)
-        if state.vimeo.video_id:
-            self.get_video(state.vimeo.video_id)
+        known_video_id = _known_video_id(state.vimeo)
+        if known_video_id:
+            self.get_video(known_video_id)
             if state.vimeo.step.status == "complete":
                 raise VimeoStateConflictError(
                     "Dieses Video wurde laut Workflow-State bereits zu Vimeo hochgeladen."
@@ -412,6 +477,7 @@ class VimeoPublishingService:
             title=build_vimeo_title(state.sermon, video_path),
             team_owner_name=preflight.team_owner_name,
             folder=preflight.folder,
+            permission_note=preflight.permission_note,
         )
 
     def publish(self, state_path: Path, progress: ProgressCallback | None = None) -> VimeoPublishResult:
@@ -419,17 +485,18 @@ class VimeoPublishingService:
         state = load_workflow_state(state_path)
         video_path = preview.file_path
         _emit(progress, "preparing", total=video_path.stat().st_size)
-        preflight = VimeoPreflightResult("", "", preview.team_owner_name, preview.folder)
+        preflight = VimeoPreflightResult("", "", preview.team_owner_name, preview.folder, preview.permission_note)
         total_size = video_path.stat().st_size
         state = replace(
             state,
             vimeo=replace(
                 state.vimeo,
                 step=StepState("in_progress"),
-                folder_id=preflight.folder.folder_id,
-                folder_uri=preflight.folder.uri,
-                folder_name=preflight.folder.name,
+                target_folder_id=preflight.folder.folder_id,
+                target_folder_uri=preflight.folder.uri,
+                target_folder_name=preflight.folder.name,
                 team_owner_user_id=self.config.team_owner_user_id,
+                upload_status=state.vimeo.upload_status or "pending",
                 upload_size=total_size,
             ),
         )
@@ -439,13 +506,25 @@ class VimeoPublishingService:
             state = load_workflow_state(state_path)
             self._upload_if_needed(state, state_path, video_path, remote, progress)
             state = load_workflow_state(state_path)
-            video = self._verify_remote_video(state.vimeo.video_id, progress)
-            self._assign_folder(_required_video_uri(state.vimeo), progress)
-            if not self.verify_folder_membership(_required_video_uri(state.vimeo), progress=progress):
+            video = self._verify_remote_video(_known_video_id(state.vimeo), progress)
+            state = self._persist_verified_upload(state_path, video)
+            video_uri = _required_video_uri(state.vimeo)
+            folder_membership_confirmed = self.verify_folder_membership(video_uri, progress=progress)
+            if not folder_membership_confirmed:
+                self._assign_folder(video_uri, progress)
+                folder_membership_confirmed = self.verify_folder_membership(video_uri, progress=progress)
+            if not folder_membership_confirmed:
                 raise VimeoFolderError(
                     "Das Video wurde übertragen, ist aber nicht im konfigurierten Vimeo-Zielordner auffindbar.",
                     f"Video {_required_video_uri(state.vimeo)} fehlt in Folder {preflight.folder.uri}.",
                 )
+            current = load_workflow_state(state_path)
+            save_workflow_state(
+                replace(current, vimeo=replace(current.vimeo, folder_status="verified")),
+                state_path,
+            )
+            _emit(progress, "processing_video")
+            state = self._persist_remote_details(state_path, video)
             embed = self.get_video_embed(_required_video_id(state.vimeo), video=video, progress=progress)
             current = load_workflow_state(state_path)
             completed = replace(
@@ -456,6 +535,7 @@ class VimeoPublishingService:
                     video_url=embed.video_url,
                     player_embed_url=embed.player_embed_url,
                     embed_html=embed.embed_html,
+                    upload_status="complete",
                     upload_uri=None,
                     upload_offset=total_size,
                 ),
@@ -468,6 +548,7 @@ class VimeoPublishingService:
                 video_url=embed.video_url,
                 embed_html=embed.embed_html,
                 folder_uri=preflight.folder.uri,
+                transcode_status=completed.vimeo.transcode_status,
             )
         except Exception as exc:
             self._persist_failure(state_path, exc)
@@ -481,14 +562,23 @@ class VimeoPublishingService:
     def refresh_embed(self, state_path: Path) -> VimeoEmbedData:
         state = load_workflow_state(state_path)
         video_id = _required_video_id(state.vimeo)
-        embed = self.get_video_embed(video_id)
+        video = self.get_video(video_id)
+        embed = self.get_video_embed(video_id, video=video)
+        transcode = video.get("transcode")
         updated = replace(
             state,
             vimeo=replace(
                 state.vimeo,
+                video_id=video_id,
+                video_uri=state.vimeo.video_uri or f"/videos/{video_id}",
                 video_url=embed.video_url,
                 player_embed_url=embed.player_embed_url,
                 embed_html=embed.embed_html,
+                transcode_status=(
+                    _optional_text(transcode.get("status"))
+                    if isinstance(transcode, Mapping)
+                    else state.vimeo.transcode_status
+                ),
             ),
         )
         save_workflow_state(updated, state_path)
@@ -498,9 +588,42 @@ class VimeoPublishingService:
         return self.transport.get_json(
             f"/videos/{video_id}",
             params={
-                "fields": "uri,link,name,upload.status,player_embed_url,embed.html,privacy.view,privacy.embed,parent_project.uri"
+                "fields": (
+                    "uri,link,name,upload.status,transcode.status,status,is_playable,"
+                    "player_embed_url,embed.html,privacy.view,privacy.embed,privacy.add,"
+                    "privacy.download,parent_project.uri"
+                )
             },
         )
+
+    def get_video_embed_domains(self, video_id: str) -> tuple[str, ...]:
+        """Return the explicit domain allowlist for a whitelist-protected video."""
+        path: str | None = f"/videos/{video_id}/privacy/domains"
+        params: Mapping[str, Any] | None = {"per_page": 100, "fields": "domain"}
+        domains: list[str] = []
+        while path:
+            page = self.transport.get_json(path, params=params)
+            data = page.get("data", [])
+            if not isinstance(data, list):
+                raise VimeoEmbedError("Vimeo hat die Liste der erlaubten Embed-Domains nicht lesbar geliefert.")
+            for item in data:
+                if isinstance(item, Mapping):
+                    domain = _optional_text(item.get("domain"))
+                    if domain:
+                        domains.append(domain)
+            paging = page.get("paging")
+            path = str(paging.get("next")) if isinstance(paging, Mapping) and paging.get("next") else None
+            params = None
+        return tuple(domains)
+
+    def delete_video(self, video_id: str) -> None:
+        """Delete exactly one explicitly identified Vimeo video."""
+        video_id = video_id.strip()
+        if not video_id.isdigit():
+            raise VimeoStateConflictError(
+                "Das Vimeo-Testvideo kann ohne eindeutige numerische Video-ID nicht sicher gelöscht werden."
+            )
+        self.transport.delete(f"/videos/{video_id}")
 
     def get_video_embed(
         self,
@@ -555,7 +678,7 @@ class VimeoPublishingService:
     def _get_owner(self) -> Mapping[str, Any]:
         return self.transport.get_json(
             f"/users/{self.config.team_owner_user_id}",
-            params={"fields": "uri,name,metadata.connections.videos.options"},
+            params={"fields": "uri,name"},
         )
 
     def _get_target_folder(self) -> VimeoFolder:
@@ -578,10 +701,10 @@ class VimeoPublishingService:
         if folder.folder_id != self.config.target_folder_id:
             raise VimeoFolderError("Vimeo hat einen anderen Ordner als die konfigurierte Folder-ID zurückgegeben.")
         expected_owner = f"/users/{self.config.team_owner_user_id}"
-        if folder.owner_uri and folder.owner_uri != expected_owner:
+        if folder.owner_uri != expected_owner:
             raise VimeoFolderError(
-                "Der konfigurierte Vimeo-Ordner gehört nicht zum angegebenen Team-Owner.",
-                f"Erwartet {expected_owner}, erhalten {folder.owner_uri}.",
+                "Die Team-Zugehörigkeit des konfigurierten Vimeo-Ordners konnte nicht bestätigt werden.",
+                f"Erwartet {expected_owner}, erhalten {folder.owner_uri or '(keine Owner-URI)'}.",
             )
         if self.config.target_folder_name and folder.name != self.config.target_folder_name:
             raise VimeoFolderError(
@@ -597,8 +720,15 @@ class VimeoPublishingService:
         video_path: Path,
         progress: ProgressCallback | None,
     ) -> Mapping[str, Any]:
-        if state.vimeo.video_id:
-            remote = self.get_video(state.vimeo.video_id)
+        known_video_id = _known_video_id(state.vimeo)
+        if known_video_id:
+            remote = self.get_video(known_video_id)
+            current_uri = _optional_text(remote.get("uri")) or state.vimeo.video_uri or f"/videos/{known_video_id}"
+            normalized = replace(
+                state,
+                vimeo=replace(state.vimeo, video_id=known_video_id, video_uri=current_uri),
+            )
+            save_workflow_state(normalized, state_path)
             return remote
         _emit(progress, "creating_remote_video", total=video_path.stat().st_size)
         payload = {
@@ -606,7 +736,7 @@ class VimeoPublishingService:
             "name": build_vimeo_title(state.sermon, video_path),
         }
         remote = self.transport.post_json(
-            f"/users/{self.config.team_owner_user_id}/videos",
+            "/me/videos",
             payload,
         )
         video_uri = _required_text(remote, "uri", VimeoUploadError)
@@ -620,6 +750,9 @@ class VimeoPublishingService:
                 video_id=video_id,
                 video_uri=video_uri,
                 video_url=_optional_text(remote.get("link")),
+                upload_status=(
+                    _optional_text(upload.get("status")) if isinstance(upload, Mapping) else None
+                ) or "in_progress",
                 upload_uri=upload_uri,
                 upload_offset=0,
                 upload_size=video_path.stat().st_size,
@@ -633,6 +766,51 @@ class VimeoPublishingService:
                 f"Video-ID {video_id} wurde gespeichert; approach={approach or '-'}, upload_link={'ja' if upload_uri else 'nein'}.",
             )
         return remote
+
+    def _persist_verified_upload(self, state_path: Path, video: Mapping[str, Any]) -> WorkflowState:
+        current = load_workflow_state(state_path)
+        video_uri = _required_text(video, "uri", VimeoUploadError)
+        video_id = _video_id_from_uri(video_uri)
+        upload = video.get("upload")
+        upload_status = _optional_text(upload.get("status")) if isinstance(upload, Mapping) else None
+        transcode = video.get("transcode")
+        transcode_status = _optional_text(transcode.get("status")) if isinstance(transcode, Mapping) else None
+        if upload_status != "complete":
+            raise VimeoUploadError(
+                "Vimeo hat den Upload noch nicht als vollständig bestätigt.",
+                f"upload.status={upload_status or '-'}",
+            )
+        verified = replace(
+            current,
+            vimeo=replace(
+                current.vimeo,
+                video_id=video_id,
+                video_uri=video_uri,
+                video_url=_optional_text(video.get("link")) or current.vimeo.video_url,
+                upload_status="complete",
+                transcode_status=transcode_status or current.vimeo.transcode_status,
+                uploaded_at=current.vimeo.uploaded_at or _utc_now(),
+                upload_uri=None,
+                upload_offset=current.vimeo.upload_size,
+            ),
+        )
+        save_workflow_state(verified, state_path)
+        return load_workflow_state(state_path)
+
+    def _persist_remote_details(self, state_path: Path, video: Mapping[str, Any]) -> WorkflowState:
+        current = load_workflow_state(state_path)
+        transcode = video.get("transcode")
+        transcode_status = _optional_text(transcode.get("status")) if isinstance(transcode, Mapping) else None
+        updated = replace(
+            current,
+            vimeo=replace(
+                current.vimeo,
+                video_url=_optional_text(video.get("link")) or current.vimeo.video_url,
+                transcode_status=transcode_status or current.vimeo.transcode_status,
+            ),
+        )
+        save_workflow_state(updated, state_path)
+        return load_workflow_state(state_path)
 
     def _upload_if_needed(
         self,
@@ -658,7 +836,13 @@ class VimeoPublishingService:
                 "Die lokale MP4 passt nicht zur bereits begonnenen Vimeo-Übertragung.",
                 f"Lokal {total} Bytes, Vimeo erwartet {remote_total} Bytes.",
             )
-        _emit(progress, "uploading", offset, total)
+        upload_progress = _UploadProgressReporter(
+            progress,
+            initial_offset=offset,
+            total_bytes=total,
+            clock=self.clock,
+        )
+        upload_progress.report(offset)
         with video_path.open("rb") as source:
             while offset < total:
                 source.seek(offset)
@@ -671,6 +855,7 @@ class VimeoPublishingService:
                             source=source,
                             length=length,
                             read_size=self.read_size,
+                            progress=lambda sent, base_offset=offset: upload_progress.report(base_offset + sent),
                         )
                         if new_offset <= offset or new_offset > total:
                             raise VimeoUploadError("Vimeo hat einen unplausiblen Upload-Fortschritt gemeldet.")
@@ -685,12 +870,13 @@ class VimeoPublishingService:
                             raise VimeoStateConflictError("Die Vimeo-Uploadgröße hat sich unerwartet geändert.")
                         source.seek(offset)
                         length = min(self.chunk_size, total - offset)
+                        upload_progress.report(offset)
                 current = load_workflow_state(state_path)
                 save_workflow_state(
                     replace(current, vimeo=replace(current.vimeo, upload_offset=offset)),
                     state_path,
                 )
-                _emit(progress, "uploading", offset, total)
+                upload_progress.report(offset)
         _emit(progress, "verifying_upload", total, total)
         final_offset, final_total = self.transport.head_upload(upload_uri)
         if final_offset != total or final_total != total:
@@ -742,17 +928,41 @@ class VimeoPublishingService:
             current = load_workflow_state(state_path)
             message = exc.user_message if isinstance(exc, VimeoError) else "Der Vimeo-Vorgang ist fehlgeschlagen."
             message = redact_secret(message, self.token)
+            upload_status = current.vimeo.upload_status
+            if upload_status != "complete":
+                upload_status = "failed"
             save_workflow_state(
-                replace(current, vimeo=replace(current.vimeo, step=StepState("failed", message))),
+                replace(
+                    current,
+                    vimeo=replace(
+                        current.vimeo,
+                        step=StepState("failed", message),
+                        upload_status=upload_status,
+                    ),
+                ),
                 state_path,
             )
         except OSError:
             return
 
 
-def load_vimeo_token(environ: Mapping[str, str] | None = None) -> str:
-    values = os.environ if environ is None else environ
-    return require_vimeo_token(values.get(VIMEO_TOKEN_ENV, ""))
+def load_vimeo_token(
+    environ: Mapping[str, str] | None = None,
+    credential_manager: VimeoCredentialManager | None = None,
+) -> str:
+    manager = credential_manager or VimeoCredentialManager(environ=environ)
+    try:
+        return require_vimeo_token(manager.resolve().value)
+    except CredentialNotConfiguredError as exc:
+        raise VimeoCredentialError(
+            "Vimeo ist noch nicht eingerichtet. Öffne Einstellungen > Vimeo und richte den Zugang ein.",
+            f"Weder {VIMEO_TOKEN_ENV} noch ein sicher gespeicherter Vimeo-Token ist verfügbar.",
+        ) from exc
+    except CredentialStoreError as exc:
+        raise VimeoCredentialError(
+            "Der sichere Vimeo-Zugang konnte nicht gelesen werden. Bitte öffne Einstellungen > Vimeo.",
+            str(exc),
+        ) from exc
 
 
 def require_vimeo_token(token: str) -> str:
@@ -807,9 +1017,10 @@ def _validate_local_state(state: WorkflowState) -> Path:
 
 def _guard_duplicate_state(state: WorkflowState) -> None:
     vimeo = state.vimeo
-    if vimeo.step.status == "complete" and not vimeo.video_id:
+    known_video_id = _known_video_id(vimeo)
+    if vimeo.step.status == "complete" and not known_video_id:
         raise VimeoStateConflictError("Der Vimeo-State ist als vollständig markiert, enthält aber keine Video-ID.")
-    if vimeo.step.status == "in_progress" and not vimeo.video_id:
+    if vimeo.step.status == "in_progress" and not known_video_id:
         raise VimeoStateConflictError(
             "Ein Vimeo-Upload ist als begonnen markiert, aber die Video-ID fehlt. Es wird kein zweiter Upload gestartet."
         )
@@ -831,14 +1042,6 @@ def _folder_from_response(payload: Mapping[str, Any]) -> VimeoFolder:
         parent_folder_uri=_optional_text(parent.get("uri")) if isinstance(parent, Mapping) else None,
         item_options=tuple(str(option).upper() for option in options if isinstance(option, str)),
     )
-
-
-def _connection_options(payload: Mapping[str, Any], name: str) -> tuple[str, ...]:
-    metadata = payload.get("metadata")
-    connections = metadata.get("connections") if isinstance(metadata, Mapping) else None
-    connection = connections.get(name) if isinstance(connections, Mapping) else None
-    options = connection.get("options", ()) if isinstance(connection, Mapping) else ()
-    return tuple(str(option).upper() for option in options if isinstance(option, str))
 
 
 def _required_text(payload: Mapping[str, Any], key: str, error_type: type[VimeoError]) -> str:
@@ -867,13 +1070,32 @@ def _folder_id_from_uri(uri: str) -> str:
 
 
 def _required_video_id(state: VimeoState) -> str:
-    if not state.video_id:
+    video_id = _known_video_id(state)
+    if not video_id:
         raise VimeoStateConflictError("Im Workflow-State fehlt die Vimeo-Video-ID.")
-    return state.video_id
+    return video_id
 
 
 def _required_video_uri(state: VimeoState) -> str:
     return state.video_uri or f"/videos/{_required_video_id(state)}"
+
+
+def _known_video_id(state: VimeoState) -> str | None:
+    if state.video_id:
+        return state.video_id
+    if not state.video_uri:
+        return None
+    try:
+        return _video_id_from_uri(state.video_uri)
+    except VimeoUploadError as exc:
+        raise VimeoStateConflictError(
+            "Die Vimeo-Video-URI im Workflow-State ist ungültig.",
+            exc.admin_hint,
+        ) from exc
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _emit(

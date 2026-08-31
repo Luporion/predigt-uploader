@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .companion_files import recording_summary_path
 from .models import ProcessingPlan
 
 
 def summary_file_path(target_folder: Path) -> Path:
+    """Return the legacy generic summary path for backward compatibility."""
     return target_folder / "predigt-zusammenfassung.txt"
 
 
@@ -38,6 +40,5 @@ def build_summary_text(plan: ProcessingPlan) -> str:
 
 
 def write_summary_file(plan: ProcessingPlan, *, target_path: Path | None = None) -> None:
-    target_folder = plan.target_mp4.parent
-    summary_path = target_path or summary_file_path(target_folder)
+    summary_path = target_path or recording_summary_path(plan.target_mp4)
     summary_path.write_text(build_summary_text(plan), encoding="utf-8-sig")

@@ -129,6 +129,19 @@ if (Test-Path -LiteralPath $VenvPython -PathType Leaf) {
     }
 
     try {
+        & $VenvPython -c "import keyring" *> $null
+        if ($LASTEXITCODE -eq 0) {
+            Write-CheckOk "Der sichere Windows-Zugangsspeicher fuer Vimeo ist verfuegbar."
+        }
+        else {
+            Write-CheckWarn "Das Python-Paket keyring fehlt. Vimeo-Tokens koennen nicht dauerhaft sicher gespeichert werden. Bitte `"PredigtUploader einrichten.cmd`" erneut ausfuehren."
+        }
+    }
+    catch {
+        Write-CheckWarn "Der sichere Windows-Zugangsspeicher konnte nicht geprueft werden. Bitte `"PredigtUploader einrichten.cmd`" erneut ausfuehren."
+    }
+
+    try {
         & $VenvPython -c "from predigt_uploader.config import load_config; from predigt_uploader.mp3 import ffmpeg_available; raise SystemExit(0 if ffmpeg_available(load_config()) else 1)" *> $null
         if ($LASTEXITCODE -eq 0) {
             Write-CheckOk "FFmpeg ist fuer den Wizard verfuegbar."

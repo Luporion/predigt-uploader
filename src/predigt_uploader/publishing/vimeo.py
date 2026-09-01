@@ -506,7 +506,7 @@ class VimeoPublishingService:
             state = load_workflow_state(state_path)
             self._upload_if_needed(state, state_path, video_path, remote, progress)
             state = load_workflow_state(state_path)
-            video = self._verify_remote_video(_known_video_id(state.vimeo), progress)
+            video = self._verify_remote_video(_known_video_id(state.vimeo), progress, total_bytes=state.vimeo.upload_size)
             state = self._persist_verified_upload(state_path, video)
             video_uri = _required_video_uri(state.vimeo)
             folder_membership_confirmed = self.verify_folder_membership(video_uri, progress=progress)
@@ -889,25 +889,57 @@ class VimeoPublishingService:
         self,
         video_id: str | None,
         progress: ProgressCallback | None,
+        *,
+        total_bytes: int = 0,
     ) -> Mapping[str, Any]:
+        """
+        Poll until Vimeo confirms upload completion with exponential backoff.
+
+        After TUS upload completes, Vimeo briefly stays in 'in_progress' before
+        confirming 'complete'. This method tolerates that transient state.
+
+        Polling strategy:
+        - Attempts with exponential backoff: 1s, 2s, 4s, 8s, 16s, 30s, 30s, ...
+        - Total timeout: ~120 seconds (recoverable error)
+        - In-progress stays are normal, only error/canceled stop immediately
+        """
         video_id = video_id or ""
         if not video_id:
             raise VimeoUploadError("Nach dem Upload fehlt die Vimeo-Video-ID.")
-        _emit(progress, "verifying_upload")
+
+        # Exponential backoff schedule (in seconds)
+        backoff_schedule = [1, 2, 4, 8, 16] + [30] * 10  # ~150 seconds max
+
+        _emit(progress, "verifying_upload", total_bytes, total_bytes)
         last: Mapping[str, Any] = {}
-        for attempt in range(6):
+
+        for attempt, delay_between_attempts in enumerate(backoff_schedule):
             last = self.get_video(video_id)
             upload = last.get("upload")
             status = str(upload.get("status")) if isinstance(upload, Mapping) else ""
+
             if status == "complete":
                 return last
+
             if status in {"error", "canceled"}:
-                raise VimeoUploadError("Vimeo meldet einen Fehler bei der Videoübertragung.", f"upload.status={status}")
-            if attempt < 5:
-                self.sleep(2)
+                raise VimeoUploadError(
+                    "Vimeo meldet einen Fehler bei der Videoübertragung.",
+                    f"upload.status={status}"
+                )
+
+            # in_progress is expected and tolerated
+            if attempt < len(backoff_schedule) - 1:
+                _emit(progress, "verifying_upload", total_bytes, total_bytes)
+                self.sleep(delay_between_attempts)
+
+        # After all retries, still in_progress → recoverable error
         raise VimeoUploadError(
-            "Vimeo hat die vollständige Übertragung noch nicht bestätigt. Bitte später erneut prüfen.",
-            "upload.status blieb in_progress.",
+            "Vimeo-Veröffentlichung noch nicht abgeschlossen.\n"
+            "Die lokale MP4, MP3 und Zusammenfassung sind sicher fertig.\n"
+            "Ursache: Vimeo hat die vollständige Übertragung noch nicht bestätigt.\n"
+            f"Bekannte Vimeo-Video-ID: {video_id}\n"
+            "Diese ID wird beim nächsten Versuch wiederverwendet.",
+            f"upload.status blieb in_progress.",
         )
 
     def _assign_folder(self, video_uri: str, progress: ProgressCallback | None) -> None:

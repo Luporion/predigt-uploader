@@ -74,8 +74,8 @@ TUI_WORKFLOW_STEP_NAMES = ("Start", "Quelle", "Schnitt", "MP4", "Metadaten", "Or
 TUI_VIMEO_STAGE_LABELS = (
     ("connection", "Vimeo-Verbindung geprüft"),
     ("remote_video", "Video auf Vimeo angelegt"),
-    ("upload", "Video wird hochgeladen"),
-    ("verify_upload", "Upload wird geprüft"),
+    ("upload", "Datei zu Vimeo übertragen"),
+    ("verify_upload", "Vimeo bestätigt den Upload"),
     ("folder", "Ordner „Predigten“ wird zugeordnet"),
     ("processing", "Vimeo verarbeitet das Video"),
     ("embed", "Embed-Code wird abgerufen"),
@@ -2853,12 +2853,9 @@ def build_tui_app(
                 if not self.editing_output_names:
                     self.editing_output_names = True
                     self.query_one("#output_rename_fields", Vertical).display = True
-                    self.query_one("#new_mp4_name", Input).focus()
                     event.button.label = "Neue Dateinamen verwenden"
-                    self.call_after_refresh(self._scroll_to_output_names)
-                    self.set_timer(0.05, self._scroll_to_output_names)
-                    self.set_timer(0.2, self._scroll_to_output_names)
                     self._update_output_name_preview()
+                    self.call_after_refresh(self._focus_and_scroll_to_output_names)
                     return
                 try:
                     self.plan = self._candidate_output_name_plan()
@@ -2955,13 +2952,13 @@ def build_tui_app(
                 button.disabled = False
                 status.update("Die vorgeschlagenen Dateinamen sind frei und koennen verwendet werden.")
 
-        def _scroll_to_output_names(self) -> None:
-            self.query_one("#processing_review_scroll", VerticalScroll).scroll_to_widget(
-                self.query_one("#new_mp4_name", Input),
+        def _focus_and_scroll_to_output_names(self) -> None:
+            target = self.query_one("#new_mp4_name", Input)
+            target.focus(scroll_visible=False)
+            target.scroll_visible(
+                animate=True,
                 top=False,
-                origin_visible=False,
                 force=True,
-                immediate=True,
             )
 
         def _hide_conflict_strategy_buttons(self) -> None:

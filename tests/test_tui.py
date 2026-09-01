@@ -2191,6 +2191,7 @@ def test_tui_processing_conflicts_are_responsive_and_validate_new_names(tmp_path
             await pilot.wait_for_animation()
             mp4_name = app.screen.query_one("#new_mp4_name", Input)
             assert mp4_name.value.endswith(" (2).mp4")
+            await _wait_for_tui_condition(pilot, lambda: scroll.can_view_partial(mp4_name))
             assert scroll.can_view_partial(mp4_name), (
                 scroll.region,
                 scroll.scroll_y,
@@ -2517,8 +2518,8 @@ def test_tui_vimeo_progress_and_success_text_are_clear(tmp_path):
     completion = build_tui_processing_success_status(plan, vimeo_state=state)
     error = build_tui_vimeo_error_text(VimeoUploadError("Netzwerk unterbrochen"), replace(state, step=StepState("failed")))
 
-    assert "⟳ Video wird hochgeladen: 63.0 %" in uploading
-    assert "○ Upload wird geprüft" in uploading
+    assert "⟳ Datei zu Vimeo übertragen: 63.0 %" in uploading
+    assert "○ Vimeo bestätigt den Upload" in uploading
     assert "Vimeo-Upload abgeschlossen" in success
     assert "Embed-Code: abgerufen" in success
     assert "✓ Video zu Vimeo hochgeladen." in completion
@@ -2674,7 +2675,7 @@ def test_tui_vimeo_error_keeps_local_files_and_allows_later_completion(tmp_path,
             stages = str(app.screen.query_one("#vimeo_progress", Static).render())
             assert "✓ Vimeo-Verbindung geprüft" in stages
             assert "✓ Video auf Vimeo angelegt" in stages
-            assert "✗ Video wird hochgeladen" in stages
+            assert "✗ Datei zu Vimeo übertragen" in stages
             assert "63 B / 100 B" in str(
                 app.screen.query_one("#vimeo_upload_details", Static).render()
             )

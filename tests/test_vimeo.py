@@ -602,6 +602,145 @@ def test_failed_folder_membership_verification_blocks_completion(tmp_path):
     assert load_workflow_state(path).vimeo.step.status == "failed"
 
 
+def test_upload_verification_tolerates_in_progress_with_exponential_backoff(tmp_path):
+    """After TUS completes, Vimeo may briefly report in_progress before complete."""
+    path = _state_path(tmp_path)
+    transport = FakeTransport()
+    # Simulate: first 3 checks show in_progress, then complete
+    transport.transcode_statuses = ["complete"]  # transcode is unrelated
+    upload_statuses = ["in_progress", "in_progress", "in_progress", "complete"]
+    status_index = [0]
+
+    original_get_video = transport.get_json
+
+    def get_video_with_varying_upload(path_or_url, **kwargs):
+        result = original_get_video(path_or_url, **kwargs)
+        if path_or_url == f"/videos/{VIDEO_ID}":
+            upload_status = upload_statuses[min(status_index[0], len(upload_statuses) - 1)]
+            status_index[0] += 1
+            result = dict(result)
+            result["upload"] = {"status": upload_status}
+        return result
+
+    transport.get_json = get_video_with_varying_upload  # type: ignore[method-assign]
+    clock = _FakeClock()
+
+    service = VimeoPublishingService(
+        _config(),
+        TOKEN,
+        transport,
+        chunk_size=5,
+        read_size=2,
+        sleep=clock.sleep,
+        clock=clock,
+    )
+    result = service.publish(path)
+
+    assert result.video_id == VIDEO_ID
+    assert load_workflow_state(path).vimeo.upload_status == "complete"
+    # Should have slept multiple times (backoff: 1, 2, 4, ...)
+    assert clock.value > 0
+
+
+def test_upload_verification_timeout_is_recoverable_with_same_video_id(tmp_path):
+    """If Vimeo stays in_progress too long, error is recoverable and ID is saved."""
+    path = _state_path(tmp_path)
+    transport = FakeTransport()
+    # Always report in_progress to trigger timeout
+    transport.remote_upload_status = "in_progress"
+    clock = _FakeClock()
+
+    service = VimeoPublishingService(
+        _config(),
+        TOKEN,
+        transport,
+        chunk_size=5,
+        read_size=2,
+        sleep=clock.sleep,
+        clock=clock,
+    )
+    with pytest.raises(VimeoUploadError, match="Vimeo-Veröffentlichung noch nicht abgeschlossen"):
+        service.publish(path)
+
+    state = load_workflow_state(path)
+    assert state.vimeo.video_id == VIDEO_ID  # ID is preserved
+    assert state.vimeo.video_uri == f"/videos/{VIDEO_ID}"  # URI is preserved
+    assert state.vimeo.step.status == "failed"
+    assert state.vimeo.step.error is not None
+    assert "Bekannte Vimeo-Video-ID" in state.vimeo.step.error
+
+
+def test_upload_verification_preserves_total_bytes_in_progress_display(tmp_path):
+    """After upload completes, progress should show full bytes, not 0 B / 0 B."""
+    path = _state_path(tmp_path)
+    transport = FakeTransport()
+    progress = []
+
+    result = _service(transport).publish(path, progress.append)
+
+    # Find verifying_upload phase in progress
+    verify_updates = [p for p in progress if p.phase == "verifying_upload"]
+    assert len(verify_updates) > 0
+
+    # All verification updates should have the same bytes (full upload)
+    for p in verify_updates:
+        assert p.uploaded_bytes == p.total_bytes
+        assert p.total_bytes == 16  # our test file size
+        assert p.percent == 100.0
+
+
+def test_retry_with_known_upload_status_skips_remote_video_creation(tmp_path):
+    """After upload verification fails with timeout, retry uses existing video ID."""
+    path = _state_path(
+        tmp_path,
+        vimeo=VimeoState(
+            step=StepState("failed", "Timeout"),
+            video_id=VIDEO_ID,
+            video_uri=f"/videos/{VIDEO_ID}",
+            upload_status="in_progress",
+            upload_uri=UPLOAD_URL,
+            upload_size=16,
+        ),
+    )
+    transport = FakeTransport()
+    transport.remote_upload_status = "in_progress"
+    transport.total = 16  # Match test file size
+    transport.offset = 16  # Already uploaded
+    clock = _FakeClock()
+
+    service = VimeoPublishingService(
+        _config(),
+        TOKEN,
+        transport,
+        chunk_size=5,
+        read_size=2,
+        sleep=clock.sleep,
+        clock=clock,
+    )
+    with pytest.raises(VimeoUploadError):
+        service.publish(path)
+
+    # Should not have created a new video
+    create_calls = [call for call in transport.calls if call == ("POST_JSON", "/me/videos")]
+    assert len(create_calls) == 0  # Retry should not create new video, just verify existing
+
+
+def test_upload_and_transcode_status_are_independent(tmp_path):
+    """upload.status=complete with transcode.status=in_progress is not an error."""
+    path = _state_path(tmp_path)
+    transport = FakeTransport()
+    transport.remote_upload_status = "complete"
+    transport.transcode_statuses = ["in_progress"]  # still processing
+
+    result = _service(transport).publish(path)
+
+    assert result.video_id == VIDEO_ID
+    state = load_workflow_state(path)
+    assert state.vimeo.upload_status == "complete"
+    assert state.vimeo.transcode_status == "in_progress"
+    assert state.vimeo.step.status == "complete"  # Publishing can complete
+
+
 def test_embed_uses_oembed_then_player_url_fallback():
     transport = FakeTransport()
     transport.embed_html = None

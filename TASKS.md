@@ -129,24 +129,49 @@
 ## Phase 4: Vimeo
 
 - [x] UI-unabhängigen Workflow-State mit Schema-Version vorbereiten
-- [x] lokale Metadaten und tatsächliche Ausgabepfade atomar in `predigt-workflow.json` speichern
+- [x] lokale Metadaten und tatsächliche Ausgabepfade atomar in einem aufnahmespezifischen `<MP4-Stem>.predigt-workflow.json` speichern
 - [x] Vimeo-/WordPress-Status sowie spätere IDs/URLs ohne Secrets vorbereiten
 - [x] Secrets- und Publishing-Architektur dokumentieren
 - [x] Vimeo-Credentials außerhalb von Git und Statusdatei aus Umgebungsvariable laden
 - [x] Vimeo-Upload per tus mit Fortschritt, Fehlerbehandlung, Resume und Doppelschutz implementieren
 - [x] Vimeo-ID, URL, Folder- und Resume-Daten atomar speichern
+- [x] Textual-Einstellungen produktiv gliedern und unbekannte TOML-Werte beim Speichern erhalten
+- [x] Vimeo-Zielordner über gemeinsamen Teamordner-Browser auswählen und bestätigt neu anlegen
+- [x] Vimeo-Bibliothek um progressive Alle-Videos- und gecachte Ordneransicht mit Breadcrumbs erweitern
+- [x] Vimeo-Standard-Zielordner in den Settings über eine sichtbare Aktion, echten Folderbrowser und sofortige explizite Speicherung auswählbar machen
+- [x] Predigerverwaltung um sicheres Umbenennen ergänzen und freies Autocomplete beibehalten
 
 - [x] Vimeo API-Zugang, Scopes und Upload Access dokumentieren
 - [x] API-Token zur Laufzeit sicher aus `PREDIGT_UPLOADER_VIMEO_TOKEN` lesen
 - [x] Team-Owner und Ordner per uploadfreier Diagnose mit IDs/URIs auflisten
-- [x] Zielordner vor Upload validieren und Schreibrechte prüfen
+- [x] Zielordner vor Upload auf Existenz, Identität und Team-Owner prüfen; nicht destruktiv unbeweisbare Schreibrechte klar kennzeichnen
+- [x] unzuverlässiges `metadata.connections.videos.options` aus dem harten Upload-Check entfernen
+- [x] tus-Platzhalter über den dokumentierten Endpoint `POST /me/videos` erstellen
 - [x] MP4-Upload UI-unabhängig und explizit startbar implementieren
 - [x] Video dem konfigurierten Teamordner zuordnen und Mitgliedschaft verifizieren
 - [x] `embed.html`, `player_embed_url` und oEmbed-Fallback abrufen
 - [x] fehlenden Embed-Code anhand bekannter Video-ID nachladbar machen
-- [ ] Vimeo-Verbindung und Teamordner am echten Gemeindekonto diagnostizieren
-- [ ] kleinen bewussten Testupload durchführen und Folder-/Embed-Ergebnis manuell prüfen
-- [ ] nach erfolgreichem Praxistest dünne Vimeo-Bedienebene entwerfen
+- [x] Vimeo-Verbindung und Teamordner am echten Gemeindekonto diagnostizieren
+- [x] isoliertes, bestätigungspflichtiges `vimeo-smoke-test`-Kommando mit FFmpeg-Testclip, Transkodierungs-/Privacy-Diagnose und optionaler ID-genauer Löschung implementieren
+- [x] kleinen bewussten Testupload durchführen und Folder-/Embed-Ergebnis manuell prüfen
+- [x] Textual um einen expliziten achten Vimeo-Schritt auf Basis des vorhandenen Publishing-Service erweitern
+- [x] Vimeo-Upload im Textual-Thread-Worker mit bytegenauem Fortschrittsbalken, Größen-, Geschwindigkeits- und Restzeitanzeige ausführen
+- [x] Vimeo-Erfolg, Überspringen und Fehler im Abschlussstatus unterscheiden
+- [x] bestätigte nicht geheime Team-/Folderwerte als rückwärtskompatible Config-Defaults bereitstellen
+- [x] Vimeo-Token mit Environment-Vorrang sicher im Windows Credential Manager speicherbar machen
+- [x] Textual-Einstellungen für lokale Pfade, Vimeo-Ziel, Token und Prediger produktiv machen
+- [x] fertige MP4 samt vorhandenem/neu erzeugtem State direkt aus dem Textual-Startmenü an Schritt 8 übergeben
+- [x] mehrere Aufnahmen pro Tagesordner durch aufnahmespezifische Summary-/State-Dateien trennen
+- [x] Prediger-Historie lokal persistieren und als freie Eingabevorschläge anbieten
+- [x] Vimeo-Link und Embed-Code unmittelbar nach der Videoanlage opportunistisch abrufen, speichern und in Schritt 8 freigeben
+- [x] echte, paginierte Vimeo-Bibliothek für den konfigurierten Teamordner mit Titelsuche, Details und sicheren Capability-Anzeigen ergänzen
+- [x] Bibliotheksseiten progressiv anzeigen, vollständige Ergebnisse pro App-Lauf cachen und explizites `Neu laden` anbieten
+- [x] extern gelöschte Vimeo-Videos ausschließlich bei eindeutigem Remote-404 aus dem Aufnahme-State lösen
+- [x] laufenden Vimeo-Upload nach Bestätigung kooperativ stoppen und über bestätigten tus-Offset fortsetzen
+- [x] Early-Link und Early-Embed während des Uploads als verfügbare grüne Aktionen hervorheben
+- [ ] optionalen Download ausgewählter, von Vimeo ausdrücklich gelieferter Download-Dateien mit Zielauswahl implementieren
+- [ ] unvollständige produktive Vimeo-States ohne vorherige MP4-Auswahl automatisch im Startmenü auflisten
+- [x] produktiven Textual-Vimeo-Schritt mit einer großen bewussten Aufnahme manuell prüfen
 
 ## Phase 5: WordPress optional
 

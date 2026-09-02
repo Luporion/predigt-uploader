@@ -20,6 +20,7 @@ from predigt_uploader.processing import (
     raw_action_label,
 )
 from predigt_uploader.workflow_state import load_workflow_state
+from predigt_uploader.companion_files import recording_summary_path, recording_workflow_state_path
 from predigt_uploader.report import build_summary_text, write_summary_file
 
 
@@ -49,7 +50,7 @@ def test_prepared_processing_plan_uses_shared_predigt_paths(tmp_path):
     assert plan.target_folder == tmp_path / "Aufnahmen" / "2026" / "2026-05-24 - Taufe"
     assert plan.target_mp4.name == "Predigt (Lehre statt Leere_Johannes 3,16)_Max Muster.mp4"
     assert plan.target_mp3.name == "Predigt (Lehre statt Leere_Johannes 3,16)_Max Muster.mp3"
-    assert plan.summary_path == plan.target_folder / "predigt-zusammenfassung.txt"
+    assert plan.summary_path == recording_summary_path(plan.target_mp4)
     assert plan.processing_plan.target_mp4 == plan.target_mp4
 
 
@@ -75,7 +76,7 @@ def test_prepared_processing_plan_supports_target_folder_override(tmp_path):
     assert plan.target_folder == target_folder
     assert plan.target_mp4 == target_folder / "Predigt (Lehre statt Leere_Johannes 3,16)_Max Muster.mp4"
     assert plan.target_mp3 == target_folder / "Predigt (Lehre statt Leere_Johannes 3,16)_Max Muster.mp3"
-    assert plan.summary_path == target_folder / "predigt-zusammenfassung.txt"
+    assert plan.summary_path == recording_summary_path(plan.target_mp4)
 
 
 def test_prepared_processing_plan_supports_bibelstunde_with_and_without_title(tmp_path):
@@ -187,7 +188,7 @@ def test_execute_processing_plan_copies_mp4_creates_mp3_summary_and_opens_folder
     assert "MP3 wird erstellt." in result.messages
     assert "Zusammenfassung wird geschrieben." in result.messages
     assert result.messages[-1] == "Fertig."
-    assert result.workflow_state_path == plan.target_folder / "predigt-workflow.json"
+    assert result.workflow_state_path == recording_workflow_state_path(plan.target_mp4)
     state = load_workflow_state(result.workflow_state_path)
     assert state.local_preparation.status == "complete"
     assert state.paths.final_mp4 == plan.target_mp4
@@ -419,7 +420,7 @@ def test_execute_processing_plan_backs_up_existing_outputs_before_writing(tmp_pa
     assert plan.target_mp3.read_bytes() == b"mp3-neu"
     assert len(tuple(plan.target_folder.glob(f"{plan.target_mp4.stem}__alt-*.mp4"))) == 1
     assert len(tuple(plan.target_folder.glob(f"{plan.target_mp3.stem}__alt-*.mp3"))) == 1
-    assert len(tuple(plan.target_folder.glob("predigt-zusammenfassung__alt-*.txt"))) == 1
+    assert len(tuple(plan.target_folder.glob(f"{plan.summary_path.stem}__alt-*.txt"))) == 1
     assert "Vorhandene Ziel-Dateien werden gesichert." in result.messages
 
 
@@ -434,6 +435,7 @@ def test_execute_processing_plan_writes_custom_summary_path(tmp_path):
         speaker="Max Muster",
     )
     plan = build_prepared_recording_plan(config=config, source_mp4=source, info=info)
+    default_summary = plan.summary_path
     custom_summary = plan.target_folder / "predigt-zusammenfassung - Korrektur.txt"
     plan = replace(plan, summary_path=custom_summary)
 
@@ -446,7 +448,48 @@ def test_execute_processing_plan_writes_custom_summary_path(tmp_path):
 
     assert result.success is True
     assert custom_summary.exists()
-    assert not (plan.target_folder / "predigt-zusammenfassung.txt").exists()
+    assert not default_summary.exists()
+
+
+def test_two_recordings_in_same_day_folder_keep_separate_summaries_and_states(tmp_path):
+    config = _config(tmp_path)
+    target = tmp_path / "Aufnahmen" / "2026" / "2026-05-24"
+    source_one = tmp_path / "quelle-1.mp4"
+    source_two = tmp_path / "quelle-2.mp4"
+    source_one.write_bytes(b"video-1")
+    source_two.write_bytes(b"video-2")
+    first = build_prepared_recording_plan(
+        config=config,
+        source_mp4=source_one,
+        info=SermonInfo(date(2026, 5, 24), "Erste", "Johannes 1", "Max Muster"),
+        target_folder_override=target,
+    )
+    second = build_prepared_recording_plan(
+        config=config,
+        source_mp4=source_two,
+        info=SermonInfo(date(2026, 5, 24), "Zweite", "Johannes 2", "Anna Beispiel"),
+        target_folder_override=target,
+    )
+
+    first_result = execute_processing_plan(
+        first,
+        config,
+        mp3_converter=lambda _source, output, _config: output.write_bytes(b"mp3-1"),
+        ffmpeg_checker=lambda _config: True,
+    )
+    second_result = execute_processing_plan(
+        second,
+        config,
+        mp3_converter=lambda _source, output, _config: output.write_bytes(b"mp3-2"),
+        ffmpeg_checker=lambda _config: True,
+    )
+
+    assert first_result.success and second_result.success
+    assert first.summary_path != second.summary_path
+    assert first_result.workflow_state_path != second_result.workflow_state_path
+    assert first.summary_path.is_file() and second.summary_path.is_file()
+    assert load_workflow_state(first_result.workflow_state_path).paths.final_mp4 == first.target_mp4
+    assert load_workflow_state(second_result.workflow_state_path).paths.final_mp4 == second.target_mp4
 
 
 def test_unique_output_names_use_numbered_windows_safe_suggestions(tmp_path):

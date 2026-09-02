@@ -6,7 +6,7 @@ Ziel: Der manuelle Ablauf mit vMix-Aufnahme, LosslessCut-Schnitt, MP3-Erzeugung,
 
 ## Version-1-Ziel
 
-Version 1 automatisiert **noch nicht WordPress** und lädt **noch nicht zu Vimeo** hoch. Sie konzentriert sich auf den lokalen, fehleranfälligen Teil:
+Die stabile Version-1-Basis automatisiert **noch nicht WordPress**. Der normale Wizard bleibt rein lokal; die separat startbare Textual-Oberfläche bietet nach der lokalen Verarbeitung inzwischen einen bewusst auszulösenden Vimeo-Schritt. Die lokale Basis umfasst:
 
 1. Aufnahme oder geschnittene MP4 auswählen
 2. Aufnahmedaten und Dienstart abfragen
@@ -15,8 +15,8 @@ Version 1 automatisiert **noch nicht WordPress** und lädt **noch nicht zu Vimeo
 5. optional Besonderheit im Ordnernamen ergänzen
 6. MP4 in den Zielordner verschieben/umbenennen
 7. gleichnamige MP3 per FFmpeg erzeugen
-8. `predigt-zusammenfassung.txt` für die manuelle Weiterarbeit anzeigen/speichern
-9. `predigt-workflow.json` als maschinenlesbaren lokalen Arbeitsstand speichern
+8. `<finaler MP4-Stem> - Zusammenfassung.txt` für die manuelle Weiterarbeit anzeigen/speichern
+9. `<finaler MP4-Stem>.predigt-workflow.json` als maschinenlesbaren lokalen Arbeitsstand speichern
 
 ## Phase 1.5: LosslessCut-Schnitt-Assistent
 
@@ -84,27 +84,43 @@ Kurzablauf in PowerShell:
 
 `setup-local.ps1` richtet `.venv` und die Python-Abhängigkeiten ein. `check-system.ps1` prüft Python, Wizard-Start, FFmpeg und optional den konfigurierten LosslessCut-Pfad. Der Doppelklick-Start öffnet zuerst ein einfaches Hauptmenü. Der Wizard arbeitet weiterhin nur lokal und lädt nichts zu Vimeo oder WordPress hoch. Abweichende Ordner und ein funktionierender LosslessCut-Pfad können auf Wunsch unter `%APPDATA%\PredigtUploader\config.toml` gemerkt werden.
 
-Der normale Terminal-Wizard bleibt weiterhin verfügbar und wird durch Textual nicht ersetzt. Die neue Textual-Oberfläche kann mit `python -m predigt_uploader tui`, `.\scripts\run-tui.ps1` oder `PredigtUploader Textual starten.cmd` gestartet werden, wenn das Extra `tui` installiert ist. Der lokale Textual-Workflow umfasst Startcheck, MP4-/Rohaufnahme-Auswahl, LosslessCut-Schritt, Exportbestätigung, Metadaten, Zielordner- und Konfliktentscheidung, finale MP4/MP3/Zusammenfassung und Abschlussstatus. Die Oberfläche bleibt vorerst die neuere, separat startbare Variante; Nutzer werden nicht zur Umstellung gezwungen.
+Der normale Terminal-Wizard bleibt weiterhin verfügbar und wird durch Textual nicht ersetzt. Die neue Textual-Oberfläche kann mit `python -m predigt_uploader tui`, `.\scripts\run-tui.ps1` oder `PredigtUploader Textual starten.cmd` gestartet werden, wenn das Extra `tui` installiert ist. Sie umfasst Startcheck, MP4-/Rohaufnahme-Auswahl, LosslessCut-Schritt, Exportbestätigung, Metadaten, Zielordner- und Konfliktentscheidung, finale MP4/MP3/Zusammenfassung, einen eigenen Vimeo-Schritt und den Abschlussstatus. Der Vimeo-Screen startet beim Betreten keinen Upload: Erst `Video jetzt auf Vimeo hochladen` ruft die bestehende Publishing-Schicht in einem Hintergrund-Worker auf. Sobald Vimeo nach der Remote-Anlage Link oder Embed-Code liefert, werden beide atomar gespeichert, sichtbar als verfügbar gemeldet und die zugehörigen Buttons bereits während der Dateiübertragung freigeschaltet. Während des tus-Uploads zeigt der Screen echte übertragene Bytes, Prozent, Geschwindigkeit und eine daraus geschätzte Restzeit; die übrigen Vimeo-Phasen bleiben als Checkliste sichtbar. `Upload stoppen` fragt zuerst nach und beendet kooperativ nach der laufenden Vimeo-Operation; Remote-ID, tus-Link und ausschließlich bestätigte Offsets bleiben für `Vimeo-Upload fortsetzen` erhalten. Für Vimeos anschließende Transkodierung wird bewusst kein erfundener Prozentwert angezeigt. Ein gespeichertes Video wird vor Wiederverwendung remote geprüft: Nur ein eindeutiges 404 setzt die alten Vimeo-Verknüpfungen zurück und erlaubt eine neue Anlage, während unklare Netzwerk-, Auth-, Rate-Limit- oder Serverfehler jeden Doppelupload blockieren. `Vimeo überspringen / später erledigen` lässt die lokalen Dateien unverändert fertig. Das Hauptmenü bietet außerdem den deutlich als Admin-/Sonderfall markierten Direkteinstieg für bereits fertige MP4-Dateien und eine lesende `Vimeo-Bibliothek` für den konfigurierten Teamordner. Die Bibliothek zeigt die erste API-Seite sofort, ergänzt weitere Seiten im Hintergrund, cached das vollständige Ergebnis für die laufende App und besitzt `Neu laden` für einen bewussten Refresh. Einstellungen für lokale Pfade, Schneiden, nicht geheime Vimeo-Zielwerte, den sicher gespeicherten Token und die Prediger-Historie sind direkt in Textual pflegbar.
+
+Die Vimeo-Bibliothek bietet jetzt zwei Sichten: `Alle Videos` lädt mehrere hundert Videos progressiv und unterstützt Titelsuche sowie Sortierung; `Ordner` navigiert mit Breadcrumbs durch die Team-Bibliothek und cached geöffnete Ordner für die laufende Sitzung. In den strukturierten Textual-Einstellungen wählen normale Nutzer den Vimeo-Zielordner nach Namen und können nach einem Bestätigungsdialog neue Ordner anlegen. Technische IDs stehen nur unter Erweitert/Admin. Nur von Vimeo ausdrücklich gelieferte Downloadlinks aktivieren die Downloadaktion.
 
 ## Lokaler Workflow-Status und Publishing-Vorbereitung
 
-Nach erfolgreicher lokaler Verarbeitung liegt im Zielordner neben der menschlich lesbaren `predigt-zusammenfassung.txt` eine `predigt-workflow.json`. Sie enthält Metadaten, tatsächliche lokale Zielpfade und die Zustände `local_preparation`, `vimeo`, `wordpress_audio` und `wordpress_post`. Die lokalen Dateien stehen auf `complete`; die noch nicht implementierten Publishing-Schritte beginnen mit `pending`. Damit kann eine kommende Integration nach einem Neustart an bereits erledigte Arbeit anknüpfen und vorhandene Vimeo-/WordPress-IDs wiederverwenden.
+Nach erfolgreicher lokaler Verarbeitung liegen neben MP4 und MP3 die Begleitdateien `<MP4-Stem> - Zusammenfassung.txt` und `<MP4-Stem>.predigt-workflow.json`. Damit können mehrere Aufnahmen im selben Tagesordner nicht mehr gegenseitig Zusammenfassung oder Publishing-State überschreiben. Der JSON-State enthält Metadaten, tatsächliche lokale Zielpfade und die Zustände `local_preparation`, `vimeo`, `wordpress_audio` und `wordpress_post`. Alte generische `predigt-workflow.json`-Dateien werden weiterhin erkannt, wenn ihr gespeicherter MP4-Pfad exakt zur ausgewählten Aufnahme passt.
 
-Die Datei enthält ausdrücklich keine Zugangsdaten. WordPress ist noch nicht integriert. Für Vimeo gibt es nun eine UI-unabhängige, ausschließlich manuell gestartete Entwicklungsschicht: Team-Owner-/Folder-Prüfung, resumierbarer tus-Upload, Doppelschutz, Folder-Zuordnung mit Verifikation und Embed-Abruf. Der normale Wizard und Textual laden weiterhin nichts automatisch hoch. Details stehen in [docs/publishing-architecture.md](docs/publishing-architecture.md) und [docs/vimeo-development.md](docs/vimeo-development.md).
+Die Datei enthält ausdrücklich keine Zugangsdaten. WordPress ist noch nicht integriert. Für Vimeo gibt es eine UI-unabhängige Publishing-Schicht mit Team-Owner-/Folder-Prüfung, resumierbarem tus-Upload, Doppelschutz, Folder-Zuordnung mit Verifikation und Embed-Abruf. Textual verwendet genau diese Schicht nach einer ausdrücklichen Nutzeraktion; Netzwerk- und Uploadarbeit läuft außerhalb des UI-Threads. Der normale Wizard bleibt lokal. Details stehen in [docs/publishing-architecture.md](docs/publishing-architecture.md) und [docs/vimeo-development.md](docs/vimeo-development.md).
 
 ## Vimeo-Entwicklungskommandos
 
-Der Vimeo-Token wird nur aus `PREDIGT_UPLOADER_VIMEO_TOKEN` gelesen. Die nicht geheimen Werte `team_owner_user_id`, `target_folder_id` und optional `target_folder_name` stehen im Abschnitt `[vimeo]` der lokalen Konfiguration. Keine ID wird aus Namen oder URLs geraten.
+Der Vimeo-Token wird zentral aufgelöst: `PREDIGT_UPLOADER_VIMEO_TOKEN` hat für Entwicklung/CI Vorrang, anschließend wird der Windows Credential Manager über `keyring` verwendet. Der Token steht niemals in `config.toml`, Workflow-State oder Logs. Normale Nutzer richten ihn maskiert unter `Einstellungen > Vimeo` ein. Die nicht geheimen Werte `team_owner_user_id`, `target_folder_id` und optional `target_folder_name` stehen im Abschnitt `[vimeo]` der lokalen Konfiguration. Keine ID wird aus Namen oder URLs geraten.
+
+`vimeo-check` führt ausschließlich lesende Prüfungen aus. Vimeos `metadata.connections.videos.options` wird nicht als harter Upload-Berechtigungstest verwendet, weil dieser Wert beim realen Teamkonto nur `GET` meldet, obwohl Vimeo `POST /me/videos` bis zur fachlichen Body-Prüfung verarbeitet. Der Check zeigt deshalb transparent: „Die eigentliche Upload-Berechtigung wird beim Upload geprüft.“
 
 ```powershell
 # Verbindung/Identität und – nach konfigurierter Owner-ID – Teamordner lesen; kein Upload:
 python -m predigt_uploader vimeo-diagnose --config "$env:APPDATA\PredigtUploader\config.toml"
 
 # konkrete fertige MP4 und Zielkonfiguration prüfen; kein Upload:
-python -m predigt_uploader vimeo-check --config "$env:APPDATA\PredigtUploader\config.toml" --state "C:\Pfad\predigt-workflow.json"
+python -m predigt_uploader vimeo-check --config "$env:APPDATA\PredigtUploader\config.toml" --state "C:\Pfad\<MP4-Stem>.predigt-workflow.json"
 ```
 
-Ein Testupload ist absichtlich ein separates Entwicklungskommando und erfordert zusätzlich `--confirm-vimeo-upload`. Er wird nicht vom normalen 7-Schritt-Workflow aufgerufen. Einrichtung, benötigte Scopes und der sichere Testablauf sind in [docs/vimeo-development.md](docs/vimeo-development.md) beschrieben.
+Ein CLI-Testupload ist absichtlich ein separates Entwicklungskommando und erfordert zusätzlich `--confirm-vimeo-upload`. Der produktive Textual-Schritt verwendet dagegen eine sichtbare blaue Nutzeraktion im achten Schritt; bloßes Betreten des Screens reicht nie aus. Einrichtung, benötigte Scopes und der sichere Testablauf sind in [docs/vimeo-development.md](docs/vimeo-development.md) beschrieben.
+
+Für den ersten echten Ende-zu-Ende-Test muss keine Predigt und keine Workflow-Datei vorbereitet werden. `vimeo-smoke-test` erzeugt nach ausdrücklicher Freigabe einen ungefähr vier Sekunden langen, sehr kleinen schwarzen MP4-Clip mit stiller Tonspur in einem temporären Verzeichnis. Es verwendet danach dieselbe tus-, Teamfolder- und Embed-Logik wie das Backend, zeigt Upload-/Transkodierungsstatus und Privacy an und entfernt alle lokalen Testdateien. Ohne Freigabeschalter erfolgt weder ein FFmpeg-Aufruf noch ein Vimeo-Zugriff:
+
+```powershell
+# Nur Ablauf und Sicherheitshinweise anzeigen; kein lokaler Clip, kein Netzwerk-Upload:
+python -m predigt_uploader vimeo-smoke-test --config "$env:APPDATA\PredigtUploader\config.toml"
+
+# Bewusster echter Smoke-Test; das Vimeo-Testvideo bleibt zur Web-Kontrolle erhalten:
+python -m predigt_uploader vimeo-smoke-test --config "$env:APPDATA\PredigtUploader\config.toml" --confirm-vimeo-upload
+```
+
+Optional löscht `--delete-after-test` nach einem erfolgreichen Test ausschließlich die in diesem isolierten Lauf gespeicherte numerische Video-ID. Bei Fehlern wird nie automatisch gelöscht.
 
 Für Gemeindemitarbeiter gibt es im Projektordner zusätzlich anklickbare Windows-Startdateien:
 

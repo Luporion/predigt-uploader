@@ -6,12 +6,13 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
+from .companion_files import WORKFLOW_STATE_SUFFIX, recording_workflow_state_path
 from .models import SermonInfo
 
 
 WORKFLOW_STATE_FILENAME = "predigt-workflow.json"
-WORKFLOW_STATE_SCHEMA_VERSION = 2
-STEP_STATUSES = frozenset({"pending", "in_progress", "complete", "failed"})
+WORKFLOW_STATE_SCHEMA_VERSION = 5
+STEP_STATUSES = frozenset({"pending", "in_progress", "complete", "failed", "stopped"})
 
 
 @dataclass(frozen=True)
@@ -33,9 +34,13 @@ class VimeoState:
     video_url: str | None = None
     player_embed_url: str | None = None
     embed_html: str | None = None
-    folder_id: str | None = None
-    folder_uri: str | None = None
-    folder_name: str | None = None
+    upload_status: str | None = None
+    transcode_status: str | None = None
+    uploaded_at: str | None = None
+    target_folder_id: str | None = None
+    target_folder_uri: str | None = None
+    target_folder_name: str | None = None
+    folder_status: str | None = None
     team_owner_user_id: str | None = None
     upload_uri: str | None = None
     upload_offset: int | None = None
@@ -114,12 +119,32 @@ class WorkflowState:
 
 
 def workflow_state_path(target_folder: Path) -> Path:
+    """Return the legacy generic state path used before per-recording states."""
     return target_folder / WORKFLOW_STATE_FILENAME
 
 
+def resolve_workflow_state_path(final_mp4: Path) -> Path | None:
+    """Find the state belonging to one MP4 without claiming unrelated legacy state."""
+    exact = recording_workflow_state_path(final_mp4)
+    if exact.exists():
+        _require_state_matches_mp4(exact, final_mp4)
+        return exact
+
+    legacy = workflow_state_path(final_mp4.parent)
+    if legacy.exists() and _state_matches_mp4(legacy, final_mp4):
+        return legacy
+
+    for candidate in final_mp4.parent.glob(f"*{WORKFLOW_STATE_SUFFIX}"):
+        if candidate != exact and _state_matches_mp4(candidate, final_mp4):
+            return candidate
+    return None
+
+
 def save_workflow_state(state: WorkflowState, path: Path | None = None) -> Path:
-    target = path or workflow_state_path(_required_target_folder(state.paths))
+    target = path or _default_workflow_state_path(state.paths)
     target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists() and state.paths.final_mp4 is not None:
+        _require_state_matches_mp4(target, state.paths.final_mp4)
     temporary = target.with_name(f".{target.name}.tmp")
     stored_state = replace(
         state,
@@ -185,6 +210,33 @@ def _required_target_folder(paths: WorkflowPaths) -> Path:
     return paths.target_folder
 
 
+def _default_workflow_state_path(paths: WorkflowPaths) -> Path:
+    if paths.final_mp4 is not None:
+        return recording_workflow_state_path(paths.final_mp4)
+    return workflow_state_path(_required_target_folder(paths))
+
+
+def _state_matches_mp4(path: Path, final_mp4: Path) -> bool:
+    try:
+        state = load_workflow_state(path)
+    except (OSError, ValueError, KeyError):
+        return False
+    stored = state.paths.final_mp4
+    return stored is not None and _path_key(stored) == _path_key(final_mp4)
+
+
+def _require_state_matches_mp4(path: Path, final_mp4: Path) -> None:
+    if not _state_matches_mp4(path, final_mp4):
+        raise FileExistsError(
+            "Die Workflow-Statusdatei gehört zu einer anderen Aufnahme und wird nicht überschrieben: "
+            f"{path}"
+        )
+
+
+def _path_key(path: Path) -> str:
+    return str(path.absolute()).casefold()
+
+
 def _step_from(value: object, *, default: str = "pending") -> StepState:
     data = _mapping(value)
     return StepState(status=str(data.get("status", default)), error=_optional_text(data.get("error")))
@@ -199,9 +251,13 @@ def _vimeo_from(value: object) -> VimeoState:
         video_url=_optional_text(data.get("video_url")),
         player_embed_url=_optional_text(data.get("player_embed_url")),
         embed_html=_optional_text(data.get("embed_html")),
-        folder_id=_optional_text(data.get("folder_id")),
-        folder_uri=_optional_text(data.get("folder_uri")),
-        folder_name=_optional_text(data.get("folder_name")),
+        upload_status=_optional_text(data.get("upload_status")),
+        transcode_status=_optional_text(data.get("transcode_status")),
+        uploaded_at=_optional_text(data.get("uploaded_at")),
+        target_folder_id=_optional_text(data.get("target_folder_id") or data.get("folder_id")),
+        target_folder_uri=_optional_text(data.get("target_folder_uri") or data.get("folder_uri")),
+        target_folder_name=_optional_text(data.get("target_folder_name") or data.get("folder_name")),
+        folder_status=_optional_text(data.get("folder_status")),
         team_owner_user_id=_optional_text(data.get("team_owner_user_id")),
         upload_uri=_optional_text(data.get("upload_uri")),
         upload_offset=_optional_int(data.get("upload_offset")),

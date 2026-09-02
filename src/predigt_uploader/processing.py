@@ -7,11 +7,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
+from .companion_files import recording_summary_path, recording_workflow_state_path
 from .filename import build_media_filename
 from .folders import ensure_folder, suggest_folder
 from .models import AppConfig, ProcessingPlan, SermonInfo
 from .mp3 import Mp3ConversionError, convert_mp4_to_mp3, ffmpeg_available
-from .report import summary_file_path, write_summary_file
+from .report import write_summary_file
 from .workflow_state import completed_local_workflow_state, save_workflow_state
 
 RAW_ACTION_MOVE = "move"
@@ -79,6 +80,10 @@ class PreparedRecordingPlan:
             info=self.info,
         )
 
+    @property
+    def workflow_state_path(self) -> Path:
+        return recording_workflow_state_path(self.target_mp4)
+
 
 @dataclass(frozen=True)
 class ProcessingExecutionResult:
@@ -115,7 +120,7 @@ def build_prepared_recording_plan(
         target_folder=target_folder,
         target_mp4=target_mp4,
         target_mp3=target_mp3,
-        summary_path=summary_file_path(target_folder),
+        summary_path=recording_summary_path(target_mp4),
         info=info,
         raw_action=normalize_raw_action(normalized_raw_action),
         mp4_action=normalized_mp4_action,
@@ -288,6 +293,10 @@ def execute_processing_plan(
         if plan.backup_existing_outputs:
             emit("Vorhandene Ziel-Dateien werden gesichert.")
             _backup_existing_outputs(plan)
+        elif plan.overwrite_existing_outputs and plan.workflow_state_path.exists():
+            backup = _available_named_backup_path(plan.workflow_state_path)
+            emit(f"Vorhandener Workflow-Status wird gesichert: {backup.name}")
+            plan.workflow_state_path.rename(backup)
         _ensure_outputs_can_be_written(plan)
 
         emit(_mp4_status_message(plan.mp4_action, config))
@@ -384,6 +393,8 @@ def _ensure_outputs_can_be_written(plan: PreparedRecordingPlan) -> None:
             raise FileExistsError(f"Ziel-MP3 existiert bereits: {plan.target_mp3}")
         if plan.summary_path.exists():
             raise FileExistsError(f"Zusammenfassung existiert bereits: {plan.summary_path}")
+        if plan.workflow_state_path.exists():
+            raise FileExistsError(f"Workflow-Status existiert bereits: {plan.workflow_state_path}")
 
 
 def _backup_existing_outputs(plan: PreparedRecordingPlan, *, now: datetime | None = None) -> tuple[Path, ...]:
@@ -391,7 +402,7 @@ def _backup_existing_outputs(plan: PreparedRecordingPlan, *, now: datetime | Non
         planned_sources = {source for source, _target in plan.existing_output_renames}
         unexpected = tuple(
             path
-            for path in (plan.target_mp4, plan.target_mp3, plan.summary_path)
+            for path in (plan.target_mp4, plan.target_mp3, plan.summary_path, plan.workflow_state_path)
             if path.exists() and path not in planned_sources
         )
         if unexpected:
@@ -399,7 +410,7 @@ def _backup_existing_outputs(plan: PreparedRecordingPlan, *, now: datetime | Non
         return _rename_existing_outputs(plan.existing_output_renames)
     timestamp = (now or datetime.now()).strftime("%Y%m%d-%H%M%S")
     backups: list[Path] = []
-    for path in (plan.target_mp4, plan.target_mp3, plan.summary_path):
+    for path in (plan.target_mp4, plan.target_mp3, plan.summary_path, plan.workflow_state_path):
         if not path.exists():
             continue
         backup = _available_backup_path(path, timestamp)

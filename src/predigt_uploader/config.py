@@ -2,10 +2,16 @@ from __future__ import annotations
 
 import os
 import tomllib
+from datetime import date, datetime, time
 from pathlib import Path
 from typing import Any
 
 from .models import AppConfig, ServiceTypeConfig, VimeoConfig
+
+
+DEFAULT_VIMEO_TEAM_OWNER_USER_ID = "59930802"
+DEFAULT_VIMEO_TARGET_FOLDER_ID = "1320477"
+DEFAULT_VIMEO_TARGET_FOLDER_NAME = "Predigten"
 
 
 class ConfigLoadError(RuntimeError):
@@ -20,6 +26,11 @@ def default_config() -> AppConfig:
         vmix_storage=Path(r"V:\vMixStorage"),
         recordings_base=Path.home() / "Desktop" / "Aufnahmen",
         mp3_base=Path(r"V:\Predigten\Predigten"),
+        vimeo=VimeoConfig(
+            team_owner_user_id=DEFAULT_VIMEO_TEAM_OWNER_USER_ID,
+            target_folder_id=DEFAULT_VIMEO_TARGET_FOLDER_ID,
+            target_folder_name=DEFAULT_VIMEO_TARGET_FOLDER_NAME,
+        ),
     )
 
 
@@ -124,9 +135,15 @@ def load_config(explicit_path: Path | None = None) -> AppConfig:
         open_target_folder=bool(_get_nested(loaded, "workflow", "open_target_folder", base.open_target_folder)),
         raw_archive_mode=str(_get_nested(loaded, "workflow", "raw_archive_mode", base.raw_archive_mode)),
         vimeo=VimeoConfig(
-            team_owner_user_id=str(_get_nested(loaded, "vimeo", "team_owner_user_id", "")).strip(),
-            target_folder_id=str(_get_nested(loaded, "vimeo", "target_folder_id", "")).strip(),
-            target_folder_name=str(_get_nested(loaded, "vimeo", "target_folder_name", "")).strip(),
+            team_owner_user_id=str(
+                _get_nested(loaded, "vimeo", "team_owner_user_id", base.vimeo.team_owner_user_id)
+            ).strip(),
+            target_folder_id=str(
+                _get_nested(loaded, "vimeo", "target_folder_id", base.vimeo.target_folder_id)
+            ).strip(),
+            target_folder_name=str(
+                _get_nested(loaded, "vimeo", "target_folder_name", base.vimeo.target_folder_name)
+            ).strip(),
         ),
     )
     custom_service_types = _parse_custom_service_types(_get_nested(loaded, "service_types", "additional", ()), config)
@@ -219,8 +236,16 @@ def save_user_config_values(
         try:
             with path.open("rb") as handle:
                 data = tomllib.load(handle)
-        except (tomllib.TOMLDecodeError, OSError):
-            data = {}
+        except tomllib.TOMLDecodeError as exc:
+            raise ConfigLoadError(
+                "Die vorhandenen Einstellungen sind ungültig und wurden nicht überschrieben.",
+                f"Ungültiges TOML in {path}: {exc}",
+            ) from exc
+        except OSError as exc:
+            raise ConfigLoadError(
+                "Die vorhandenen Einstellungen konnten nicht gelesen und wurden nicht überschrieben.",
+                f"Benutzer-config.toml konnte nicht gelesen werden: {path}. Details: {exc}",
+            ) from exc
 
     if paths:
         data.setdefault("paths", {}).update(paths)
@@ -233,28 +258,64 @@ def save_user_config_values(
     if service_types is not None:
         data.setdefault("service_types", {})["additional"] = service_types
 
-    lines: list[str] = []
-    for section in ("paths", "naming", "workflow", "vimeo", "service_types"):
-        values = data.get(section)
-        if not isinstance(values, dict) or not values:
-            continue
-        lines.append(f"[{section}]")
-        for key, value in values.items():
-            if isinstance(value, bool):
-                rendered = "true" if value else "false"
-            elif isinstance(value, list):
-                rendered = "[" + ", ".join(_toml_string(str(item)) for item in value) + "]"
-            else:
-                rendered = _toml_string(str(value))
-            lines.append(f"{key} = {rendered}")
-        lines.append("")
+    lines = _render_toml(data)
 
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("\n".join(lines), encoding="utf-8")
+        temporary = path.with_name(f".{path.name}.tmp")
+        temporary.write_text("\n".join(lines), encoding="utf-8")
+        temporary.replace(path)
     except OSError as exc:
         raise ConfigLoadError(
             "Die Einstellungen konnten nicht gespeichert werden.",
             f"Benutzer-config.toml konnte nicht geschrieben werden: {path}. Details: {exc}",
         ) from exc
+    finally:
+        temporary = path.with_name(f".{path.name}.tmp")
+        if temporary.exists():
+            temporary.unlink()
     return path
+
+
+def _render_toml(data: dict[str, Any]) -> list[str]:
+    """Render user config while retaining unknown TOML sections and keys."""
+    lines: list[str] = []
+    scalar_items = [(key, value) for key, value in data.items() if not isinstance(value, dict)]
+    for key, value in scalar_items:
+        lines.append(f"{key} = {_toml_value(value)}")
+    if scalar_items:
+        lines.append("")
+    preferred = ("paths", "naming", "workflow", "vimeo", "service_types")
+    section_names = [name for name in preferred if isinstance(data.get(name), dict)]
+    section_names.extend(
+        name for name, value in data.items() if isinstance(value, dict) and name not in section_names
+    )
+    for name in section_names:
+        _render_toml_table(lines, (name,), data[name])
+    return lines
+
+
+def _render_toml_table(lines: list[str], path: tuple[str, ...], values: dict[str, Any]) -> None:
+    scalars = [(key, value) for key, value in values.items() if not isinstance(value, dict)]
+    if scalars:
+        lines.append("[" + ".".join(path) + "]")
+        for key, value in scalars:
+            lines.append(f"{key} = {_toml_value(value)}")
+        lines.append("")
+    for key, value in values.items():
+        if isinstance(value, dict):
+            _render_toml_table(lines, path + (key,), value)
+
+
+def _toml_value(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, (date, datetime, time)):
+        return value.isoformat()
+    if isinstance(value, list):
+        return "[" + ", ".join(_toml_value(item) for item in value) + "]"
+    if isinstance(value, dict):
+        return "{ " + ", ".join(f"{key} = {_toml_value(item)}" for key, item in value.items()) + " }"
+    return _toml_string(str(value))

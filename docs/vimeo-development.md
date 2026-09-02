@@ -17,10 +17,13 @@ Der Code verwendet API-Version 3.4. Relevante Endpunkte:
 | angemeldeten Benutzer prüfen | `GET /me` |
 | Team-Owner lesen | `GET /users/{team_owner_user_id}` |
 | Teamordner auflisten | `GET /users/{team_owner_user_id}/folders` |
+| Teamordner erstellen | `POST /users/{team_owner_user_id}/folders` |
 | Zielordner validieren | `GET /users/{team_owner_user_id}/folders/{folder_id}` |
 | tus-Video für den authentifizierten Benutzer anlegen | `POST /me/videos` |
 | tus-Fortschritt prüfen/übertragen | `HEAD`/`PATCH` auf Vimeos `upload_link` |
 | Remote-Video und Embed-Daten lesen | `GET /videos/{video_id}` |
+| Videos im Zielordner auflisten | `GET /users/{team_owner_user_id}/projects/{target_folder_id}/videos` (paginiert) |
+| alle Videos des Team-Owners auflisten | `GET /users/{team_owner_user_id}/videos` (paginiert) |
 | erlaubte Embed-Domains bei `privacy.embed=whitelist` lesen | `GET /videos/{video_id}/privacy/domains` |
 | Video zum Teamordner hinzufügen | `POST /users/{team_owner_user_id}/projects/{folder_id}/items` |
 | Ordnerzuordnung verifizieren | `GET /users/{team_owner_user_id}/projects/{folder_id}/videos` |
@@ -138,6 +141,8 @@ Nach dem erfolgreichen Erstellen von MP4, MP3, Zusammenfassung und `predigt-work
 
 Der blaue Button startet `VimeoPublishingService` in einem Textual-Thread-Worker. Der tus-Transport liest weiterhin höchstens 1 MiB auf einmal und meldet jeden tatsächlich in den HTTP-PATCH übernommenen Leseblock an den gemeinsamen Fortschrittscallback. Textual zeigt daraus Balken, Prozent, Bytes/Gesamtgröße sowie – sobald genug Zeit vergangen ist – mittlere Sitzungsgeschwindigkeit und grobe Restzeit. Die Stufen Verbindung, Remote-Video, Uploadprüfung, Folder-Zuordnung, Vimeo-Verarbeitung und Embed bleiben parallel sichtbar. UI-Aktualisierungen werden sicher in den App-Thread zurückgereicht; die Netzwerk- und Dateiübertragung blockiert die Textual-Ereignisschleife nicht. Während des Laufs sind Upload, Überspringen und abschließende Aktionen gesperrt, sodass kein zweiter Worker gestartet werden kann.
 
+Nach Vergabe der Video-ID speichert der Service Link und Remote-Identität sofort und versucht den vorhandenen Embed-Abruf noch vor dem ersten tus-PATCH. Ist `embed.html` beziehungsweise ein sicherer Fallback bereits verfügbar, wird er atomar gespeichert; Textual aktiviert `Vimeo öffnen` und `Embed-Code kopieren` unabhängig vom weiterlaufenden Upload. Ein fehlender oder vorübergehend fehlerhafter früher Abruf ist ausdrücklich nicht fatal. Der Service versucht es nach der Übertragung erneut und behält den bisherigen abschließenden Pflichtabruf bei. Die UI unterscheidet deshalb `Embed-Code erhalten`, laufende Dateiübertragung und Vimeos spätere Verarbeitung als getrennte Stufen.
+
 `transcode.status=in_progress` wird nur als laufende Vimeo-Verarbeitung angezeigt. Die produktive Publishing-Semantik wartet weiterhin nicht künstlich auf einen von Vimeo nicht gelieferten Prozentwert: Sind Upload, Folder und Embed vollständig, darf der lokale Publishing-Schritt abgeschlossen sein, während Vimeo noch transkodiert. `complete` wird als abgeschlossene Verarbeitung markiert.
 
 Eine vorhandene Video-ID/-URI wird vom Service vor einer neuen Remote-Anlage geprüft und wiederverwendet. Bei einem Fehler bleiben lokale Dateien sowie bekannte Vimeo-Identität erhalten; der Nutzer kann kontrolliert erneut versuchen oder Vimeo als offen überspringen. Nach Erfolg stehen Vimeo öffnen, Embed-Code kopieren und Weiter zum Abschluss zur Verfügung. Der Abschluss unterscheidet Erfolg und offen/übersprungen. Ein Zurückspringen zu Schritt 7 wird bewusst nicht angeboten, weil die lokalen Dateien zu diesem Zeitpunkt bereits geschrieben sind; Überspringen ist die sichere sekundäre Aktion.
@@ -150,7 +155,11 @@ Die MP4 wird per resumierbarem tus-Upload übertragen. Standardmäßig werden 12
 
 Eine bekannte `video_id` oder `video_uri` wird vor einer weiteren Aktion remote geprüft und wiederverwendet. `complete` verhindert einen Doppelupload, `in_progress` ohne Remote-Identität stoppt sicher und `failed` darf kontrolliert erneut versucht werden. Eine von Vimeo bestätigte URI/ID wird sofort atomar gespeichert. Scheitern danach Upload, Folder-Zuordnung oder Embed-Abruf, bleibt die Remote-Identität erhalten und der Schritt wird mit bereinigter deutscher Fehlermeldung `failed`.
 
-Schema 4 speichert `video_uri`, `video_id`, `video_url`, `upload_status`, `transcode_status`, `uploaded_at`, `target_folder_id`, `target_folder_uri`, `target_folder_name`, `folder_status`, `team_owner_user_id`, tus-Resume-Daten sowie `step.status`/`step.error`. Sobald Vimeo die Übertragung remote als `complete` bestätigt, werden URL, Status und lokaler UTC-Bestätigungszeitpunkt gespeichert – noch bevor Folder-Zuordnung und Embed-Abruf folgen. Dadurch geht ein erfolgreicher Upload bei einem späteren Folder-/Embed-Fehler nicht verloren. Ältere Dateien einschließlich Schema 2 mit `folder_id`, `folder_uri` und `folder_name` bleiben lesbar und werden beim nächsten Speichern migriert.
+Wurde das bekannte Video außerhalb des PredigtUploaders gelöscht, setzt ein erneuter Versuch die gespeicherten Remote-Felder nur bei einem expliziten HTTP 404 zurück. Diese Entscheidung fällt erst nach erfolgreicher Token-, Team-Owner- und Folder-Prüfung. Lokale Predigtmetadaten und Dateipfade bleiben unverändert. Bei Timeout, fehlender Verbindung, 401/403, 429, 5xx oder einer sonst unklaren Antwort bleibt die bekannte ID erhalten und es wird kein zweites Video angelegt.
+
+`Upload stoppen` setzt nach einem Bestätigungsdialog ein threadsicheres Flag. Der Worker prüft es zwischen den fachlichen Vimeo-Schritten und tus-Blöcken. Ein laufender PATCH darf sauber enden; anschließend wird dessen bestätigter Offset gespeichert und erst dann mit `step.status=stopped` beendet. Die TUI nennt bestätigte Bytes und Gesamtgröße. `Vimeo-Upload fortsetzen` verwendet dieselbe Video-ID, denselben tus-Link und den per HEAD bestätigten Remote-Offset. Wurde das Video zwischenzeitlich extern gelöscht, greift stattdessen die beschriebene 404-Behandlung. Das Stoppen löscht kein Vimeo-Video.
+
+Schema 5 speichert weiterhin `video_uri`, `video_id`, `video_url`, `upload_status`, `transcode_status`, `uploaded_at`, `target_folder_id`, `target_folder_uri`, `target_folder_name`, `folder_status`, `team_owner_user_id`, tus-Resume-Daten sowie `step.status`/`step.error` und erlaubt zusätzlich den Status `stopped`. Sobald Vimeo die Übertragung remote als `complete` bestätigt, werden URL, Status und lokaler UTC-Bestätigungszeitpunkt gespeichert – noch bevor Folder-Zuordnung und Embed-Abruf folgen. Dadurch geht ein erfolgreicher Upload bei einem späteren Folder-/Embed-Fehler nicht verloren. Ältere Dateien einschließlich Schema 2 mit `folder_id`, `folder_uri` und `folder_name` bleiben lesbar und werden beim nächsten Speichern migriert.
 
 ## Embed-Code
 
@@ -164,4 +173,18 @@ Fehlt der Embed-Code später, kann er ohne erneuten Upload nachgeladen werden:
   --state "C:\Pfad\zur\Predigt\<MP4-Stem>.predigt-workflow.json"
 ```
 
+## Vimeo-Bibliothek in Textual
+
+`Vimeo-Bibliothek` im Hauptmenü lädt echte Videos aus dem konfigurierten Teamordner. Der Service verwendet den expliziten Team-Owner und die Folder-ID und folgt Vimeos `paging.next`, bis alle zugänglichen Seiten geladen sind. Jede geladene Seite wird sofort kumulativ an Textual gemeldet; bei einer von Vimeo gelieferten Gesamtzahl steht beispielsweise `100 / 606 Videos geladen – weitere werden geladen …`. Die bereits sichtbaren Videos bleiben auswählbar. Vollständig geladene Ergebnisse werden für die laufende App gecached; beim erneuten Öffnen ist kein neuer Komplettabruf nötig. `Neu laden` verwirft den passenden Owner-/Folder-Cache und ruft Vimeo erneut ab. Das Öffnen der Ansicht lädt nur lesend; es legt kein Video an, verändert keine Ordnerzuordnung und startet keinen Download. Netzwerkzugriffe laufen in einem Textual-Thread-Worker, sodass Loading-, Leer- und Fehlerzustände weiterhin bedienbar bleiben.
+
+Die Tabelle zeigt Titel, Erstellungsdatum, Verarbeitungsstatus und Dauer. Nach Auswahl stehen – abhängig von den tatsächlich gelieferten Daten – Vimeo öffnen, Link kopieren, Embed kopieren und Details zur Verfügung. Die Titelsuche filtert die bereits geladenen Ergebnisse; eine spätere serverseitige Suche oder Auswahl mehrerer Ordner kann auf dem UI-unabhängigen Bibliotheksergebnis aufbauen.
+
+Vimeo kann je nach Konto, Token, Privacy und Video im Feld `download` zeitlich begrenzte Downloadvarianten liefern. Nur solche expliziten HTTPS-Links werden als Download-Capability akzeptiert und mit Qualität, Auflösung, Größe und Typ angezeigt. Das Vorhandensein von `files`, einer Player-URL oder eines Embed-Codes wird nicht als Downloadrecht interpretiert. In dieser ersten Version gibt es deshalb noch keinen Datei-Download; fehlt `download`, bleibt die Aktion deaktiviert, ohne den restlichen Browser zu beeinträchtigen.
+
 Vimeos Konto-/Video-Defaults für Privacy werden beim Anlegen nicht überschrieben. Der Smoke-Test zeigt `privacy.view`, `privacy.embed`, `embed.html`, `player_embed_url` und bei `whitelist` die von Vimeo gemeldeten erlaubten Domains. Laut offizieller Vimeo-Semantik bedeutet `public` frei einbettbar, `private` nicht extern einbettbar und `whitelist` nur auf den gelisteten Domains. Diese reale Ausgabe und die Wiedergabe auf der späteren WordPress-Domain müssen vor der WordPress-Phase zusätzlich im Browser geprüft werden.
+
+### Ordnerwahl und zwei Bibliothekssichten
+
+Normale Nutzer wählen den Standard-Zielordner in Textual nach Namen. Der Folderkatalog bildet Unterordner und Breadcrumbs aus den von Vimeo gelieferten URIs; IDs stehen nur im Adminbereich. `Neuen Ordner erstellen` zeigt Zielpfad und Namen in einem Bestätigungsdialog. Für Unterordner wird die echte `parent_folder_uri` gesendet. Nach Erfolg wird der Katalog neu geladen, der neue Ordner aber erst durch eine ausdrückliche Auswahl zum Standardziel. Fehlt der gespeicherte Ordner, wird gewarnt und nichts automatisch ersetzt.
+
+`Alle Videos` verwendet `GET /users/{owner}/videos`, `Ordner` den Folderkatalog und je geöffnetem Ordner dessen `/projects/{id}/videos`-Liste. Beide laufen im Thread-Worker, veröffentlichen Videoseiten progressiv und verwenden nur sitzungsweite Caches. `Neu laden` erzwingt einen API-Refresh. Fehlt `download`, bleibt die Downloadaktion deaktiviert. Ist ein expliziter HTTPS-Link vorhanden, öffnet die Aktion den ersten von Vimeo gelieferten Link im Standardbrowser; Qualitäts- und lokale Zielauswahl bleiben ein möglicher späterer Ausbau.

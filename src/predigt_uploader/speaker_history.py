@@ -59,6 +59,24 @@ class SpeakerHistory:
         self._save(names)
         return tuple(names)
 
+    def rename(self, old_name: str, new_name: str) -> tuple[str, ...]:
+        old_key = normalize_speaker_name(old_name).casefold()
+        cleaned = normalize_speaker_name(new_name)
+        if not old_key:
+            raise ValueError("Bitte zuerst einen gespeicherten Prediger auswählen.")
+        if not cleaned:
+            raise ValueError("Der neue Name darf nicht leer sein.")
+        names = list(self.list())
+        if not any(item.casefold() == old_key for item in names):
+            raise ValueError("Der ausgewählte Prediger wurde nicht gefunden.")
+        new_key = cleaned.casefold()
+        if new_key != old_key and any(item.casefold() == new_key for item in names):
+            raise ValueError("Dieser Prediger ist bereits gespeichert.")
+        names = [cleaned if item.casefold() == old_key else item for item in names]
+        names.sort(key=str.casefold)
+        self._save(names)
+        return tuple(names)
+
     def suggest(self, query: str, *, limit: int = 6) -> tuple[str, ...]:
         normalized = normalize_speaker_name(query).casefold()
         names = self.list()

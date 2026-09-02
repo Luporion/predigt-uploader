@@ -2271,6 +2271,11 @@ def run_vimeo_diagnose(args: argparse.Namespace) -> int:
 
 
 def _print_vimeo_upload_preview(preview) -> None:
+    if getattr(preview, "remote_state_reset", False):
+        print(
+            "Das zuvor gespeicherte Vimeo-Video existiert nicht mehr. "
+            "Die lokale Aufnahme bleibt unverändert; ein neuer Upload ist wieder möglich."
+        )
     print("Vimeo-Verbindung und Zielkonfiguration: OK")
     print(f"Team: {preview.team_owner_name}")
     print(f"Zielordner: {preview.folder.name}")

@@ -1,4 +1,5 @@
 from pathlib import Path
+import tomllib
 
 import pytest
 
@@ -247,3 +248,23 @@ def test_save_does_not_overwrite_invalid_existing_config(monkeypatch, tmp_path: 
 
     assert "nicht überschrieben" in error.value.user_message
     assert path.read_text(encoding="utf-8") == original
+
+
+def test_save_preserves_unknown_toml_sections_and_keys(monkeypatch, tmp_path: Path):
+    appdata = tmp_path / "AppData"
+    monkeypatch.setenv("APPDATA", str(appdata))
+    config_path = appdata / "PredigtUploader" / "config.toml"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text(
+        '[paths]\nrecordings_base = "D:\\\\Alt"\ncustom_path_key = "bleibt"\n\n'
+        '[future]\nenabled = true\ncount = 7\n\n[future.nested]\nlabel = "erhalten"\n',
+        encoding="utf-8",
+    )
+
+    save_user_config_values(paths={"recordings_base": r"D:\Neu"})
+
+    with config_path.open("rb") as handle:
+        data = tomllib.load(handle)
+    assert data["paths"]["recordings_base"] == r"D:\Neu"
+    assert data["paths"]["custom_path_key"] == "bleibt"
+    assert data["future"] == {"enabled": True, "count": 7, "nested": {"label": "erhalten"}}

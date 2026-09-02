@@ -15,11 +15,15 @@ from predigt_uploader.publishing.vimeo import (
     VimeoConfigurationError,
     VimeoCredentialError,
     VimeoEmbedError,
+    VimeoFolder,
     VimeoFolderError,
+    VimeoFolderCatalog,
+    VimeoLibraryError,
     VimeoProgress,
     VimeoPublishingService,
     VimeoStateConflictError,
     VimeoUploadError,
+    VimeoUploadStoppedError,
     load_vimeo_token,
 )
 from predigt_uploader.credentials import CredentialNotConfiguredError
@@ -215,14 +219,17 @@ def _state_path(tmp_path: Path, *, local_status: str = "complete", vimeo: VimeoS
 
 
 def _service(transport: FakeTransport, config: VimeoConfig | None = None, **kwargs) -> VimeoPublishingService:
+    options = {
+        "chunk_size": 5,
+        "read_size": 2,
+        "sleep": lambda _seconds: None,
+    }
+    options.update(kwargs)
     return VimeoPublishingService(
         config or _config(),
         TOKEN,
         transport,
-        chunk_size=5,
-        read_size=2,
-        sleep=lambda _seconds: None,
-        **kwargs,
+        **options,
     )
 
 
@@ -300,6 +307,57 @@ def test_diagnose_lists_team_folders_with_ids_uris_and_parent():
     assert report.folders[0].parent_folder_uri == "/folders/12"
 
 
+def test_folder_catalog_models_hierarchy_and_breadcrumbs():
+    catalog = VimeoFolderCatalog(
+        "Gemeinde-Team",
+        (
+            VimeoFolder("10", "/users/42/projects/10", "Predigten"),
+            VimeoFolder("11", "/users/42/projects/11", "2026", parent_folder_uri="/users/42/projects/10"),
+        ),
+    )
+
+    assert [folder.name for folder in catalog.children_of(None)] == ["Predigten"]
+    assert [folder.name for folder in catalog.children_of("10")] == ["2026"]
+    assert [folder.name for folder in catalog.breadcrumbs("11")] == ["Predigten", "2026"]
+
+
+def test_create_folder_uses_explicit_team_and_parent_then_returns_folder():
+    class FolderTransport(FakeTransport):
+        def get_json(self, path_or_url, *, params=None):
+            if path_or_url == f"/users/{OWNER_ID}/folders/12":
+                return {
+                    "uri": "/users/42/projects/12",
+                    "name": "Predigten",
+                    "user": {"uri": f"/users/{OWNER_ID}"},
+                }
+            return super().get_json(path_or_url, params=params)
+
+        def post_json(self, path, payload):
+            self.calls.append(("POST_JSON", path))
+            assert path == f"/users/{OWNER_ID}/folders"
+            assert payload == {"name": "2026", "parent_folder_uri": "/users/42/projects/12"}
+            return {
+                "uri": "/users/42/projects/13",
+                "name": "2026",
+                "user": {"uri": f"/users/{OWNER_ID}"},
+                "metadata": {"connections": {"parent_folder": {"uri": "/users/42/projects/12"}}},
+            }
+
+    created = _service(FolderTransport()).create_folder("  2026  ", parent_folder_id="12")
+
+    assert created.folder_id == "13"
+    assert created.parent_folder_uri == "/users/42/projects/12"
+
+
+def test_create_folder_wraps_api_error_without_silent_change():
+    class FailedCreateTransport(FakeTransport):
+        def post_json(self, path, payload):
+            raise VimeoApiError("abgelehnt", "HTTP 403", status_code=403)
+
+    with pytest.raises(VimeoFolderError, match="konnte nicht erstellt"):
+        _service(FailedCreateTransport()).create_folder("Neuer Ordner")
+
+
 def test_target_folder_must_exist_and_be_accessible():
     transport = FakeTransport()
     transport.folder_exists = False
@@ -347,6 +405,123 @@ def test_preflight_rejects_wrong_owner_or_control_name():
         _service(wrong_name).preflight()
 
 
+def test_vimeo_library_loads_all_pages_and_only_explicit_downloads():
+    class LibraryTransport(FakeTransport):
+        def get_json(self, path_or_url, *, params=None):
+            if path_or_url == f"/users/{OWNER_ID}/projects/{FOLDER_ID}/videos":
+                self.calls.append(("GET", path_or_url))
+                return {
+                    "data": [
+                        {
+                            "uri": "/videos/901",
+                            "name": "Erste Predigt",
+                            "link": "https://vimeo.com/901/hash",
+                            "created_time": "2026-08-30T10:00:00Z",
+                            "duration": 3723,
+                            "status": "available",
+                            "upload": {"status": "complete"},
+                            "transcode": {"status": "complete"},
+                            "player_embed_url": "https://player.vimeo.com/video/901?h=hash",
+                            "embed": {"html": "<iframe>901</iframe>"},
+                            "privacy": {"view": "unlisted", "embed": "public"},
+                            "download": [
+                                {
+                                    "link": "https://download.vimeo.test/901.mp4",
+                                    "quality": "hd",
+                                    "type": "video/mp4",
+                                    "width": 1920,
+                                    "height": 1080,
+                                    "size": 123456,
+                                }
+                            ],
+                        }
+                    ],
+                    "paging": {"next": "/library/page/2"},
+                    "total": 2,
+                }
+            if path_or_url == "/library/page/2":
+                self.calls.append(("GET", path_or_url))
+                assert params is None
+                return {
+                    "data": [
+                        {
+                            "uri": "/videos/902",
+                            "name": "Zweite Predigt",
+                            "status": "uploading",
+                            "transcode": {"status": "in_progress"},
+                            "files": [{"link": "https://player-only.example/video.mp4"}],
+                            "download": [{"link": "http://unsafe.example/video.mp4", "quality": "sd"}],
+                        }
+                    ],
+                    "paging": {"next": None},
+                }
+            return super().get_json(path_or_url, params=params)
+
+    progressive: list = []
+    result = _service(LibraryTransport()).list_target_folder_videos(progressive.append)
+
+    assert result.team_owner_name == "Gemeinde-Team"
+    assert result.folder.folder_id == FOLDER_ID
+    assert [video.video_id for video in result.videos] == ["901", "902"]
+    assert result.videos[0].download_available is True
+    assert result.videos[0].downloads[0].quality == "hd"
+    assert result.videos[1].transcode_status == "in_progress"
+    assert result.videos[1].download_available is False
+    assert len(progressive) == 2
+    assert [len(page.videos) for page in progressive] == [1, 2]
+    assert progressive[0].complete is False
+    assert progressive[0].total_count == 2
+    assert progressive[1].complete is True
+
+
+def test_vimeo_library_supports_empty_folder():
+    class EmptyLibraryTransport(FakeTransport):
+        def get_json(self, path_or_url, *, params=None):
+            if path_or_url == f"/users/{OWNER_ID}/projects/{FOLDER_ID}/videos":
+                return {"data": [], "paging": {"next": None}}
+            return super().get_json(path_or_url, params=params)
+
+    assert _service(EmptyLibraryTransport()).list_target_folder_videos().videos == ()
+
+
+def test_vimeo_library_wraps_api_error_and_rejects_missing_configuration():
+    class FailedLibraryTransport(FakeTransport):
+        def get_json(self, path_or_url, *, params=None):
+            if path_or_url == f"/users/{OWNER_ID}/projects/{FOLDER_ID}/videos":
+                raise VimeoApiError("nicht erreichbar", "HTTP 503", status_code=503)
+            return super().get_json(path_or_url, params=params)
+
+    with pytest.raises(VimeoLibraryError, match="Videos im Vimeo-Zielordner"):
+        _service(FailedLibraryTransport()).list_target_folder_videos()
+    with pytest.raises(VimeoConfigurationError, match="Zielordner-ID"):
+        _service(FakeTransport(), _config(target_folder_id="")).list_target_folder_videos()
+
+
+def test_all_videos_paginates_progressively_and_keeps_parent_folder_uri():
+    class AllVideosTransport(FakeTransport):
+        def get_json(self, path_or_url, *, params=None):
+            if path_or_url == f"/users/{OWNER_ID}/videos":
+                return {
+                    "data": [{"uri": "/videos/901", "name": "Neu", "created_time": "2026-01-02", "parent_project": {"uri": "/projects/77"}}],
+                    "total": 2,
+                    "paging": {"next": "https://api.vimeo.com/page/2"},
+                }
+            if path_or_url == "https://api.vimeo.com/page/2":
+                return {
+                    "data": [{"uri": "/videos/902", "name": "Alt", "created_time": "2026-01-01"}],
+                    "total": 2,
+                    "paging": {"next": None},
+                }
+            return super().get_json(path_or_url, params=params)
+
+    pages = []
+    result = _service(AllVideosTransport()).list_all_videos(progress=pages.append)
+
+    assert [len(page.videos) for page in pages] == [1, 2]
+    assert [page.complete for page in pages] == [False, True]
+    assert result.videos[0].folder_uri == "/projects/77"
+
+
 def test_publish_requires_completed_local_preparation(tmp_path):
     path = _state_path(tmp_path, local_status="pending")
 
@@ -371,6 +546,92 @@ def test_complete_state_checks_remote_and_never_creates_duplicate(tmp_path):
         _service(transport).publish(path)
 
     assert ("GET", f"/videos/{VIDEO_ID}") in transport.calls
+    assert not any(method == "POST_JSON" for method, _ in transport.calls)
+
+
+def test_definitively_deleted_remote_video_resets_only_vimeo_state_and_allows_fresh_upload(tmp_path):
+    old_vimeo = VimeoState(
+        step=StepState("complete"),
+        video_id=VIDEO_ID,
+        video_uri=f"/videos/{VIDEO_ID}",
+        video_url="https://vimeo.com/old",
+        player_embed_url="https://player.vimeo.com/old",
+        embed_html="<iframe>alt</iframe>",
+        upload_status="complete",
+        transcode_status="complete",
+        uploaded_at="2026-08-31T12:00:00+00:00",
+        folder_status="verified",
+        upload_uri="https://files.tus.vimeo.com/old",
+        upload_offset=5,
+        upload_size=5,
+    )
+    path = _state_path(tmp_path, vimeo=old_vimeo)
+
+    class DeletedRemoteTransport(FakeTransport):
+        def __init__(self):
+            super().__init__()
+            self.created = False
+            self.state_before_new_remote: VimeoState | None = None
+
+        def get_json(self, path_or_url, *, params=None):
+            if path_or_url == f"/videos/{VIDEO_ID}" and not self.created:
+                self.calls.append(("GET", path_or_url))
+                raise VimeoApiError("Video wurde gelöscht", "HTTP 404", status_code=404)
+            return super().get_json(path_or_url, params=params)
+
+        def post_json(self, request_path, payload):
+            self.state_before_new_remote = load_workflow_state(path).vimeo
+            self.created = True
+            return super().post_json(request_path, payload)
+
+    transport = DeletedRemoteTransport()
+    result = _service(transport).publish(path)
+
+    assert result.video_id == VIDEO_ID
+    assert transport.state_before_new_remote == VimeoState(
+        step=StepState(
+            "in_progress",
+            None,
+        ),
+        target_folder_id=FOLDER_ID,
+        target_folder_uri=f"/projects/{FOLDER_ID}",
+        target_folder_name="Predigten",
+        team_owner_user_id=OWNER_ID,
+        upload_status="pending",
+        upload_size=load_workflow_state(path).paths.final_mp4.stat().st_size,
+    )
+    assert sum(method == "POST_JSON" for method, _ in transport.calls) == 1
+    final = load_workflow_state(path)
+    assert final.paths.final_mp4 is not None
+    assert final.local_preparation.status == "complete"
+    assert final.vimeo.step.status == "complete"
+
+
+@pytest.mark.parametrize("status_code", [None, 401, 403, 429, 503])
+def test_unclear_remote_error_never_resets_state_or_creates_duplicate(tmp_path, status_code):
+    original = VimeoState(
+        step=StepState("failed", "früherer Fehler"),
+        video_id=VIDEO_ID,
+        video_uri=f"/videos/{VIDEO_ID}",
+        video_url="https://vimeo.com/known",
+        upload_uri=UPLOAD_URL,
+        upload_offset=3,
+        upload_size=5,
+    )
+    path = _state_path(tmp_path, vimeo=original)
+
+    class UnclearRemoteTransport(FakeTransport):
+        def get_json(self, path_or_url, *, params=None):
+            if path_or_url == f"/videos/{VIDEO_ID}":
+                self.calls.append(("GET", path_or_url))
+                raise VimeoApiError("Remote-Lage unklar", "temporär", status_code=status_code)
+            return super().get_json(path_or_url, params=params)
+
+    transport = UnclearRemoteTransport()
+    with pytest.raises(VimeoApiError, match="Remote-Lage unklar"):
+        _service(transport).publish(path)
+
+    assert load_workflow_state(path).vimeo == original
     assert not any(method == "POST_JSON" for method, _ in transport.calls)
 
 
@@ -408,6 +669,52 @@ def test_failed_state_can_retry_in_a_controlled_way(tmp_path):
     assert load_workflow_state(path).vimeo.step.status == "complete"
 
 
+def test_user_stop_keeps_confirmed_tus_offset_and_retry_resumes_without_duplicate(tmp_path):
+    path = _state_path(tmp_path)
+
+    class ResumableTransport(FakeTransport):
+        def _video(self):
+            self.remote_upload_status = "complete" if self.total and self.offset == self.total else "in_progress"
+            return super()._video()
+
+    transport = ResumableTransport()
+    service = _service(transport, chunk_size=4, read_size=2)
+
+    with pytest.raises(VimeoUploadStoppedError, match="auf Wunsch gestoppt") as stopped:
+        service.publish(path, should_cancel=lambda: transport.offset >= 4)
+
+    state = load_workflow_state(path).vimeo
+    assert stopped.value.confirmed_bytes == 4
+    assert state.step.status == "stopped"
+    assert state.video_id == VIDEO_ID
+    assert state.upload_uri == UPLOAD_URL
+    assert state.upload_offset == 4
+    assert state.upload_status == "in_progress"
+    assert sum(method == "POST_JSON" for method, _ in transport.calls) == 1
+
+    service.publish(path)
+
+    completed = load_workflow_state(path).vimeo
+    assert completed.step.status == "complete"
+    assert completed.upload_offset == load_workflow_state(path).paths.final_mp4.stat().st_size
+    assert sum(method == "POST_JSON" for method, _ in transport.calls) == 1
+
+
+def test_user_stop_before_remote_creation_does_not_invent_remote_state(tmp_path):
+    path = _state_path(tmp_path)
+    transport = FakeTransport()
+
+    with pytest.raises(VimeoUploadStoppedError):
+        _service(transport).publish(path, should_cancel=lambda: True)
+
+    state = load_workflow_state(path).vimeo
+    assert state.step.status == "stopped"
+    assert state.video_id is None
+    assert state.video_uri is None
+    assert state.upload_uri is None
+    assert not any(method == "POST_JSON" for method, _ in transport.calls)
+
+
 def test_successful_publish_streams_with_progress_assigns_and_verifies_folder(tmp_path):
     path = _state_path(tmp_path)
     transport = FakeTransport()
@@ -436,7 +743,8 @@ def test_successful_publish_streams_with_progress_assigns_and_verifies_folder(tm
         "assigning_folder",
         "verifying_folder",
         "processing_video",
-        "fetching_embed",
+        "fetching_early_embed",
+        "early_embed_available",
         "complete",
     }
     assert progress[-1].percent == 100.0
@@ -445,6 +753,70 @@ def test_successful_publish_streams_with_progress_assigns_and_verifies_folder(tm
     assert [item.uploaded_bytes for item in upload_updates] == sorted(
         item.uploaded_bytes for item in upload_updates
     )
+
+
+def test_early_embed_and_video_link_are_persisted_before_tus_upload(tmp_path):
+    path = _state_path(tmp_path)
+
+    class InspectingTransport(FakeTransport):
+        state_during_patch: VimeoState | None = None
+
+        def patch_upload(self, *args, **kwargs):
+            self.state_during_patch = load_workflow_state(path).vimeo
+            return super().patch_upload(*args, **kwargs)
+
+    transport = InspectingTransport()
+    progress: list[VimeoProgress] = []
+
+    _service(transport).publish(path, progress.append)
+
+    assert transport.state_during_patch is not None
+    assert transport.state_during_patch.video_url.endswith("/unlisted-hash")
+    assert transport.state_during_patch.embed_html == transport.embed_html
+    phases = [item.phase for item in progress]
+    assert phases.index("video_link_available") < phases.index("uploading")
+    assert phases.index("early_embed_available") < phases.index("uploading")
+
+
+def test_early_embed_missing_then_becomes_available_after_upload(tmp_path):
+    path = _state_path(tmp_path)
+
+    class DelayedEmbedTransport(FakeTransport):
+        def _video(self):
+            video = dict(super()._video())
+            if self.video_get_count == 1:
+                video["embed"] = {"html": None}
+                video["player_embed_url"] = None
+            return video
+
+    transport = DelayedEmbedTransport()
+    progress: list[VimeoProgress] = []
+
+    _service(transport).publish(path, progress.append)
+
+    state = load_workflow_state(path).vimeo
+    assert state.embed_html == transport.embed_html
+    phases = [item.phase for item in progress]
+    assert phases.count("fetching_early_embed") == 2
+    assert phases.index("uploading") < phases.index("early_embed_available")
+
+
+def test_early_embed_api_error_never_blocks_tus_upload(tmp_path):
+    path = _state_path(tmp_path)
+
+    class EarlyEmbedErrorTransport(FakeTransport):
+        def get_json(self, path_or_url, *, params=None):
+            if path_or_url == f"/videos/{VIDEO_ID}" and self.video_get_count == 0:
+                self.video_get_count += 1
+                raise VimeoApiError("Embed noch nicht erreichbar", "HTTP 503", status_code=503)
+            return super().get_json(path_or_url, params=params)
+
+    transport = EarlyEmbedErrorTransport()
+
+    _service(transport).publish(path)
+
+    assert ("PATCH", UPLOAD_URL) in transport.calls
+    assert load_workflow_state(path).vimeo.step.status == "complete"
 
 
 @pytest.mark.parametrize(
@@ -1082,7 +1454,7 @@ def test_smoke_embed_not_yet_available_is_reported_without_duplicate_upload(tmp_
 
 def test_smoke_waits_for_processing_with_bounded_polling(tmp_path):
     transport = FakeTransport()
-    transport.transcode_statuses = ["in_progress", "in_progress", "complete"]
+    transport.transcode_statuses = ["in_progress"] * 4 + ["complete"]
     clock = _FakeClock()
 
     result = run_vimeo_smoke_test(

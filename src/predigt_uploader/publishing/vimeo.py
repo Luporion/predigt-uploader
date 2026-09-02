@@ -44,6 +44,16 @@ class VimeoUploadError(VimeoError):
     pass
 
 
+class VimeoUploadStoppedError(VimeoError):
+    def __init__(self, confirmed_bytes: int, total_bytes: int) -> None:
+        super().__init__(
+            "Der Vimeo-Upload wurde auf Wunsch gestoppt. Ein erneuter Versuch kann den bestätigten Stand fortsetzen.",
+            f"Von Vimeo bestätigter tus-Offset: {confirmed_bytes} von {total_bytes} Bytes.",
+        )
+        self.confirmed_bytes = confirmed_bytes
+        self.total_bytes = total_bytes
+
+
 class VimeoFolderError(VimeoError):
     pass
 
@@ -53,6 +63,10 @@ class VimeoStateConflictError(VimeoError):
 
 
 class VimeoEmbedError(VimeoError):
+    pass
+
+
+class VimeoLibraryError(VimeoError):
     pass
 
 
@@ -79,6 +93,7 @@ class VimeoProgress:
 
 ProgressCallback = Callable[[VimeoProgress], None]
 UploadReadCallback = Callable[[int], None]
+CancellationCheck = Callable[[], bool]
 
 
 class _UploadProgressReporter:
@@ -172,6 +187,84 @@ class VimeoUploadPreview:
     folder: VimeoFolder
     permission_note: str
     upload_approach: str = "tus"
+    remote_state_reset: bool = False
+
+
+@dataclass(frozen=True)
+class VimeoDownloadFile:
+    link: str
+    quality: str
+    file_type: str | None = None
+    width: int | None = None
+    height: int | None = None
+    size: int | None = None
+    expires: str | None = None
+
+
+@dataclass(frozen=True)
+class VimeoLibraryVideo:
+    video_id: str
+    uri: str
+    title: str
+    video_url: str | None = None
+    player_embed_url: str | None = None
+    embed_html: str | None = None
+    created_time: str | None = None
+    duration: int | None = None
+    status: str | None = None
+    upload_status: str | None = None
+    transcode_status: str | None = None
+    privacy_view: str | None = None
+    privacy_embed: str | None = None
+    folder_uri: str | None = None
+    downloads: tuple[VimeoDownloadFile, ...] = ()
+
+    @property
+    def download_available(self) -> bool:
+        return bool(self.downloads)
+
+
+@dataclass(frozen=True)
+class VimeoLibraryResult:
+    team_owner_name: str
+    folder: VimeoFolder
+    videos: tuple[VimeoLibraryVideo, ...]
+    total_count: int | None = None
+    complete: bool = True
+
+
+LibraryProgressCallback = Callable[[VimeoLibraryResult], None]
+
+
+@dataclass(frozen=True)
+class VimeoFolderCatalog:
+    team_owner_name: str
+    folders: tuple[VimeoFolder, ...]
+
+    def by_id(self, folder_id: str) -> VimeoFolder | None:
+        return next((folder for folder in self.folders if folder.folder_id == folder_id), None)
+
+    def children_of(self, parent_folder_id: str | None) -> tuple[VimeoFolder, ...]:
+        children: list[VimeoFolder] = []
+        for folder in self.folders:
+            actual_parent_id = _folder_id_from_optional_uri(folder.parent_folder_uri)
+            if actual_parent_id == parent_folder_id:
+                children.append(folder)
+            elif parent_folder_id is None and actual_parent_id and self.by_id(actual_parent_id) is None:
+                # Vimeo may return an account-level/private root URI that isn't itself
+                # part of the normal folder collection. Its children are UI roots.
+                children.append(folder)
+        return tuple(sorted(children, key=lambda folder: folder.name.casefold()))
+
+    def breadcrumbs(self, folder_id: str | None) -> tuple[VimeoFolder, ...]:
+        chain: list[VimeoFolder] = []
+        visited: set[str] = set()
+        current = self.by_id(folder_id or "")
+        while current is not None and current.folder_id not in visited:
+            chain.append(current)
+            visited.add(current.folder_id)
+            current = self.by_id(_folder_id_from_optional_uri(current.parent_folder_uri) or "")
+        return tuple(reversed(chain))
 
 
 class VimeoTransport(Protocol):
@@ -438,6 +531,43 @@ class VimeoPublishingService:
             params = None
         return folders
 
+    def get_folder_catalog(self) -> VimeoFolderCatalog:
+        owner = self._get_owner()
+        return VimeoFolderCatalog(
+            str(owner.get("name") or "(ohne Namen)"),
+            tuple(self.list_folders()),
+        )
+
+    def create_folder(self, name: str, *, parent_folder_id: str | None = None) -> VimeoFolder:
+        """Create one explicitly named Team Library folder."""
+        validate_vimeo_owner_config(self.config)
+        cleaned = " ".join(name.split())
+        if not cleaned:
+            raise VimeoFolderError("Bitte einen Namen für den neuen Vimeo-Ordner eingeben.")
+        if len(cleaned) > 128:
+            raise VimeoFolderError("Der Vimeo-Ordnername ist zu lang.")
+        payload: dict[str, Any] = {"name": cleaned}
+        if parent_folder_id:
+            if not parent_folder_id.isdigit():
+                raise VimeoFolderError("Der Elternordner besitzt keine gültige Vimeo-ID.")
+            payload["parent_folder_uri"] = self._get_folder(parent_folder_id).uri
+        try:
+            response = self.transport.post_json(
+                f"/users/{self.config.team_owner_user_id}/folders",
+                payload,
+            )
+        except VimeoApiError as exc:
+            raise VimeoFolderError(
+                "Der Vimeo-Ordner konnte nicht erstellt werden.",
+                exc.admin_hint,
+            ) from exc
+        folder = _folder_from_response(response)
+        if folder.name and folder.name != cleaned:
+            raise VimeoFolderError(
+                "Vimeo hat nach dem Erstellen einen unerwarteten Ordner zurückgegeben."
+            )
+        return folder
+
     def preflight(self) -> VimeoPreflightResult:
         validate_vimeo_config(self.config)
         me = self.transport.get_json("/me", params={"fields": "uri,name"})
@@ -463,14 +593,23 @@ class VimeoPublishingService:
         state = load_workflow_state(state_path)
         video_path = _validate_local_state(state)
         _guard_duplicate_state(state)
+        preflight = self.preflight()
+        remote_state_reset = False
         known_video_id = _known_video_id(state.vimeo)
         if known_video_id:
-            self.get_video(known_video_id)
-            if state.vimeo.step.status == "complete":
-                raise VimeoStateConflictError(
-                    "Dieses Video wurde laut Workflow-State bereits zu Vimeo hochgeladen."
-                )
-        preflight = self.preflight()
+            try:
+                self.get_video(known_video_id)
+            except VimeoApiError as exc:
+                if exc.status_code != 404:
+                    raise
+                self._reset_missing_remote_state(state_path)
+                state = load_workflow_state(state_path)
+                remote_state_reset = True
+            else:
+                if state.vimeo.step.status == "complete":
+                    raise VimeoStateConflictError(
+                        "Dieses Video wurde laut Workflow-State bereits zu Vimeo hochgeladen."
+                    )
         return VimeoUploadPreview(
             file_path=video_path,
             file_size=video_path.stat().st_size,
@@ -478,12 +617,20 @@ class VimeoPublishingService:
             team_owner_name=preflight.team_owner_name,
             folder=preflight.folder,
             permission_note=preflight.permission_note,
+            remote_state_reset=remote_state_reset,
         )
 
-    def publish(self, state_path: Path, progress: ProgressCallback | None = None) -> VimeoPublishResult:
+    def publish(
+        self,
+        state_path: Path,
+        progress: ProgressCallback | None = None,
+        should_cancel: CancellationCheck | None = None,
+    ) -> VimeoPublishResult:
         preview = self.preview_upload(state_path)
         state = load_workflow_state(state_path)
         video_path = preview.file_path
+        if preview.remote_state_reset:
+            _emit(progress, "remote_video_reset", total=video_path.stat().st_size)
         _emit(progress, "preparing", total=video_path.stat().st_size)
         preflight = VimeoPreflightResult("", "", preview.team_owner_name, preview.folder, preview.permission_note)
         total_size = video_path.stat().st_size
@@ -502,16 +649,43 @@ class VimeoPublishingService:
         )
         save_workflow_state(state, state_path)
         try:
+            self._raise_if_cancelled(state_path, should_cancel)
             remote = self._resolve_or_create_remote(state, state_path, video_path, progress)
+            self._raise_if_cancelled(state_path, should_cancel)
+            state = self._persist_remote_details(state_path, remote)
+            if state.vimeo.video_url:
+                _emit(progress, "video_link_available", total=total_size)
+            self._try_persist_embed(state_path, video=remote, progress=progress)
+            self._raise_if_cancelled(state_path, should_cancel)
             state = load_workflow_state(state_path)
-            self._upload_if_needed(state, state_path, video_path, remote, progress)
+            self._upload_if_needed(
+                state,
+                state_path,
+                video_path,
+                remote,
+                progress,
+                should_cancel=should_cancel,
+            )
+            self._raise_if_cancelled(state_path, should_cancel)
             state = load_workflow_state(state_path)
-            video = self._verify_remote_video(_known_video_id(state.vimeo), progress, total_bytes=state.vimeo.upload_size)
+            video = self._verify_remote_video(
+                _known_video_id(state.vimeo),
+                progress,
+                total_bytes=state.vimeo.upload_size,
+                should_cancel=should_cancel,
+                state_path=state_path,
+            )
+            self._raise_if_cancelled(state_path, should_cancel)
             state = self._persist_verified_upload(state_path, video)
+            self._try_persist_embed(state_path, video=video, progress=progress)
+            self._raise_if_cancelled(state_path, should_cancel)
+            state = load_workflow_state(state_path)
             video_uri = _required_video_uri(state.vimeo)
             folder_membership_confirmed = self.verify_folder_membership(video_uri, progress=progress)
+            self._raise_if_cancelled(state_path, should_cancel)
             if not folder_membership_confirmed:
                 self._assign_folder(video_uri, progress)
+                self._raise_if_cancelled(state_path, should_cancel)
                 folder_membership_confirmed = self.verify_folder_membership(video_uri, progress=progress)
             if not folder_membership_confirmed:
                 raise VimeoFolderError(
@@ -523,9 +697,18 @@ class VimeoPublishingService:
                 replace(current, vimeo=replace(current.vimeo, folder_status="verified")),
                 state_path,
             )
+            self._raise_if_cancelled(state_path, should_cancel)
             _emit(progress, "processing_video")
             state = self._persist_remote_details(state_path, video)
-            embed = self.get_video_embed(_required_video_id(state.vimeo), video=video, progress=progress)
+            if state.vimeo.embed_html and state.vimeo.video_url:
+                embed = VimeoEmbedData(
+                    state.vimeo.embed_html,
+                    state.vimeo.player_embed_url,
+                    state.vimeo.video_url,
+                )
+            else:
+                embed = self.get_video_embed(_required_video_id(state.vimeo), video=video, progress=progress)
+            self._raise_if_cancelled(state_path, should_cancel)
             current = load_workflow_state(state_path)
             completed = replace(
                 current,
@@ -550,6 +733,9 @@ class VimeoPublishingService:
                 folder_uri=preflight.folder.uri,
                 transcode_status=completed.vimeo.transcode_status,
             )
+        except VimeoUploadStoppedError as exc:
+            self._persist_stopped(state_path, exc)
+            raise
         except Exception as exc:
             self._persist_failure(state_path, exc)
             if isinstance(exc, VimeoError):
@@ -594,6 +780,105 @@ class VimeoPublishingService:
                     "privacy.download,parent_project.uri"
                 )
             },
+        )
+
+    def list_target_folder_videos(
+        self,
+        progress: LibraryProgressCallback | None = None,
+    ) -> VimeoLibraryResult:
+        """Load every video in the configured Team Library folder without mutating Vimeo."""
+        preflight = self.preflight()
+        return self._list_library_videos(preflight.folder, progress=progress)
+
+    def list_folder_videos(
+        self,
+        folder_id: str,
+        progress: LibraryProgressCallback | None = None,
+    ) -> VimeoLibraryResult:
+        validate_vimeo_owner_config(self.config)
+        return self._list_library_videos(self._get_folder(folder_id), progress=progress)
+
+    def list_all_videos(
+        self,
+        progress: LibraryProgressCallback | None = None,
+    ) -> VimeoLibraryResult:
+        validate_vimeo_owner_config(self.config)
+        owner = self._get_owner()
+        root = VimeoFolder(
+            "",
+            f"/users/{self.config.team_owner_user_id}",
+            str(owner.get("name") or "Team-Bibliothek"),
+        )
+        return self._list_library_videos(root, progress=progress, all_videos=True)
+
+    def _list_library_videos(
+        self,
+        folder: VimeoFolder,
+        *,
+        progress: LibraryProgressCallback | None = None,
+        all_videos: bool = False,
+    ) -> VimeoLibraryResult:
+        team_owner_name = str(self._get_owner().get("name") or "(ohne Namen)")
+        path: str | None = (
+            f"/users/{self.config.team_owner_user_id}/videos"
+            if all_videos
+            else f"/users/{self.config.team_owner_user_id}/projects/{folder.folder_id}/videos"
+        )
+        params: Mapping[str, Any] | None = {
+            "per_page": 100,
+            "sort": "date",
+            "direction": "desc",
+            "fields": (
+                "uri,name,link,created_time,duration,status,upload.status,transcode.status,"
+                "player_embed_url,embed.html,privacy.view,privacy.embed,parent_project.uri,"
+                "download.link,download.quality,download.type,download.width,download.height,"
+                "download.size,download.expires"
+            ),
+        }
+        videos: list[VimeoLibraryVideo] = []
+        total_count: int | None = None
+        while path:
+            try:
+                page = self.transport.get_json(path, params=params)
+            except VimeoApiError as exc:
+                raise VimeoLibraryError(
+                    (
+                        "Die Vimeo-Videobibliothek konnte nicht geladen werden."
+                        if all_videos
+                        else "Die Videos im Vimeo-Zielordner konnten nicht geladen werden."
+                    ),
+                    exc.admin_hint,
+                ) from exc
+            data = page.get("data", [])
+            if not isinstance(data, list):
+                raise VimeoLibraryError(
+                    "Vimeo hat die Videoliste in einem unbekannten Format geliefert."
+                )
+            for item in data:
+                if isinstance(item, Mapping):
+                    videos.append(_library_video_from_response(item))
+            page_total = _optional_int(page.get("total"))
+            if page_total is not None:
+                total_count = page_total
+            paging = page.get("paging")
+            path = str(paging.get("next")) if isinstance(paging, Mapping) and paging.get("next") else None
+            params = None
+            if progress is not None:
+                progress(
+                    VimeoLibraryResult(
+                        team_owner_name,
+                        folder,
+                        tuple(videos),
+                        total_count,
+                        complete=path is None,
+                    )
+                )
+        return VimeoLibraryResult(
+            team_owner_name,
+            folder,
+            tuple(videos),
+            total_count,
+            complete=True,
         )
 
     def get_video_embed_domains(self, video_id: str) -> tuple[str, ...]:
@@ -682,9 +967,17 @@ class VimeoPublishingService:
         )
 
     def _get_target_folder(self) -> VimeoFolder:
+        return self._get_folder(
+            self.config.target_folder_id,
+            expected_name=self.config.target_folder_name or None,
+        )
+
+    def _get_folder(self, folder_id: str, *, expected_name: str | None = None) -> VimeoFolder:
+        if not folder_id or not folder_id.isdigit():
+            raise VimeoFolderError("Der Vimeo-Ordner besitzt keine gültige numerische ID.")
         try:
             payload = self.transport.get_json(
-                f"/users/{self.config.team_owner_user_id}/folders/{self.config.target_folder_id}",
+                f"/users/{self.config.team_owner_user_id}/folders/{folder_id}",
                 params={
                     "fields": (
                         "uri,name,user.uri,metadata.connections.parent_folder.uri,"
@@ -698,7 +991,7 @@ class VimeoPublishingService:
                 exc.admin_hint,
             ) from exc
         folder = _folder_from_response(payload)
-        if folder.folder_id != self.config.target_folder_id:
+        if folder.folder_id != folder_id:
             raise VimeoFolderError("Vimeo hat einen anderen Ordner als die konfigurierte Folder-ID zurückgegeben.")
         expected_owner = f"/users/{self.config.team_owner_user_id}"
         if folder.owner_uri != expected_owner:
@@ -706,10 +999,10 @@ class VimeoPublishingService:
                 "Die Team-Zugehörigkeit des konfigurierten Vimeo-Ordners konnte nicht bestätigt werden.",
                 f"Erwartet {expected_owner}, erhalten {folder.owner_uri or '(keine Owner-URI)'}.",
             )
-        if self.config.target_folder_name and folder.name != self.config.target_folder_name:
+        if expected_name and folder.name != expected_name:
             raise VimeoFolderError(
                 "Die Vimeo-Folder-ID gehört nicht zum erwarteten Ordnernamen.",
-                f"Erwartet {self.config.target_folder_name!r}, erhalten {folder.name!r}.",
+                f"Erwartet {expected_name!r}, erhalten {folder.name!r}.",
             )
         return folder
 
@@ -722,14 +1015,26 @@ class VimeoPublishingService:
     ) -> Mapping[str, Any]:
         known_video_id = _known_video_id(state.vimeo)
         if known_video_id:
-            remote = self.get_video(known_video_id)
-            current_uri = _optional_text(remote.get("uri")) or state.vimeo.video_uri or f"/videos/{known_video_id}"
-            normalized = replace(
-                state,
-                vimeo=replace(state.vimeo, video_id=known_video_id, video_uri=current_uri),
-            )
-            save_workflow_state(normalized, state_path)
-            return remote
+            try:
+                remote = self.get_video(known_video_id)
+            except VimeoApiError as exc:
+                if exc.status_code != 404:
+                    raise
+                self._reset_missing_remote_state(state_path)
+                _emit(progress, "remote_video_reset", total=video_path.stat().st_size)
+                state = load_workflow_state(state_path)
+            else:
+                current_uri = (
+                    _optional_text(remote.get("uri"))
+                    or state.vimeo.video_uri
+                    or f"/videos/{known_video_id}"
+                )
+                normalized = replace(
+                    state,
+                    vimeo=replace(state.vimeo, video_id=known_video_id, video_uri=current_uri),
+                )
+                save_workflow_state(normalized, state_path)
+                return remote
         _emit(progress, "creating_remote_video", total=video_path.stat().st_size)
         payload = {
             "upload": {"approach": "tus", "size": video_path.stat().st_size},
@@ -801,16 +1106,76 @@ class VimeoPublishingService:
         current = load_workflow_state(state_path)
         transcode = video.get("transcode")
         transcode_status = _optional_text(transcode.get("status")) if isinstance(transcode, Mapping) else None
+        embed = video.get("embed")
+        embed_html = _optional_text(embed.get("html")) if isinstance(embed, Mapping) else None
         updated = replace(
             current,
             vimeo=replace(
                 current.vimeo,
                 video_url=_optional_text(video.get("link")) or current.vimeo.video_url,
+                player_embed_url=(
+                    _optional_text(video.get("player_embed_url")) or current.vimeo.player_embed_url
+                ),
+                embed_html=embed_html or current.vimeo.embed_html,
                 transcode_status=transcode_status or current.vimeo.transcode_status,
             ),
         )
         save_workflow_state(updated, state_path)
         return load_workflow_state(state_path)
+
+    def _try_persist_embed(
+        self,
+        state_path: Path,
+        *,
+        video: Mapping[str, Any] | None,
+        progress: ProgressCallback | None,
+    ) -> VimeoEmbedData | None:
+        """Try to obtain embed data early; absence must never abort the upload."""
+        current = load_workflow_state(state_path)
+        video_id = _known_video_id(current.vimeo)
+        if not video_id:
+            return None
+        _emit(progress, "fetching_early_embed", total=current.vimeo.upload_size or 0)
+        try:
+            candidate = video
+            candidate_embed = candidate.get("embed") if candidate else None
+            has_direct_embed = (
+                isinstance(candidate_embed, Mapping)
+                and bool(_optional_text(candidate_embed.get("html")))
+            )
+            has_player_url = bool(candidate and _optional_text(candidate.get("player_embed_url")))
+            if not candidate or not _optional_text(candidate.get("link")) or not (
+                has_direct_embed or has_player_url
+            ):
+                candidate = self.get_video(video_id)
+            current = self._persist_remote_details(state_path, candidate)
+            if current.vimeo.video_url:
+                _emit(progress, "video_link_available", total=current.vimeo.upload_size or 0)
+            if current.vimeo.embed_html and current.vimeo.video_url:
+                embed = VimeoEmbedData(
+                    current.vimeo.embed_html,
+                    current.vimeo.player_embed_url,
+                    current.vimeo.video_url,
+                )
+            else:
+                embed = self.get_video_embed(video_id, video=candidate)
+            current = load_workflow_state(state_path)
+            save_workflow_state(
+                replace(
+                    current,
+                    vimeo=replace(
+                        current.vimeo,
+                        video_url=embed.video_url,
+                        player_embed_url=embed.player_embed_url,
+                        embed_html=embed.embed_html,
+                    ),
+                ),
+                state_path,
+            )
+            _emit(progress, "early_embed_available", total=current.vimeo.upload_size or 0)
+            return embed
+        except VimeoError:
+            return None
 
     def _upload_if_needed(
         self,
@@ -819,6 +1184,8 @@ class VimeoPublishingService:
         video_path: Path,
         remote: Mapping[str, Any],
         progress: ProgressCallback | None,
+        *,
+        should_cancel: CancellationCheck | None,
     ) -> None:
         total = video_path.stat().st_size
         upload = remote.get("upload")
@@ -843,8 +1210,10 @@ class VimeoPublishingService:
             clock=self.clock,
         )
         upload_progress.report(offset)
+        self._raise_if_cancelled(state_path, should_cancel)
         with video_path.open("rb") as source:
             while offset < total:
+                self._raise_if_cancelled(state_path, should_cancel)
                 source.seek(offset)
                 length = min(self.chunk_size, total - offset)
                 for attempt in range(self.max_retries + 1):
@@ -864,7 +1233,9 @@ class VimeoPublishingService:
                     except VimeoApiError:
                         if attempt >= self.max_retries:
                             raise
+                        self._raise_if_cancelled(state_path, should_cancel)
                         self.sleep(min(2**attempt, 8))
+                        self._raise_if_cancelled(state_path, should_cancel)
                         offset, remote_total = self.transport.head_upload(upload_uri)
                         if remote_total != total:
                             raise VimeoStateConflictError("Die Vimeo-Uploadgröße hat sich unerwartet geändert.")
@@ -877,6 +1248,7 @@ class VimeoPublishingService:
                     state_path,
                 )
                 upload_progress.report(offset)
+                self._raise_if_cancelled(state_path, should_cancel)
         _emit(progress, "verifying_upload", total, total)
         final_offset, final_total = self.transport.head_upload(upload_uri)
         if final_offset != total or final_total != total:
@@ -891,6 +1263,8 @@ class VimeoPublishingService:
         progress: ProgressCallback | None,
         *,
         total_bytes: int = 0,
+        should_cancel: CancellationCheck | None = None,
+        state_path: Path | None = None,
     ) -> Mapping[str, Any]:
         """
         Poll until Vimeo confirms upload completion with exponential backoff.
@@ -914,6 +1288,8 @@ class VimeoPublishingService:
         last: Mapping[str, Any] = {}
 
         for attempt, delay_between_attempts in enumerate(backoff_schedule):
+            if state_path is not None:
+                self._raise_if_cancelled(state_path, should_cancel)
             last = self.get_video(video_id)
             upload = last.get("upload")
             status = str(upload.get("status")) if isinstance(upload, Mapping) else ""
@@ -931,6 +1307,8 @@ class VimeoPublishingService:
             if attempt < len(backoff_schedule) - 1:
                 _emit(progress, "verifying_upload", total_bytes, total_bytes)
                 self.sleep(delay_between_attempts)
+                if state_path is not None:
+                    self._raise_if_cancelled(state_path, should_cancel)
 
         # After all retries, still in_progress → recoverable error
         raise VimeoUploadError(
@@ -969,6 +1347,54 @@ class VimeoPublishingService:
                     vimeo=replace(
                         current.vimeo,
                         step=StepState("failed", message),
+                        upload_status=upload_status,
+                    ),
+                ),
+                state_path,
+            )
+        except OSError:
+            return
+
+    def _reset_missing_remote_state(self, state_path: Path) -> WorkflowState:
+        current = load_workflow_state(state_path)
+        reset = replace(
+            current,
+            vimeo=VimeoState(
+                step=StepState(
+                    "pending",
+                    "Das zuvor gespeicherte Vimeo-Video existiert nicht mehr. "
+                    "Die lokale Aufnahme bleibt unverändert. Ein neuer Vimeo-Upload kann gestartet werden.",
+                )
+            ),
+        )
+        save_workflow_state(reset, state_path)
+        return load_workflow_state(state_path)
+
+    def _raise_if_cancelled(
+        self,
+        state_path: Path,
+        should_cancel: CancellationCheck | None,
+    ) -> None:
+        if should_cancel is None or not should_cancel():
+            return
+        current = load_workflow_state(state_path).vimeo
+        raise VimeoUploadStoppedError(
+            current.upload_offset or 0,
+            current.upload_size or 0,
+        )
+
+    def _persist_stopped(self, state_path: Path, exc: VimeoUploadStoppedError) -> None:
+        try:
+            current = load_workflow_state(state_path)
+            upload_status = current.vimeo.upload_status
+            if current.vimeo.video_id and upload_status not in {"complete", "uploaded"}:
+                upload_status = "in_progress"
+            save_workflow_state(
+                replace(
+                    current,
+                    vimeo=replace(
+                        current.vimeo,
+                        step=StepState("stopped", exc.user_message),
                         upload_status=upload_status,
                     ),
                 ),
@@ -1076,6 +1502,67 @@ def _folder_from_response(payload: Mapping[str, Any]) -> VimeoFolder:
     )
 
 
+def _library_video_from_response(payload: Mapping[str, Any]) -> VimeoLibraryVideo:
+    uri = _required_text(payload, "uri", VimeoLibraryError)
+    video_id = _video_id_from_uri(uri)
+    upload = payload.get("upload")
+    transcode = payload.get("transcode")
+    privacy = payload.get("privacy")
+    downloads: list[VimeoDownloadFile] = []
+    raw_downloads = payload.get("download")
+    if isinstance(raw_downloads, list):
+        for item in raw_downloads:
+            if not isinstance(item, Mapping):
+                continue
+            link = _optional_text(item.get("link"))
+            if not link or not link.lower().startswith("https://"):
+                continue
+            downloads.append(
+                VimeoDownloadFile(
+                    link=link,
+                    quality=_optional_text(item.get("quality")) or "unbekannt",
+                    file_type=_optional_text(item.get("type")),
+                    width=_optional_int(item.get("width")),
+                    height=_optional_int(item.get("height")),
+                    size=_optional_int(item.get("size")),
+                    expires=_optional_text(item.get("expires")),
+                )
+            )
+    embed = payload.get("embed")
+    return VimeoLibraryVideo(
+        video_id=video_id,
+        uri=uri,
+        title=_optional_text(payload.get("name")) or f"Vimeo-Video {video_id}",
+        video_url=_optional_text(payload.get("link")),
+        player_embed_url=_optional_text(payload.get("player_embed_url")),
+        embed_html=_optional_text(embed.get("html")) if isinstance(embed, Mapping) else None,
+        created_time=_optional_text(payload.get("created_time")),
+        duration=_optional_int(payload.get("duration")),
+        status=_optional_text(payload.get("status")),
+        upload_status=_optional_text(upload.get("status")) if isinstance(upload, Mapping) else None,
+        transcode_status=(
+            _optional_text(transcode.get("status")) if isinstance(transcode, Mapping) else None
+        ),
+        privacy_view=_optional_text(privacy.get("view")) if isinstance(privacy, Mapping) else None,
+        privacy_embed=_optional_text(privacy.get("embed")) if isinstance(privacy, Mapping) else None,
+        folder_uri=(
+            _optional_text(payload.get("parent_project", {}).get("uri"))
+            if isinstance(payload.get("parent_project"), Mapping)
+            else None
+        ),
+        downloads=tuple(downloads),
+    )
+
+
+def _folder_id_from_optional_uri(uri: str | None) -> str | None:
+    if not uri:
+        return None
+    try:
+        return _folder_id_from_uri(uri)
+    except VimeoFolderError:
+        return None
+
+
 def _required_text(payload: Mapping[str, Any], key: str, error_type: type[VimeoError]) -> str:
     value = _optional_text(payload.get(key))
     if value is None:
@@ -1086,6 +1573,13 @@ def _required_text(payload: Mapping[str, Any], key: str, error_type: type[VimeoE
 def _optional_text(value: object) -> str | None:
     text = str(value).strip() if value is not None else ""
     return text or None
+
+
+def _optional_int(value: object) -> int | None:
+    try:
+        return int(value) if value not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
 
 
 def _video_id_from_uri(uri: str) -> str:

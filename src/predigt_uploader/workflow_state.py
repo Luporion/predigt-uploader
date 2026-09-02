@@ -11,8 +11,8 @@ from .models import SermonInfo
 
 
 WORKFLOW_STATE_FILENAME = "predigt-workflow.json"
-WORKFLOW_STATE_SCHEMA_VERSION = 4
-STEP_STATUSES = frozenset({"pending", "in_progress", "complete", "failed"})
+WORKFLOW_STATE_SCHEMA_VERSION = 5
+STEP_STATUSES = frozenset({"pending", "in_progress", "complete", "failed", "stopped"})
 
 
 @dataclass(frozen=True)

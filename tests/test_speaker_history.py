@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from predigt_uploader.speaker_history import SpeakerHistory, normalize_speaker_name
 
 
@@ -34,3 +36,16 @@ def test_speaker_history_removes_case_insensitively(tmp_path):
 
     assert history.remove("max müller") == ()
     assert history.list() == ()
+
+
+def test_speaker_history_renames_normalized_and_rejects_duplicate(tmp_path):
+    history = SpeakerHistory(tmp_path / "speakers.json")
+    history.add("Max Müller")
+    history.add("Anna Beispiel")
+
+    assert history.rename("max müller", "  Viktor   Grünwald ") == (
+        "Anna Beispiel",
+        "Viktor Grünwald",
+    )
+    with pytest.raises(ValueError, match="bereits gespeichert"):
+        history.rename("Viktor Grünwald", "ANNA BEISPIEL")

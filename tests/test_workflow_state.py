@@ -107,7 +107,7 @@ def test_workflow_state_loads_minimal_older_state_with_safe_defaults(tmp_path):
     assert loaded.wordpress_post.step.status == "pending"
 
     migrated_path = save_workflow_state(loaded, path)
-    assert load_workflow_state(migrated_path).schema_version == 4
+    assert load_workflow_state(migrated_path).schema_version == 5
 
 
 def test_workflow_state_migrates_legacy_vimeo_folder_names(tmp_path):

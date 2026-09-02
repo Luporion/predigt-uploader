@@ -135,6 +135,11 @@
 - [x] Vimeo-Credentials außerhalb von Git und Statusdatei aus Umgebungsvariable laden
 - [x] Vimeo-Upload per tus mit Fortschritt, Fehlerbehandlung, Resume und Doppelschutz implementieren
 - [x] Vimeo-ID, URL, Folder- und Resume-Daten atomar speichern
+- [x] Textual-Einstellungen produktiv gliedern und unbekannte TOML-Werte beim Speichern erhalten
+- [x] Vimeo-Zielordner über gemeinsamen Teamordner-Browser auswählen und bestätigt neu anlegen
+- [x] Vimeo-Bibliothek um progressive Alle-Videos- und gecachte Ordneransicht mit Breadcrumbs erweitern
+- [x] Vimeo-Standard-Zielordner in den Settings über eine sichtbare Aktion, echten Folderbrowser und sofortige explizite Speicherung auswählbar machen
+- [x] Predigerverwaltung um sicheres Umbenennen ergänzen und freies Autocomplete beibehalten
 
 - [x] Vimeo API-Zugang, Scopes und Upload Access dokumentieren
 - [x] API-Token zur Laufzeit sicher aus `PREDIGT_UPLOADER_VIMEO_TOKEN` lesen
@@ -158,8 +163,15 @@
 - [x] fertige MP4 samt vorhandenem/neu erzeugtem State direkt aus dem Textual-Startmenü an Schritt 8 übergeben
 - [x] mehrere Aufnahmen pro Tagesordner durch aufnahmespezifische Summary-/State-Dateien trennen
 - [x] Prediger-Historie lokal persistieren und als freie Eingabevorschläge anbieten
+- [x] Vimeo-Link und Embed-Code unmittelbar nach der Videoanlage opportunistisch abrufen, speichern und in Schritt 8 freigeben
+- [x] echte, paginierte Vimeo-Bibliothek für den konfigurierten Teamordner mit Titelsuche, Details und sicheren Capability-Anzeigen ergänzen
+- [x] Bibliotheksseiten progressiv anzeigen, vollständige Ergebnisse pro App-Lauf cachen und explizites `Neu laden` anbieten
+- [x] extern gelöschte Vimeo-Videos ausschließlich bei eindeutigem Remote-404 aus dem Aufnahme-State lösen
+- [x] laufenden Vimeo-Upload nach Bestätigung kooperativ stoppen und über bestätigten tus-Offset fortsetzen
+- [x] Early-Link und Early-Embed während des Uploads als verfügbare grüne Aktionen hervorheben
+- [ ] optionalen Download ausgewählter, von Vimeo ausdrücklich gelieferter Download-Dateien mit Zielauswahl implementieren
 - [ ] unvollständige produktive Vimeo-States ohne vorherige MP4-Auswahl automatisch im Startmenü auflisten
-- [ ] produktiven Textual-Vimeo-Schritt mit einer kleinen bewussten Aufnahme manuell prüfen
+- [x] produktiven Textual-Vimeo-Schritt mit einer großen bewussten Aufnahme manuell prüfen
 
 ## Phase 5: WordPress optional
 

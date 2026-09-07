@@ -167,7 +167,15 @@
 - [x] echte, paginierte Vimeo-Bibliothek für den konfigurierten Teamordner mit Titelsuche, Details und sicheren Capability-Anzeigen ergänzen
 - [x] Bibliotheksseiten progressiv anzeigen, vollständige Ergebnisse pro App-Lauf cachen und explizites `Neu laden` anbieten
 - [x] extern gelöschte Vimeo-Videos ausschließlich bei eindeutigem Remote-404 aus dem Aufnahme-State lösen
-- [x] laufenden Vimeo-Upload nach Bestätigung kooperativ stoppen und über bestätigten tus-Offset fortsetzen
+- [x] laufenden Vimeo-Dateitransfer nach Bestätigung kooperativ abbrechen und über bestätigten tus-Offset fortsetzen
+- [x] neu angelegten Vimeo-Ordner direkt zur weiterhin expliziten Standard-Zielbestätigung öffnen
+- [x] Direct-Vimeo-Auswahl als lazy Ordner-/Dateibrowser mit expliziter MP4-Bestätigung ausbauen
+- [x] resumefähige Upload-Pause semantisch vom endgültigen Remote-Cleanup trennen
+- [x] endgültigen Abbruch nur für nachweislich app-erzeugte Vimeo-Einträge zulassen und eigenen Abschlusszustand anzeigen
+- [x] Vimeo-Uploadscreen um aktive Beenden-Warnung, sicheren Pause-Hinweis, Website-bereite Early-Aktionen, lokalen Aufnahmeordner und Exit-Bestätigung ergänzen
+- [x] Vimeo-Warnung fest im oberen Screenbereich hervorheben und Fortschritt, Sicherheit sowie Website-Arbeit klar trennen
+- [x] vollständigen Vimeo-Erfolgsabschluss für normalen Workflow und reduzierten Direct-Vimeo-Abschluss ergänzen
+- [x] nach bestätigtem Upload Vimeo-Nachbearbeitungsfehler und fehlenden `interact`-Scope verständlich und ohne erneuten TUS-Transfer behandeln
 - [x] Early-Link und Early-Embed während des Uploads als verfügbare grüne Aktionen hervorheben
 - [ ] optionalen Download ausgewählter, von Vimeo ausdrücklich gelieferter Download-Dateien mit Zielauswahl implementieren
 - [ ] unvollständige produktive Vimeo-States ohne vorherige MP4-Auswahl automatisch im Startmenü auflisten

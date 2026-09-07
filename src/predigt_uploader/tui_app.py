@@ -40,6 +40,8 @@ from .processing import (
     validate_windows_filename,
 )
 from .publishing.vimeo import (
+    VimeoAbortResult,
+    VimeoCleanupError,
     VimeoError,
     VimeoFolder,
     VimeoFolderCatalog,
@@ -53,6 +55,7 @@ from .publishing.vimeo import (
 )
 from .speaker_history import SpeakerHistory
 from .workflow_state import (
+    WORKFLOW_ORIGIN_DIRECT_VIMEO,
     StepState,
     VimeoState,
     WorkflowPaths,
@@ -121,6 +124,18 @@ class TuiMp4FileRow:
     filename: str
     modified: str
     size: str
+
+
+@dataclass(frozen=True)
+class DirectVimeoBrowserEntry:
+    path: Path
+    is_directory: bool
+    modified: str
+    size: str
+
+    @property
+    def is_selectable_mp4(self) -> bool:
+        return not self.is_directory and self.path.suffix.casefold() == ".mp4"
 
 
 @dataclass(frozen=True)
@@ -237,6 +252,11 @@ def load_or_create_direct_vimeo_state(final_mp4: Path) -> tuple[Path, bool]:
         state = load_workflow_state(existing)
         if state.local_preparation.status != "complete":
             raise ValueError("Der gefundene Workflow-Status meldet die lokale Vorbereitung noch nicht als abgeschlossen.")
+        if state.workflow_origin != WORKFLOW_ORIGIN_DIRECT_VIMEO:
+            save_workflow_state(
+                replace(state, workflow_origin=WORKFLOW_ORIGIN_DIRECT_VIMEO),
+                existing,
+            )
         return existing, False
 
     detected_date = detect_tui_recording_date_from_filename(final_mp4) or tui_file_modified_date(final_mp4) or date.today()
@@ -256,6 +276,7 @@ def load_or_create_direct_vimeo_state(final_mp4: Path) -> tuple[Path, bool]:
             summary=summary if summary.is_file() else None,
             target_folder=final_mp4.parent,
         ),
+        workflow_origin=WORKFLOW_ORIGIN_DIRECT_VIMEO,
         local_preparation=StepState("complete"),
     )
     return save_workflow_state(state), True
@@ -1006,6 +1027,38 @@ def _build_tui_mp4_file_row(path: Path) -> TuiMp4FileRow:
     return TuiMp4FileRow(path=path, filename=path.name, modified=changed, size=f"{size_mb:.1f} MB")
 
 
+def list_direct_vimeo_directory(folder: Path) -> tuple[DirectVimeoBrowserEntry, ...]:
+    """List one folder without recursive traversal for the Direct-Vimeo browser."""
+    if not folder.exists():
+        raise FileNotFoundError(f"Der Ordner wurde nicht gefunden: {folder}")
+    if not folder.is_dir():
+        raise NotADirectoryError(f"Der Pfad ist kein Ordner: {folder}")
+    try:
+        paths = list(folder.iterdir())
+    except PermissionError as exc:
+        raise PermissionError(f"Der Ordner darf nicht geöffnet werden: {folder}") from exc
+
+    entries: list[DirectVimeoBrowserEntry] = []
+    for path in paths:
+        try:
+            is_directory = path.is_dir()
+            stat = path.stat()
+        except OSError:
+            is_directory = False
+            stat = None
+        entries.append(
+            DirectVimeoBrowserEntry(
+                path=path,
+                is_directory=is_directory,
+                modified=_format_timestamp(stat.st_mtime) if stat is not None else "unbekannt",
+                size="" if is_directory else (_format_size(stat.st_size) if stat is not None else "unbekannt"),
+            )
+        )
+    return tuple(
+        sorted(entries, key=lambda entry: (not entry.is_directory, entry.path.name.casefold()))
+    )
+
+
 def build_tui_file_choice_lines(
     folder: Path,
     *,
@@ -1326,7 +1379,7 @@ def build_tui_vimeo_initial_status(state: VimeoState | None) -> str:
         return "Vimeo-Upload abgeschlossen. Die vorhandene Video-ID wird weiterverwendet."
     if state.step.status == "stopped":
         return (
-            "Der Vimeo-Upload wurde gestoppt. Die lokale Aufnahme ist unverändert; "
+            "Der Vimeo-Upload wurde pausiert. Die lokale Aufnahme ist unverändert; "
             "ein erneuter Versuch setzt den bestätigten tus-Stand fort."
         )
     if state.video_id:
@@ -1344,11 +1397,20 @@ def build_tui_vimeo_available_actions_text(state: VimeoState | None, *, running:
         return ""
     lines: list[str] = []
     if state.video_url:
-        lines.append("✓ Vimeo-Link verfügbar – das Video kann bereits auf Vimeo geöffnet werden.")
+        lines.append("✓ Vimeo-Link verfügbar")
     if state.embed_html:
-        lines.append("✓ Embed-Code verfügbar – kann bereits in WordPress eingefügt werden.")
-    if running and state.video_url and state.embed_html:
-        lines.append("Sie müssen für diese beiden Angaben nicht auf 100 % Upload warten.")
+        lines.append("✓ Embed-Code verfügbar")
+    if state.video_url and not state.embed_html:
+        lines.append("Das Video kann bereits auf Vimeo geöffnet werden.")
+    elif state.embed_html and not state.video_url:
+        lines.append("Der Embed-Code kann bereits für die Website kopiert werden.")
+    return "\n".join(lines)
+
+
+def build_tui_vimeo_website_ready_detail(*, running: bool) -> str:
+    lines = ["Vimeo-Link und Einbettungscode können bereits verwendet werden."]
+    if running:
+        lines.append("Der Video-Upload läuft währenddessen weiter.")
     return "\n".join(lines)
 
 
@@ -1568,6 +1630,74 @@ def build_tui_vimeo_success_text(plan: PreparedRecordingPlan, state: VimeoState)
     )
 
 
+def build_tui_vimeo_completion_banner(state: VimeoState, *, direct_mode: bool) -> str:
+    lines = []
+    if not direct_mode:
+        lines.extend(
+            (
+                "✓ Lokale Aufnahme verarbeitet",
+                "✓ MP4 erstellt",
+                "✓ MP3 erstellt",
+                "✓ Zusammenfassung erstellt",
+                "✓ Dateien im Zielordner gespeichert",
+            )
+        )
+    lines.extend(
+        (
+            "✓ Video vollständig zu Vimeo übertragen",
+            f"✓ Vimeo-Zielordner „{state.target_folder_name or 'Predigten'}“ zugeordnet",
+            f"{'✓' if state.video_url else '○'} Vimeo-Link {'verfügbar' if state.video_url else 'noch nicht verfügbar'}",
+            f"{'✓' if state.embed_html else '○'} Einbettungscode {'verfügbar' if state.embed_html else 'noch nicht verfügbar'}",
+        )
+    )
+    transcode_complete = (state.transcode_status or "").lower() in {"complete", "completed"}
+    lines.append(
+        "✓ Vimeo-Verarbeitung abgeschlossen"
+        if transcode_complete
+        else "○ Vimeo verarbeitet das Video noch"
+    )
+    return "\n".join(lines)
+
+
+def build_tui_vimeo_completion_details(
+    plan: PreparedRecordingPlan,
+    state: VimeoState,
+    *,
+    direct_mode: bool,
+) -> str:
+    lines = (
+        [f"Lokale MP4: {plan.target_mp4}"]
+        if direct_mode
+        else [
+            f"Lokaler Zielordner: {plan.target_folder}",
+            f"Finale MP4: {plan.target_mp4}",
+            f"Finale MP3: {plan.target_mp3}",
+            f"Zusammenfassung: {plan.summary_path}",
+        ]
+    )
+    lines.extend(
+        (
+            "",
+            f"Vimeo-Titel: {build_vimeo_title(plan.info, plan.target_mp4)}",
+            f"Vimeo-Zielordner: {state.target_folder_name or 'Predigten'}",
+            f"Vimeo-URL: {state.video_url or '(noch nicht gemeldet)'}",
+            "Status: Upload vollständig abgeschlossen",
+            f"Verarbeitung: {(state.transcode_status or 'unbekannt').upper()}",
+            f"Embed-Code: {'verfügbar' if state.embed_html else 'noch nicht verfügbar'}",
+        )
+    )
+    if not direct_mode:
+        lines.extend(
+            (
+                "",
+                "Die technische Verarbeitung der Aufnahme ist abgeschlossen.",
+                "Die Predigt kann jetzt auf der Website angelegt werden.",
+                "Nächster manueller Schritt: Embed-Code kopieren und die Predigt auf der Website eintragen.",
+            )
+        )
+    return "\n".join(lines)
+
+
 def build_tui_vimeo_error_text(error: Exception, state: VimeoState | None) -> str:
     if isinstance(error, VimeoError):
         message = error.user_message
@@ -1578,6 +1708,20 @@ def build_tui_vimeo_error_text(error: Exception, state: VimeoState | None) -> st
     known = ""
     if state and state.video_id:
         known = f"\nBekannte Vimeo-Video-ID: {state.video_id}\nDiese ID wird beim nächsten Versuch wiederverwendet."
+    if state and state.upload_status == "complete":
+        folder_line = (
+            "✗ Zielordner konnte nicht zugeordnet werden"
+            if isinstance(error, VimeoFolderError)
+            else "✗ Vimeo-Nachbearbeitung noch nicht vollständig"
+        )
+        return (
+            "Video vollständig hochgeladen – Nachbearbeitung unvollständig.\n"
+            "✓ Datei vollständig zu Vimeo übertragen\n"
+            f"{'✓ Vimeo-Link verfügbar' if state.video_url else '○ Vimeo-Link noch nicht verfügbar'}\n"
+            f"{'✓ Embed-Code verfügbar' if state.embed_html else '○ Embed-Code noch nicht verfügbar'}\n"
+            f"{folder_line}\n"
+            f"Ursache: {message}{known}{admin}"
+        )
     return (
         "Vimeo-Veröffentlichung noch nicht abgeschlossen.\n"
         "Die lokale MP4, MP3 und Zusammenfassung sind sicher fertig.\n"
@@ -3151,6 +3295,7 @@ def build_tui_app(
                     self.plan,
                     state_path=result.workflow_state_path or recording_workflow_state_path(self.plan.target_mp4),
                     opened_target_folder=result.opened_target_folder,
+                    direct_mode=False,
                 )
                 self.notify("Dateien wurden vorbereitet.")
                 return
@@ -3196,8 +3341,10 @@ def build_tui_app(
     class VimeoStopConfirmationScreen(ModalScreen[bool]):
         def compose(self) -> ComposeResult:
             with Vertical(id="vimeo_stop_dialog"):
-                yield Static("Vimeo-Upload wirklich stoppen?", id="vimeo_stop_title")
+                yield Static("Vimeo-Upload pausieren?", id="vimeo_stop_title")
                 yield Static(
+                    "Der aktuell übertragene Block kann noch fertig übertragen werden.\n"
+                    "Danach wird der Upload angehalten.\n\n"
                     "Die lokale MP4 bleibt unverändert.\n"
                     "Bereits von Vimeo bestätigte Daten bleiben für einen späteren Resume erhalten.\n"
                     "Das Vimeo-Video wird nicht gelöscht.",
@@ -3206,13 +3353,57 @@ def build_tui_app(
                 )
                 with Horizontal(id="vimeo_stop_dialog_actions"):
                     yield Button("Weiter hochladen", id="vimeo_stop_continue", variant="primary")
-                    yield Button("Upload stoppen", id="vimeo_stop_confirm", variant="error")
+                    yield Button("Upload pausieren", id="vimeo_stop_confirm")
 
         def on_mount(self) -> None:
             self.query_one("#vimeo_stop_continue", Button).focus()
 
         def on_button_pressed(self, event: Button.Pressed) -> None:
             self.dismiss(event.button.id == "vimeo_stop_confirm")
+
+    class VimeoAbortConfirmationScreen(ModalScreen[bool]):
+        def compose(self) -> ComposeResult:
+            with Vertical(id="vimeo_abort_dialog"):
+                yield Static("Vimeo-Upload endgültig abbrechen?", id="vimeo_abort_title")
+                yield Static(
+                    "Der laufende Upload wird sicher beendet.\n"
+                    "Die lokale MP4 bleibt erhalten.\n\n"
+                    "Der von PredigtUploader angelegte Vimeo-Eintrag wird nach Möglichkeit gelöscht "
+                    "und der Resume-Stand bereinigt. Danach ist nur ein neuer Upload möglich.",
+                    id="vimeo_abort_text",
+                    classes="status-warning",
+                )
+                with Horizontal(id="vimeo_abort_dialog_actions"):
+                    yield Button("Zurück – Upload behalten", id="vimeo_abort_keep", variant="primary")
+                    yield Button("Upload endgültig abbrechen", id="vimeo_abort_confirm", variant="error")
+
+        def on_mount(self) -> None:
+            self.query_one("#vimeo_abort_keep", Button).focus()
+
+        def on_button_pressed(self, event: Button.Pressed) -> None:
+            self.dismiss(event.button.id == "vimeo_abort_confirm")
+
+    class VimeoExitConfirmationScreen(ModalScreen[bool]):
+        def compose(self) -> ComposeResult:
+            with Vertical(id="vimeo_exit_dialog"):
+                yield Static("Vimeo-Upload läuft noch", id="vimeo_exit_title")
+                yield Static(
+                    "Wenn der PredigtUploader jetzt beendet wird, kann der aktuell übertragene Block "
+                    "unvollständig beendet werden.\n\n"
+                    "Empfohlen: zuerst ‚Upload pausieren‘ verwenden und warten, bis der pausierte Zustand "
+                    "bestätigt wurde.",
+                    id="vimeo_exit_text",
+                    classes="status-warning",
+                )
+                with Horizontal(id="vimeo_exit_dialog_actions"):
+                    yield Button("Zurück zum Upload", id="vimeo_exit_keep", variant="primary")
+                    yield Button("Trotzdem beenden", id="vimeo_exit_confirm", variant="error")
+
+        def on_mount(self) -> None:
+            self.query_one("#vimeo_exit_keep", Button).focus()
+
+        def on_button_pressed(self, event: Button.Pressed) -> None:
+            self.dismiss(event.button.id == "vimeo_exit_confirm")
 
     class VimeoPublishingScreen(Screen[None]):
         def __init__(
@@ -3222,18 +3413,25 @@ def build_tui_app(
             *,
             state_path: Path,
             opened_target_folder: bool,
-            direct_mode: bool = False,
+            direct_mode: bool | None = None,
         ) -> None:
             super().__init__()
             self.app_config = app_config
             self.plan = plan
             self.state_path = state_path
             self.opened_target_folder = opened_target_folder
-            self.direct_mode = direct_mode
-            self.vimeo_state = self._load_vimeo_state()
+            workflow_state = self._load_workflow_state()
+            self.direct_mode = (
+                workflow_state.workflow_origin == WORKFLOW_ORIGIN_DIRECT_VIMEO
+                if direct_mode is None
+                else direct_mode
+            )
+            self.vimeo_state = workflow_state.vimeo if workflow_state else None
             self.running = False
+            self.activity_state = "idle"
             self.last_progress: VimeoProgress | None = None
             self.cancel_event = threading.Event()
+            self.final_abort_event = threading.Event()
             self._link_announced = bool(self.vimeo_state and self.vimeo_state.video_url)
             self._embed_announced = bool(self.vimeo_state and self.vimeo_state.embed_html)
 
@@ -3252,7 +3450,15 @@ def build_tui_app(
                 id="vimeo_local_safe",
                 classes="status-ok",
             )
+            yield Static("", id="vimeo_activity_notice", classes="vimeo-critical-notice")
             with VerticalScroll(id="vimeo_scroll"):
+                with Vertical(id="vimeo_website_ready", classes="vimeo-website-ready"):
+                    yield Static(
+                        "✓ EINBETTUNGSCODE IST BEREIT\n"
+                        "→ DU KANNST JETZT DIE PREDIGT AUF DER WEBSITE ANLEGEN",
+                        id="vimeo_website_ready_headline",
+                    )
+                    yield Static("", id="vimeo_website_ready_detail")
                 with Horizontal(id="vimeo_body"):
                     with Vertical(id="vimeo_plan_box", classes="panel-neutral"):
                         yield Label("Plan / Auswahl")
@@ -3294,8 +3500,16 @@ def build_tui_app(
                     variant="primary",
                     disabled=self.vimeo_state is None or complete,
                 )
-                yield Button("Upload stoppen", id="vimeo_stop", disabled=True)
-                with Horizontal(classes="navigation_actions"):
+                with Horizontal(id="vimeo_transfer_actions", classes="vimeo_action_row"):
+                    yield Button("Upload pausieren", id="vimeo_stop", disabled=True)
+                    yield Button(
+                        "Upload endgültig abbrechen",
+                        id="vimeo_abort",
+                        variant="error",
+                        disabled=complete or not bool(self.vimeo_state and self.vimeo_state.video_id),
+                    )
+                with Horizontal(id="vimeo_helper_actions", classes="vimeo_action_row"):
+                    yield Button("Lokalen Ordner öffnen", id="vimeo_open_local")
                     yield Button(
                         "Vimeo öffnen",
                         id="vimeo_open",
@@ -3306,16 +3520,28 @@ def build_tui_app(
                         id="vimeo_copy_embed",
                         disabled=not bool(self.vimeo_state and self.vimeo_state.embed_html),
                     )
+                with Horizontal(id="vimeo_workflow_actions", classes="vimeo_action_row"):
                     yield Button("Weiter zum Abschluss", id="vimeo_continue", variant="primary", disabled=not complete)
                     yield Button("Vimeo überspringen / später erledigen", id="vimeo_skip", disabled=complete)
             yield Footer()
 
         def on_mount(self) -> None:
+            self.query_one("#vimeo_activity_notice", Static).display = False
+            self.query_one("#vimeo_website_ready", Vertical).display = False
             self.query_one("#vimeo_upload_bar", ProgressBar).display = False
             self.query_one("#vimeo_upload_details", Static).display = False
             if self.vimeo_state and self.vimeo_state.step.status == "complete" and self.vimeo_state.video_id:
                 self._show_success(self.vimeo_state)
                 self.query_one("#vimeo_continue", Button).focus()
+            elif self.vimeo_state and self.vimeo_state.step.status == "stopped":
+                self._show_stopped(
+                    VimeoUploadStoppedError(
+                        self.vimeo_state.upload_offset or 0,
+                        self.vimeo_state.upload_size or 0,
+                    ),
+                    self.vimeo_state,
+                )
+                self.query_one("#vimeo_upload", Button).focus()
             else:
                 self._sync_vimeo_remote_actions()
                 self.query_one("#vimeo_upload", Button).focus()
@@ -3326,6 +3552,9 @@ def build_tui_app(
                 return
             if event.button.id == "vimeo_stop":
                 self._request_stop_confirmation()
+                return
+            if event.button.id == "vimeo_abort":
+                self._request_final_abort_confirmation()
                 return
             if event.button.id == "vimeo_skip":
                 self._open_completion()
@@ -3338,14 +3567,20 @@ def build_tui_app(
                 return
             if event.button.id == "vimeo_copy_embed":
                 self._copy_embed()
+                return
+            if event.button.id == "vimeo_open_local":
+                self._open_local_folder()
 
         def _start_publish(self) -> None:
             if self.running:
                 return
             self.cancel_event.clear()
+            self.final_abort_event.clear()
             self.running = True
-            self.query_one("#vimeo_stop", Button).label = "Upload stoppen"
+            self.activity_state = "running"
+            self.query_one("#vimeo_stop", Button).label = "Upload pausieren"
             self._set_controls_running(True)
+            self._sync_activity_notice()
             self.query_one("#vimeo_status_banner", Static).update(
                 "Vimeo-Veröffentlichung gestartet. Die lokalen Dateien bleiben unverändert."
             )
@@ -3359,6 +3594,7 @@ def build_tui_app(
             )
 
         def _publish_in_thread(self) -> None:
+            service: VimeoPublishingService | None = None
             try:
                 service = make_vimeo_service(self.app_config)
                 self.app.call_from_thread(
@@ -3376,9 +3612,19 @@ def build_tui_app(
                     progress=report_progress,
                     should_cancel=self.cancel_event.is_set,
                 )
+                if self.final_abort_event.is_set():
+                    self._perform_final_abort(service)
+                    return
                 state = load_workflow_state(self.state_path).vimeo
                 self.app.call_from_thread(self._show_success, state)
             except VimeoUploadStoppedError as exc:
+                if self.final_abort_event.is_set():
+                    try:
+                        self._perform_final_abort(service or make_vimeo_service(self.app_config))
+                    except Exception as cleanup_error:
+                        state = self._load_vimeo_state()
+                        self.app.call_from_thread(self._show_abort_cleanup_error, cleanup_error, state)
+                    return
                 state = self._load_vimeo_state()
                 self.app.call_from_thread(self._show_stopped, exc, state)
             except Exception as exc:
@@ -3419,6 +3665,14 @@ def build_tui_app(
                 )
             )
             self._sync_vimeo_remote_actions()
+            self.query_one("#vimeo_stop", Button).disabled = not (
+                self.running
+                and progress.phase == "uploading"
+                and not self.cancel_event.is_set()
+            )
+            self.query_one("#vimeo_abort", Button).disabled = (
+                self.cancel_event.is_set() or self.final_abort_event.is_set()
+            )
             banner = self.query_one("#vimeo_status_banner", Static)
             if progress.phase == "remote_video_reset":
                 banner.update(
@@ -3450,6 +3704,8 @@ def build_tui_app(
         def _show_success(self, state: VimeoState) -> None:
             self.vimeo_state = state
             self.running = False
+            self.activity_state = "complete"
+            self._sync_activity_notice()
             banner = self.query_one("#vimeo_status_banner", Static)
             banner.update(build_tui_vimeo_success_text(self.plan, state))
             banner.set_classes("status-ok")
@@ -3477,6 +3733,7 @@ def build_tui_app(
             self.query_one("#vimeo_open", Button).disabled = not bool(state.video_url)
             self.query_one("#vimeo_copy_embed", Button).disabled = not bool(state.embed_html)
             self.query_one("#vimeo_continue", Button).disabled = False
+            self.query_one("#vimeo_abort", Button).disabled = True
             self.query_one("#vimeo_continue", Button).focus()
             self.notify(
                 "Datei hochgeladen; Vimeo verarbeitet das Video noch."
@@ -3491,25 +3748,33 @@ def build_tui_app(
         ) -> None:
             self.vimeo_state = state
             self.running = False
+            self.activity_state = "paused"
+            self._sync_activity_notice()
             confirmed = state.upload_offset if state and state.upload_offset is not None else error.confirmed_bytes
             total = state.upload_size if state and state.upload_size is not None else error.total_bytes
             banner = self.query_one("#vimeo_status_banner", Static)
             banner.update(
-                "Upload gestoppt.\n"
+                "Vimeo-Upload pausiert.\n"
                 f"{_format_vimeo_bytes(confirmed)} von {_format_vimeo_bytes(total)} wurden bestätigt übertragen.\n"
-                "Ein erneuter Versuch kann den vorhandenen Upload fortsetzen."
+                "✓ Lokale Datei unverändert\n"
+                "✓ Vimeo-Video bleibt erhalten\n"
+                "✓ Upload-Stand wurde gespeichert\n"
+                "✓ Fortsetzen ist möglich"
             )
             banner.set_classes("status-info")
             self._set_controls_running(False)
-            self.query_one("#vimeo_upload", Button).label = "Vimeo-Upload fortsetzen"
+            self.query_one("#vimeo_upload", Button).label = "Upload fortsetzen"
             self.query_one("#vimeo_upload", Button).disabled = state is None
             self.query_one("#vimeo_skip", Button).disabled = False
             self.query_one("#vimeo_stop", Button).disabled = True
-            self.notify("Vimeo-Upload gestoppt. Der bestätigte Stand bleibt erhalten.")
+            self.query_one("#vimeo_abort", Button).disabled = not bool(state and state.video_id)
+            self.notify("Vimeo-Upload pausiert. Der bestätigte Stand bleibt erhalten.")
 
         def _show_error(self, error: Exception, state: VimeoState | None) -> None:
             self.vimeo_state = state
             self.running = False
+            self.activity_state = "idle"
+            self._sync_activity_notice()
             banner = self.query_one("#vimeo_status_banner", Static)
             banner.update(build_tui_vimeo_error_text(error, state))
             banner.set_classes("status-danger")
@@ -3525,17 +3790,24 @@ def build_tui_app(
                     )
                 )
             self._set_controls_running(False)
-            self.query_one("#vimeo_upload", Button).label = "Vimeo-Veröffentlichung erneut versuchen"
+            postprocessing_only = bool(state and state.upload_status == "complete")
+            self.query_one("#vimeo_upload", Button).label = (
+                "Vimeo-Nachbearbeitung erneut versuchen"
+                if postprocessing_only
+                else "Vimeo-Veröffentlichung erneut versuchen"
+            )
             self.query_one("#vimeo_upload", Button).disabled = state is None
             self.query_one("#vimeo_skip", Button).disabled = False
             self.query_one("#vimeo_open", Button).disabled = not bool(state and state.video_url)
             self.query_one("#vimeo_copy_embed", Button).disabled = not bool(state and state.embed_html)
+            self.query_one("#vimeo_abort", Button).disabled = not bool(state and state.video_id)
             self.notify("Vimeo ist noch nicht abgeschlossen. Die lokalen Dateien sind sicher.", severity="error")
 
         def _set_controls_running(self, running: bool) -> None:
             self.query_one("#vimeo_upload", Button).disabled = running
             self.query_one("#vimeo_skip", Button).disabled = running
-            self.query_one("#vimeo_stop", Button).disabled = not running
+            self.query_one("#vimeo_stop", Button).disabled = True
+            self.query_one("#vimeo_abort", Button).disabled = running and self.final_abort_event.is_set()
             if running:
                 self.query_one("#vimeo_upload", Button).label = "Vimeo-Upload läuft..."
                 self.query_one("#vimeo_continue", Button).disabled = True
@@ -3544,30 +3816,84 @@ def build_tui_app(
         def _sync_vimeo_remote_actions(self) -> None:
             link_available = bool(self.vimeo_state and self.vimeo_state.video_url)
             embed_available = bool(self.vimeo_state and self.vimeo_state.embed_html)
+            cleanup_locked = self.activity_state == "aborting"
             open_button = self.query_one("#vimeo_open", Button)
             embed_button = self.query_one("#vimeo_copy_embed", Button)
-            open_button.disabled = not link_available
-            embed_button.disabled = not embed_available
+            open_button.disabled = cleanup_locked or not link_available
+            embed_button.disabled = cleanup_locked or not embed_available
             open_button.set_class(link_available, "available-action")
             embed_button.set_class(embed_available, "available-action")
             self.query_one("#vimeo_available_actions", Static).update(
                 build_tui_vimeo_available_actions_text(self.vimeo_state, running=self.running)
             )
+            website_ready = link_available and embed_available
+            website_banner = self.query_one("#vimeo_website_ready", Vertical)
+            website_banner.display = website_ready
+            self.query_one("#vimeo_website_ready_detail", Static).update(
+                build_tui_vimeo_website_ready_detail(running=self.running) if website_ready else ""
+            )
+            self._sync_local_safe_notice()
             if link_available and not self._link_announced:
                 self._link_announced = True
                 self._highlight_new_vimeo_action(open_button)
-                self.notify("Vimeo-Link ist jetzt verfügbar.")
             if embed_available and not self._embed_announced:
                 self._embed_announced = True
                 self._highlight_new_vimeo_action(embed_button)
-                self.notify("Embed-Code ist jetzt verfügbar und kann bereits kopiert werden.")
+
+        @property
+        def requires_exit_confirmation(self) -> bool:
+            return self.activity_state in {"running", "pausing", "aborting"}
+
+        def _sync_activity_notice(self) -> None:
+            notice = self.query_one("#vimeo_activity_notice", Static)
+            messages = {
+                "running": (
+                    "ACHTUNG – VIMEO-UPLOAD LÄUFT\n"
+                    "PROGRAMM NICHT BEENDEN!\n"
+                    "Die Datei wird gerade zu Vimeo übertragen. Erst nach Abschluss oder sicherer Pause beenden."
+                ),
+                "pausing": (
+                    "Upload wird pausiert …\n"
+                    "Der aktuell übertragene Datenblock wird noch sicher beendet.\n"
+                    "PROGRAMM NICHT BEENDEN!"
+                ),
+                "paused": (
+                    "Upload sicher pausiert.\n"
+                    "✓ Upload-Stand gespeichert  ✓ Vimeo-Eintrag bleibt erhalten  ✓ Fortsetzen später möglich\n"
+                    "PredigtUploader kann jetzt sicher geschlossen werden."
+                ),
+                "aborting": (
+                    "Upload wird endgültig abgebrochen …\n"
+                    "Datenübertragung wird beendet · Vimeo-Eintrag wird entfernt · Upload-Zwischenstand wird bereinigt\n"
+                    "PROGRAMM NICHT BEENDEN!"
+                ),
+            }
+            message = messages.get(self.activity_state, "")
+            notice.update(message)
+            notice.display = bool(message)
+            notice.set_classes("status-ok" if self.activity_state == "paused" else "vimeo-critical-notice")
+            self._sync_local_safe_notice()
+
+        def _sync_local_safe_notice(self) -> None:
+            activity_visible = self.activity_state in {"running", "pausing", "paused", "aborting"}
+            website_ready = bool(
+                self.vimeo_state
+                and self.vimeo_state.video_url
+                and self.vimeo_state.embed_html
+            )
+            self.query_one("#vimeo_local_safe", Static).display = not activity_visible and not website_ready
 
         def _highlight_new_vimeo_action(self, button: Button) -> None:
             button.add_class("newly-available-action")
             self.set_timer(1.5, lambda: button.remove_class("newly-available-action"))
 
         def _request_stop_confirmation(self) -> None:
-            if not self.running or self.cancel_event.is_set():
+            if (
+                not self.running
+                or self.cancel_event.is_set()
+                or self.last_progress is None
+                or self.last_progress.phase != "uploading"
+            ):
                 return
             self.app.push_screen(VimeoStopConfirmationScreen(), self._handle_stop_confirmation)
 
@@ -3575,19 +3901,112 @@ def build_tui_app(
             if not stop_upload or not self.running:
                 return
             self.cancel_event.set()
+            self.activity_state = "pausing"
+            self._sync_activity_notice()
             stop = self.query_one("#vimeo_stop", Button)
             stop.disabled = True
-            stop.label = "Upload wird sicher gestoppt ..."
+            stop.label = "Upload wird pausiert ..."
+            self.query_one("#vimeo_abort", Button).disabled = True
             banner = self.query_one("#vimeo_status_banner", Static)
             banner.update(
-                "Upload wird nach der aktuellen Vimeo-Operation sicher gestoppt. "
+                "Upload wird nach der aktuellen Vimeo-Operation pausiert. "
                 "Bitte kurz warten."
             )
             banner.set_classes("status-info")
 
-        def _load_vimeo_state(self) -> VimeoState | None:
+        def _request_final_abort_confirmation(self) -> None:
+            state = self._load_vimeo_state()
+            if self.final_abort_event.is_set() or (not self.running and not (state and state.video_id)):
+                return
+            self.app.push_screen(
+                VimeoAbortConfirmationScreen(),
+                self._handle_final_abort_confirmation,
+            )
+
+        def _handle_final_abort_confirmation(self, abort_upload: bool | None) -> None:
+            if not abort_upload or self.final_abort_event.is_set():
+                return
+            self.final_abort_event.set()
+            self.activity_state = "aborting"
+            self._sync_activity_notice()
+            self.query_one("#vimeo_abort", Button).disabled = True
+            self.query_one("#vimeo_stop", Button).disabled = True
+            self.query_one("#vimeo_upload", Button).disabled = True
+            self.query_one("#vimeo_skip", Button).disabled = True
+            self.query_one("#vimeo_continue", Button).disabled = True
+            self.query_one("#vimeo_open_local", Button).disabled = True
+            self.query_one("#vimeo_open", Button).disabled = True
+            self.query_one("#vimeo_copy_embed", Button).disabled = True
+            banner = self.query_one("#vimeo_status_banner", Static)
+            banner.update("Upload wird endgültig abgebrochen und der Vimeo-Eintrag bereinigt …")
+            banner.set_classes("status-warning")
+            if self.running:
+                self.cancel_event.set()
+                return
+            self.running = True
+            self.run_worker(
+                self._abort_paused_in_thread,
+                thread=True,
+                exclusive=True,
+                group="vimeo-final-abort",
+                exit_on_error=False,
+            )
+
+        def _abort_paused_in_thread(self) -> None:
             try:
-                return load_workflow_state(self.state_path).vimeo
+                self._perform_final_abort(make_vimeo_service(self.app_config))
+            except Exception as exc:
+                state = self._load_vimeo_state()
+                self.app.call_from_thread(self._show_abort_cleanup_error, exc, state)
+
+        def _perform_final_abort(self, service: VimeoPublishingService) -> None:
+            self.app.call_from_thread(self._show_abort_cleanup_started)
+            try:
+                result = service.abort_upload(self.state_path)
+            except Exception as exc:
+                state = self._load_vimeo_state()
+                self.app.call_from_thread(self._show_abort_cleanup_error, exc, state)
+                return
+            self.app.call_from_thread(self._show_abort_completion, result, None)
+
+        def _show_abort_cleanup_started(self) -> None:
+            self.query_one("#vimeo_activity_notice", Static).update(
+                "Upload wird endgültig abgebrochen …\n"
+                "✓ Datenübertragung beendet · → Vimeo-Eintrag wird entfernt · ○ Upload-Zwischenstand wird bereinigt\n"
+                "PROGRAMM NICHT BEENDEN!"
+            )
+
+        def _show_abort_cleanup_error(self, error: Exception, state: VimeoState | None) -> None:
+            self.running = False
+            self.activity_state = "idle"
+            self._show_abort_completion(None, (error, state))
+
+        def _show_abort_completion(
+            self,
+            result: VimeoAbortResult | None,
+            cleanup_error: tuple[Exception, VimeoState | None] | None,
+        ) -> None:
+            self.running = False
+            self.activity_state = "complete"
+            self.app.push_screen(
+                VimeoAbortCompletionScreen(
+                    self.app_config,
+                    self.plan,
+                    state_path=self.state_path,
+                    opened_target_folder=self.opened_target_folder,
+                    direct_mode=self.direct_mode,
+                    result=result,
+                    cleanup_error=cleanup_error,
+                )
+            )
+
+        def _load_vimeo_state(self) -> VimeoState | None:
+            state = self._load_workflow_state()
+            return state.vimeo if state else None
+
+        def _load_workflow_state(self) -> WorkflowState | None:
+            try:
+                return load_workflow_state(self.state_path)
             except (OSError, ValueError):
                 return None
 
@@ -3609,7 +4028,30 @@ def build_tui_app(
                 return
             self.notify("Embed-Code wurde in die Zwischenablage kopiert.")
 
+        def _open_local_folder(self) -> None:
+            folder = self.plan.target_mp4.parent
+            try:
+                if not folder.is_dir():
+                    raise FileNotFoundError(folder)
+                subprocess.Popen(["explorer", str(folder)])
+            except OSError as exc:
+                self.notify(
+                    f"Der lokale Aufnahmeordner konnte nicht geöffnet werden: {folder}. Admin-Hinweis: {exc}",
+                    severity="warning",
+                )
+
         def _open_completion(self) -> None:
+            state = self._load_vimeo_state()
+            if state and state.step.status == "complete" and state.video_id:
+                self.app.push_screen(
+                    VimeoSuccessCompletionScreen(
+                        self.app_config,
+                        self.plan,
+                        state,
+                        direct_mode=self.direct_mode,
+                    )
+                )
+                return
             if self.direct_mode:
                 self.app.pop_screen()
                 self.app.pop_screen()
@@ -3619,9 +4061,197 @@ def build_tui_app(
                     self.app_config,
                     self.plan,
                     opened_target_folder=self.opened_target_folder,
-                    vimeo_state=self._load_vimeo_state(),
+                    vimeo_state=state,
                 )
             )
+
+    class VimeoAbortCompletionScreen(Screen[None]):
+        def __init__(
+            self,
+            app_config: AppConfig,
+            plan: PreparedRecordingPlan,
+            *,
+            state_path: Path,
+            opened_target_folder: bool,
+            direct_mode: bool,
+            result: VimeoAbortResult | None,
+            cleanup_error: tuple[Exception, VimeoState | None] | None,
+        ) -> None:
+            super().__init__()
+            self.app_config = app_config
+            self.plan = plan
+            self.state_path = state_path
+            self.opened_target_folder = opened_target_folder
+            self.direct_mode = direct_mode
+            self.result = result
+            self.cleanup_error = cleanup_error
+
+        def compose(self) -> ComposeResult:
+            clean = self.cleanup_error is None
+            yield Static(
+                "Upload abgebrochen" if clean else "Upload lokal beendet – Vimeo-Bereinigung unvollständig",
+                id="screen_title",
+            )
+            yield Static(
+                self._status_text(),
+                id="vimeo_abort_completion_status",
+                classes="status-ok" if clean else "status-danger",
+            )
+            with Horizontal(id="vimeo_abort_completion_actions", classes="navigation_actions"):
+                yield Button("Lokalen Ordner öffnen", id="vimeo_abort_open_folder")
+                yield Button("Erneut zu Vimeo hochladen", id="vimeo_abort_retry", variant="primary")
+                yield Button("Zurück zum Hauptmenü", id="vimeo_abort_main")
+            yield Footer()
+
+        def _status_text(self) -> str:
+            if self.cleanup_error is None:
+                removed = (
+                    "Der unvollständige Vimeo-Eintrag war bereits entfernt."
+                    if self.result and self.result.already_missing
+                    else "Der unvollständige Vimeo-Eintrag wurde entfernt."
+                    if self.result and self.result.video_id
+                    else "Es war noch kein Vimeo-Eintrag angelegt."
+                )
+                return (
+                    "Der Vimeo-Upload wurde endgültig beendet.\n\n"
+                    "✓ Die lokale MP4 wurde nicht verändert.\n"
+                    f"✓ {removed}\n"
+                    "✓ Der Upload-Zwischenstand wurde bereinigt.\n\n"
+                    "Die Aufnahme kann später erneut zu Vimeo hochgeladen werden."
+                )
+            error, state = self.cleanup_error
+            user_message = error.user_message if isinstance(error, VimeoError) else str(error)
+            admin_hint = error.admin_hint if isinstance(error, VimeoError) else type(error).__name__
+            return "\n".join(
+                (
+                    "Der Upload wurde lokal beendet, aber der Vimeo-Eintrag konnte nicht automatisch gelöscht werden.",
+                    "Die lokale MP4 bleibt unverändert.",
+                    f"Vimeo-ID: {state.video_id if state and state.video_id else '(nicht bekannt)'}",
+                    f"Vimeo-URL: {state.video_url if state and state.video_url else '(nicht verfügbar)'}",
+                    user_message,
+                    "Bitte den Vimeo-Eintrag prüfen und den Vorgang danach erneut versuchen.",
+                    f"Admin-Hinweis: {admin_hint}",
+                )
+            )
+
+        def on_button_pressed(self, event: Button.Pressed) -> None:
+            if event.button.id == "vimeo_abort_open_folder":
+                try:
+                    subprocess.Popen(["explorer", str(self.plan.target_folder)])
+                except OSError as exc:
+                    self.notify(f"Der lokale Ordner konnte nicht geöffnet werden: {exc}", severity="warning")
+                return
+            if event.button.id == "vimeo_abort_retry":
+                self.app.switch_screen(
+                    VimeoPublishingScreen(
+                        self.app_config,
+                        self.plan,
+                        state_path=self.state_path,
+                        opened_target_folder=self.opened_target_folder,
+                        direct_mode=self.direct_mode,
+                    )
+                )
+                return
+            if event.button.id == "vimeo_abort_main":
+                self.app.switch_screen(StartScreen())
+
+    class VimeoSuccessCompletionScreen(Screen[None]):
+        def __init__(
+            self,
+            app_config: AppConfig,
+            plan: PreparedRecordingPlan,
+            state: VimeoState,
+            *,
+            direct_mode: bool,
+        ) -> None:
+            super().__init__()
+            self.app_config = app_config
+            self.plan = plan
+            self.vimeo_state = state
+            self.direct_mode = direct_mode
+
+        def compose(self) -> ComposeResult:
+            yield Header(show_clock=False)
+            yield Static(
+                "Vimeo-Upload abgeschlossen"
+                if self.direct_mode
+                else "Fertig – Aufnahme vollständig verarbeitet",
+                id="screen_title",
+            )
+            if not self.direct_mode:
+                skipped_steps = {3} if self.plan.raw_recording is None else set()
+                yield Static(build_tui_progress_text(9, skipped_steps), classes="workflow_progress")
+            yield Static(
+                build_tui_vimeo_completion_banner(self.vimeo_state, direct_mode=self.direct_mode),
+                id="vimeo_completion_banner",
+                classes="status-ok",
+            )
+            with VerticalScroll(id="completion_scroll"):
+                yield Static(
+                    build_tui_vimeo_completion_details(
+                        self.plan,
+                        self.vimeo_state,
+                        direct_mode=self.direct_mode,
+                    ),
+                    id="vimeo_completion_details",
+                    classes="panel-info",
+                )
+            with Vertical(id="vimeo_completion_actions"):
+                with Horizontal(classes="vimeo_action_row"):
+                    yield Button("Lokalen Ordner öffnen", id="vimeo_completion_open_local")
+                    yield Button(
+                        "Vimeo öffnen",
+                        id="vimeo_completion_open_vimeo",
+                        disabled=not bool(self.vimeo_state.video_url),
+                    )
+                    yield Button(
+                        "Embed-Code kopieren",
+                        id="vimeo_completion_copy_embed",
+                        disabled=not bool(self.vimeo_state.embed_html),
+                    )
+                with Horizontal(classes="vimeo_action_row"):
+                    yield Button("Neue Aufnahme vorbereiten", id="vimeo_completion_new", variant="primary")
+                    yield Button("Zurück zum Hauptmenü", id="vimeo_completion_main")
+                    yield Button("Beenden", id="vimeo_completion_quit")
+            yield Footer()
+
+        def on_button_pressed(self, event: Button.Pressed) -> None:
+            if event.button.id == "vimeo_completion_open_local":
+                folder = self.plan.target_mp4.parent
+                try:
+                    if not folder.is_dir():
+                        raise FileNotFoundError(folder)
+                    subprocess.Popen(["explorer", str(folder)])
+                except OSError as exc:
+                    self.notify(
+                        f"Der lokale Aufnahmeordner konnte nicht geöffnet werden: {folder}. Admin-Hinweis: {exc}",
+                        severity="warning",
+                    )
+                return
+            if event.button.id == "vimeo_completion_open_vimeo":
+                if self.vimeo_state.video_url and webbrowser.open(self.vimeo_state.video_url):
+                    return
+                self.notify("Vimeo konnte nicht automatisch geöffnet werden.", severity="warning")
+                return
+            if event.button.id == "vimeo_completion_copy_embed":
+                if not self.vimeo_state.embed_html:
+                    self.notify("Der Embed-Code ist nicht verfügbar.", severity="warning")
+                    return
+                try:
+                    self.app.copy_to_clipboard(self.vimeo_state.embed_html)
+                except Exception as exc:
+                    self.notify(f"Embed-Code konnte nicht kopiert werden: {exc}", severity="warning")
+                    return
+                self.notify("Embed-Code wurde in die Zwischenablage kopiert.")
+                return
+            if event.button.id == "vimeo_completion_new":
+                self.app.switch_screen(StartSafetyScreen(self.app_config))
+                return
+            if event.button.id == "vimeo_completion_main":
+                self.app.switch_screen(StartScreen())
+                return
+            if event.button.id == "vimeo_completion_quit":
+                self.app.exit()
 
     class CompletionScreen(Screen[None]):
         def __init__(
@@ -3896,14 +4526,29 @@ def build_tui_app(
             def work() -> None:
                 try:
                     service = make_vimeo_service(self.app_config)
-                    service.create_folder(name, parent_folder_id=self.current_folder_id)
+                    created = service.create_folder(name, parent_folder_id=self.current_folder_id)
                     catalog = service.get_folder_catalog()
-                    self.app.call_from_thread(self._show_catalog, catalog)
-                    self.app.call_from_thread(self.notify, "Der Vimeo-Ordner wurde erstellt.")
+                    self.app.call_from_thread(self._show_created_folder, catalog, created)
                 except Exception as exc:
                     self.app.call_from_thread(self._show_catalog_error, exc)
 
             self.run_worker(work, thread=True, exclusive=True, group="vimeo-folder-create", exit_on_error=False)
+
+        def _show_created_folder(
+            self,
+            catalog: VimeoFolderCatalog,
+            created: VimeoFolder,
+        ) -> None:
+            if not self.is_mounted:
+                return
+            self._show_catalog(catalog)
+            if catalog.by_id(created.folder_id) is not None:
+                self.current_folder_id = created.folder_id
+                self._refresh_folder_table()
+            self.notify(
+                "Der Vimeo-Ordner wurde erstellt. "
+                "Bitte jetzt ausdrücklich bestätigen, wenn er das Standard-Ziel werden soll."
+            )
 
     class VimeoLibraryScreen(Screen[None]):
         def __init__(self, app_config: AppConfig) -> None:
@@ -4352,8 +4997,11 @@ def build_tui_app(
         def __init__(self, app_config: AppConfig) -> None:
             super().__init__()
             self.app_config = app_config
+            self.start_folder = app_config.recordings_base
             self.current_folder = app_config.recordings_base
-            self._visible_candidates: tuple[Path, ...] = ()
+            self._folder_entries: tuple[DirectVimeoBrowserEntry, ...] = ()
+            self._content_entries: tuple[DirectVimeoBrowserEntry, ...] = ()
+            self.selected_mp4: Path | None = None
 
         def compose(self) -> ComposeResult:
             yield Header(show_clock=False)
@@ -4365,71 +5013,170 @@ def build_tui_app(
                 classes="status-warning",
             )
             with VerticalScroll(id="direct_vimeo_selection_scroll"):
-                yield Static(f"Ordner: {self.current_folder}", id="direct_vimeo_folder")
-                yield Input(placeholder="Dateiname filtern", id="direct_vimeo_search")
-                yield DataTable(id="direct_vimeo_table")
-                yield Input(placeholder="MP4-Datei oder Ordner manuell eingeben", id="direct_vimeo_path")
+                yield Label("Aktueller Ordner")
+                yield Input(value=str(self.current_folder), id="direct_vimeo_path")
+                yield Input(placeholder="Namen im aktuellen Ordner filtern", id="direct_vimeo_search")
+                with Horizontal(id="direct_vimeo_browser_body"):
+                    with Vertical(id="direct_vimeo_folders_panel"):
+                        yield Label("Ordnernavigation")
+                        yield DataTable(id="direct_vimeo_folders")
+                    with Vertical(id="direct_vimeo_contents_panel"):
+                        yield Label("Inhalt des aktuellen Ordners")
+                        yield DataTable(id="direct_vimeo_table")
                 yield Static("Noch keine Datei ausgewählt.", id="direct_vimeo_status", classes="panel-info")
             with Horizontal(id="direct_vimeo_actions", classes="navigation_actions"):
                 yield Button("Zurück", id="direct_vimeo_back")
-                yield Button("Pfad verwenden", id="direct_vimeo_manual")
-                yield Button("Ausgewählte MP4 prüfen", id="direct_vimeo_select", variant="primary")
+                yield Button("Eine Ebene höher", id="direct_vimeo_parent")
+                yield Button("Zum Startordner", id="direct_vimeo_start")
+                yield Button("Aktualisieren", id="direct_vimeo_refresh")
+                yield Button(
+                    "Ausgewählte MP4 für Vimeo verwenden",
+                    id="direct_vimeo_select",
+                    variant="primary",
+                    disabled=True,
+                )
             yield Footer()
 
         def on_mount(self) -> None:
+            folders = self.query_one("#direct_vimeo_folders", DataTable)
+            folders.cursor_type = "row"
+            folders.zebra_stripes = True
+            folders.add_columns("Ordner")
             table = self.query_one("#direct_vimeo_table", DataTable)
             table.cursor_type = "row"
             table.zebra_stripes = True
-            table.add_columns("Dateiname", "Geändert", "Größe")
-            self._refresh_table()
+            table.add_columns("Typ", "Name", "Geändert", "Größe")
+            self._refresh_browser()
             table.focus()
 
         def on_input_changed(self, event: Input.Changed) -> None:
             if event.input.id == "direct_vimeo_search":
-                self._refresh_table()
+                self._refresh_browser()
+
+        def on_input_submitted(self, event: Input.Submitted) -> None:
+            if event.input.id != "direct_vimeo_path":
+                return
+            text = event.value.strip()
+            if not text:
+                self.notify("Bitte einen Ordnerpfad eingeben.", severity="warning")
+                return
+            candidate = Path(text).expanduser()
+            if not candidate.is_absolute():
+                candidate = self.current_folder / candidate
+            self._navigate(candidate)
+
+        def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+            if event.data_table.id != "direct_vimeo_table":
+                return
+            entry = self._entry_at(self._content_entries, event.cursor_row)
+            self._select_entry(entry)
 
         def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
-            try:
-                selected = self._visible_candidates[int(str(event.row_key.value))]
-            except (ValueError, IndexError):
+            entries = (
+                self._folder_entries
+                if event.data_table.id == "direct_vimeo_folders"
+                else self._content_entries
+                if event.data_table.id == "direct_vimeo_table"
+                else ()
+            )
+            entry = self._entry_at(entries, event.cursor_row)
+            if entry is None:
                 return
-            self._prepare(selected)
+            if entry.is_directory:
+                self._navigate(entry.path)
+            else:
+                self._select_entry(entry)
 
         def on_button_pressed(self, event: Button.Pressed) -> None:
             if event.button.id == "direct_vimeo_back":
                 self.app.pop_screen()
                 return
-            if event.button.id == "direct_vimeo_manual":
-                text = self.query_one("#direct_vimeo_path", Input).value.strip()
-                if not text:
-                    self.notify("Bitte eine MP4-Datei oder einen Ordner eingeben.", severity="warning")
-                    return
-                path = Path(text).expanduser()
-                if path.is_dir():
-                    self.current_folder = path
-                    self._refresh_table()
-                    return
-                self._prepare(path)
+            if event.button.id == "direct_vimeo_parent":
+                self._navigate(self.current_folder.parent)
                 return
-            if event.button.id == "direct_vimeo_select":
-                table = self.query_one("#direct_vimeo_table", DataTable)
-                if not self._visible_candidates or table.cursor_row >= len(self._visible_candidates):
-                    self.notify("Bitte zuerst eine MP4-Datei auswählen.", severity="warning")
-                    return
-                self._prepare(self._visible_candidates[table.cursor_row])
+            if event.button.id == "direct_vimeo_start":
+                self._navigate(self.start_folder)
+                return
+            if event.button.id == "direct_vimeo_refresh":
+                self._refresh_browser()
+                return
+            if event.button.id == "direct_vimeo_select" and self.selected_mp4 is not None:
+                self._prepare(self.selected_mp4)
 
-        def _refresh_table(self) -> None:
-            rows = build_tui_mp4_file_rows(
-                self.current_folder,
-                search_text=self.query_one("#direct_vimeo_search", Input).value,
-                limit=TUI_FILE_CHOICE_LIMIT,
+        def _navigate(self, folder: Path) -> None:
+            previous = self.current_folder
+            self.current_folder = folder
+            if not self._refresh_browser():
+                self.current_folder = previous
+                self.query_one("#direct_vimeo_path", Input).value = str(previous)
+
+        def _refresh_browser(self) -> bool:
+            status = self.query_one("#direct_vimeo_status", Static)
+            try:
+                entries = list_direct_vimeo_directory(self.current_folder)
+            except OSError as exc:
+                status.update(str(exc))
+                status.set_classes("status-danger")
+                return False
+
+            needle = self.query_one("#direct_vimeo_search", Input).value.strip().casefold()
+            visible = tuple(
+                entry for entry in entries if not needle or needle in entry.path.name.casefold()
             )
-            self._visible_candidates = tuple(row.path for row in rows)
+            self._folder_entries = tuple(entry for entry in entries if entry.is_directory)
+            self._content_entries = visible
+            self.selected_mp4 = None
+            self.query_one("#direct_vimeo_select", Button).disabled = True
+
+            folders = self.query_one("#direct_vimeo_folders", DataTable)
+            folders.clear()
+            for index, entry in enumerate(self._folder_entries):
+                folders.add_row(entry.path.name, key=str(index))
+
             table = self.query_one("#direct_vimeo_table", DataTable)
             table.clear()
-            for index, row in enumerate(rows):
-                table.add_row(row.filename, row.modified, row.size, key=str(index))
-            self.query_one("#direct_vimeo_folder", Static).update(f"Ordner: {self.current_folder}")
+            for index, entry in enumerate(self._content_entries):
+                kind = "[ORDNER]" if entry.is_directory else ("MP4" if entry.is_selectable_mp4 else "DATEI")
+                table.add_row(kind, entry.path.name, entry.modified, entry.size, key=str(index))
+            self.query_one("#direct_vimeo_path", Input).value = str(self.current_folder)
+            self.query_one("#direct_vimeo_parent", Button).disabled = self.current_folder.parent == self.current_folder
+            status.update(
+                f"{len(self._folder_entries)} Ordner und "
+                f"{sum(not entry.is_directory for entry in entries)} Dateien angezeigt."
+            )
+            status.set_classes("panel-info")
+            return True
+
+        @staticmethod
+        def _entry_at(
+            entries: tuple[DirectVimeoBrowserEntry, ...],
+            index: int,
+        ) -> DirectVimeoBrowserEntry | None:
+            return entries[index] if 0 <= index < len(entries) else None
+
+        def _select_entry(self, entry: DirectVimeoBrowserEntry | None) -> None:
+            status = self.query_one("#direct_vimeo_status", Static)
+            if entry is None or entry.is_directory:
+                self.selected_mp4 = None
+                self.query_one("#direct_vimeo_select", Button).disabled = True
+                return
+            if not entry.is_selectable_mp4:
+                self.selected_mp4 = None
+                self.query_one("#direct_vimeo_select", Button).disabled = True
+                status.update(
+                    f"Ausgewählt: {entry.path.name}\n"
+                    "Nur MP4-Dateien können für Vimeo verwendet werden."
+                )
+                status.set_classes("status-warning")
+                return
+            self.selected_mp4 = entry.path
+            self.query_one("#direct_vimeo_select", Button).disabled = False
+            status.update(
+                f"Ausgewählte Datei: {entry.path}\n"
+                f"Größe: {entry.size}\n"
+                f"Geändert: {entry.modified}"
+            )
+            status.set_classes("status-ok")
 
         def _prepare(self, candidate: Path) -> None:
             status = self.query_one("#direct_vimeo_status", Static)
@@ -4495,7 +5242,10 @@ def build_tui_app(
                 yield Static("Team: noch nicht geprüft", id="settings_vimeo_team", classes="panel-neutral")
                 yield Label("Standard-Zielordner für Uploads")
                 yield Static(
-                    self.selected_vimeo_folder_name or "Nicht ausgewählt",
+                    (
+                        f"{self.selected_vimeo_folder_name or 'Nicht ausgewählt'}\n"
+                        f"ID: {self.selected_vimeo_folder_id or '(nicht gesetzt)'}"
+                    ),
                     id="settings_vimeo_folder_display",
                     classes="panel-info",
                 )
@@ -4656,7 +5406,9 @@ def build_tui_app(
             self.app_config = refreshed
             self.selected_vimeo_folder_id = refreshed.vimeo.target_folder_id
             self.selected_vimeo_folder_name = refreshed.vimeo.target_folder_name
-            self.query_one("#settings_vimeo_folder_display", Static).update(folder.name)
+            self.query_one("#settings_vimeo_folder_display", Static).update(
+                f"{folder.name}\nID: {folder.folder_id}"
+            )
             self._refresh_admin_info()
             self.notify("Der Vimeo-Zielordner wurde gespeichert.")
 
@@ -4723,7 +5475,8 @@ def build_tui_app(
                     preflight = service.preflight()
                     message = (
                         f"Vimeo-Verbindung: OK\nTeam: {preflight.team_owner_name}\n"
-                        f"Zielordner: {preflight.folder.name}"
+                        f"Zielordner: {preflight.folder.name}\n"
+                        f"Berechtigungshinweis: {preflight.permission_note}"
                     )
                     self.app.call_from_thread(self._finish_vimeo_check, message, False, preflight.team_owner_name)
                 except Exception as exc:
@@ -4885,6 +5638,36 @@ def build_tui_app(
             height: auto;
             margin-top: 1;
         }
+        #vimeo_activity_notice {
+            height: auto;
+        }
+        #vimeo_website_ready {
+            width: 100%;
+            height: auto;
+            border: heavy $success;
+            background: $success;
+            color: $text;
+            padding: 0 1;
+            margin-bottom: 1;
+        }
+        #vimeo_website_ready_headline {
+            height: auto;
+            text-style: bold;
+            text-align: center;
+        }
+        #vimeo_website_ready_detail {
+            height: auto;
+            text-align: center;
+        }
+        .vimeo-critical-notice {
+            border: heavy $warning;
+            background: $warning;
+            color: $text;
+            text-style: bold;
+            text-align: center;
+            padding: 0 1;
+            margin-bottom: 1;
+        }
         Button.available-action {
             border: heavy $success;
         }
@@ -4893,7 +5676,7 @@ def build_tui_app(
             color: $text;
             text-style: bold;
         }
-        VimeoStopConfirmationScreen {
+        VimeoStopConfirmationScreen, VimeoAbortConfirmationScreen, VimeoExitConfirmationScreen {
             align: center middle;
             background: $background 70%;
         }
@@ -4918,8 +5701,57 @@ def build_tui_app(
             height: auto;
             align-horizontal: center;
         }
+        #vimeo_abort_dialog {
+            width: 76;
+            max-width: 94%;
+            height: auto;
+            border: heavy $error;
+            background: $surface;
+            padding: 1 2;
+        }
+        #vimeo_abort_title {
+            text-style: bold;
+            text-align: center;
+            margin-bottom: 1;
+        }
+        #vimeo_abort_dialog_actions, #vimeo_abort_completion_actions {
+            height: auto;
+            align-horizontal: center;
+        }
+        #vimeo_exit_dialog {
+            width: 76;
+            max-width: 94%;
+            height: auto;
+            border: heavy $warning;
+            background: $surface;
+            padding: 1 2;
+        }
+        #vimeo_exit_title {
+            text-style: bold;
+            text-align: center;
+            margin-bottom: 1;
+        }
+        #vimeo_exit_dialog_actions {
+            height: auto;
+            align-horizontal: center;
+        }
         #direct_vimeo_table {
-            height: 10;
+            height: 14;
+        }
+        #direct_vimeo_browser_body {
+            height: auto;
+            min-height: 16;
+        }
+        #direct_vimeo_folders_panel {
+            width: 1fr;
+            min-width: 24;
+            margin-right: 1;
+        }
+        #direct_vimeo_contents_panel {
+            width: 2fr;
+        }
+        #direct_vimeo_folders {
+            height: 14;
         }
         #settings_speaker_table {
             height: 8;
@@ -4984,8 +5816,19 @@ def build_tui_app(
             height: auto;
             margin-top: 1;
         }
+        #vimeo_completion_actions {
+            height: auto;
+            margin-top: 1;
+        }
         #vimeo_actions > #vimeo_upload {
             width: 100%;
+        }
+        .vimeo_action_row {
+            height: auto;
+        }
+        .vimeo_action_row > Button {
+            width: 1fr;
+            margin-right: 1;
         }
         #metadata_actions, #target_folder_actions, #completion_actions {
             height: auto;
@@ -5130,9 +5973,25 @@ def build_tui_app(
             self.app_config = config
             self.vimeo_library_cache: dict[tuple[str, str], VimeoLibraryResult] = {}
             self.vimeo_folder_catalog_cache: dict[str, VimeoFolderCatalog] = {}
+            self._vimeo_exit_confirmation_open = False
 
         def on_mount(self) -> None:
             self.push_screen(StartScreen())
+
+        def action_quit(self) -> None:
+            if self._vimeo_exit_confirmation_open:
+                return
+            current = self.screen
+            if isinstance(current, VimeoPublishingScreen) and current.requires_exit_confirmation:
+                self._vimeo_exit_confirmation_open = True
+                self.push_screen(VimeoExitConfirmationScreen(), self._finish_vimeo_exit_confirmation)
+                return
+            self.exit()
+
+        def _finish_vimeo_exit_confirmation(self, quit_app: bool | None) -> None:
+            self._vimeo_exit_confirmation_open = False
+            if quit_app:
+                self.exit()
 
         def open_vimeo_publishing(
             self,
@@ -5140,7 +5999,7 @@ def build_tui_app(
             *,
             state_path: Path,
             opened_target_folder: bool,
-            direct_mode: bool = False,
+            direct_mode: bool | None = None,
         ) -> None:
             self.push_screen(
                 VimeoPublishingScreen(

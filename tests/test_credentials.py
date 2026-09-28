@@ -10,6 +10,11 @@ from predigt_uploader.credentials import (
     VIMEO_KEYRING_USERNAME,
     VIMEO_TOKEN_ENV,
     VimeoCredentialManager,
+    SVP_API_CODE_ENV,
+    SVP_API_KEY_ENV,
+    SVP_KEYRING_SERVICE,
+    SVP_KEYRING_USERNAME,
+    StreamingVideoProviderCredentialManager,
 )
 from predigt_uploader.publishing.vimeo import VimeoCredentialError, load_vimeo_token
 
@@ -73,4 +78,52 @@ def test_token_can_be_stored_and_removed_without_being_logged(caplog):
 
     assert backend.password is None
     assert "very-secret-vimeo-token" not in caplog.text
+
+
+class MultiCredentialBackend:
+    def __init__(self) -> None:
+        self.values: dict[tuple[str, str], str] = {}
+
+    def get_password(self, service: str, username: str) -> str | None:
+        return self.values.get((service, username))
+
+    def set_password(self, service: str, username: str, password: str) -> None:
+        self.values[(service, username)] = password
+
+    def delete_password(self, service: str, username: str) -> None:
+        self.values.pop((service, username), None)
+
+
+def test_svp_credentials_are_stored_as_one_secure_pair_and_removed(caplog):
+    backend = MultiCredentialBackend()
+    manager = StreamingVideoProviderCredentialManager(backend, {})
+    with caplog.at_level(logging.DEBUG):
+        manager.store("super-secret-key", "super-secret-code")
+        resolved = manager.resolve()
+        manager.remove_stored()
+    assert resolved.api_key == "super-secret-key"
+    assert resolved.api_code == "super-secret-code"
+    assert resolved.source == "keyring"
+    assert (SVP_KEYRING_SERVICE, SVP_KEYRING_USERNAME) not in backend.values
+    assert "super-secret-key" not in caplog.text
+    assert "super-secret-code" not in caplog.text
+
+
+def test_svp_environment_pair_has_priority():
+    backend = MultiCredentialBackend()
+    manager = StreamingVideoProviderCredentialManager(
+        backend,
+        {SVP_API_KEY_ENV: "environment-key", SVP_API_CODE_ENV: "environment-code"},
+    )
+    manager.store("stored-key", "stored-code")
+    assert manager.resolve().api_key == "environment-key"
+    assert manager.resolve().source == "environment"
+
+
+def test_svp_incomplete_environment_is_not_silently_mixed_with_store():
+    backend = MultiCredentialBackend()
+    manager = StreamingVideoProviderCredentialManager(backend, {SVP_API_KEY_ENV: "only-key"})
+    manager.store("stored-key", "stored-code")
+    with pytest.raises(CredentialNotConfiguredError, match="unvollständig"):
+        manager.resolve()
 

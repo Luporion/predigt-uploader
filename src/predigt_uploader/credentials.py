@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 from dataclasses import dataclass
 from typing import Mapping, Protocol
 
@@ -8,6 +9,10 @@ from typing import Mapping, Protocol
 VIMEO_TOKEN_ENV = "PREDIGT_UPLOADER_VIMEO_TOKEN"
 VIMEO_KEYRING_SERVICE = "PredigtUploader Vimeo"
 VIMEO_KEYRING_USERNAME = "access-token"
+SVP_KEYRING_SERVICE = "PredigtUploader / StreamingVideoProvider"
+SVP_KEYRING_USERNAME = "api-credentials"
+SVP_API_KEY_ENV = "PREDIGT_UPLOADER_SVP_API_KEY"
+SVP_API_CODE_ENV = "PREDIGT_UPLOADER_SVP_API_CODE"
 
 
 class CredentialError(RuntimeError):
@@ -53,7 +58,7 @@ class KeyringCredentialBackend:
             self._module().set_password(service, username, password)
         except Exception as exc:
             raise CredentialStoreError(
-                "Der Vimeo-Zugang konnte nicht sicher im Windows-Zugangsspeicher abgelegt werden."
+                "Der Zugang konnte nicht sicher im Windows-Zugangsspeicher abgelegt werden."
             ) from exc
 
     def delete_password(self, service: str, username: str) -> None:
@@ -64,7 +69,7 @@ class KeyringCredentialBackend:
             if error_name == "PasswordDeleteError":
                 return
             raise CredentialStoreError(
-                "Der gespeicherte Vimeo-Zugang konnte nicht entfernt werden."
+                "Der gespeicherte Zugang konnte nicht entfernt werden."
             ) from exc
 
 
@@ -114,3 +119,71 @@ class VimeoCredentialManager:
 
     def remove_stored(self) -> None:
         self.backend.delete_password(VIMEO_KEYRING_SERVICE, VIMEO_KEYRING_USERNAME)
+
+
+@dataclass(frozen=True)
+class StreamingVideoProviderCredentials:
+    api_key: str
+    api_code: str
+    source: str
+
+
+class StreamingVideoProviderCredentialManager:
+    """Loads the long-lived SVP secrets; temporary API tokens are never stored."""
+
+    def __init__(
+        self,
+        backend: CredentialBackend | None = None,
+        environ: Mapping[str, str] | None = None,
+    ) -> None:
+        self.backend = backend or KeyringCredentialBackend()
+        self.environ = os.environ if environ is None else environ
+
+    def resolve(self) -> StreamingVideoProviderCredentials:
+        api_key = str(self.environ.get(SVP_API_KEY_ENV, "")).strip()
+        api_code = str(self.environ.get(SVP_API_CODE_ENV, "")).strip()
+        if api_key and api_code:
+            return StreamingVideoProviderCredentials(api_key, api_code, "environment")
+        if api_key or api_code:
+            raise CredentialNotConfiguredError(
+                "StreamingVideoProvider ist unvollständig eingerichtet. "
+                "Bitte API-Key und API-Code gemeinsam hinterlegen."
+            )
+        stored = self.backend.get_password(SVP_KEYRING_SERVICE, SVP_KEYRING_USERNAME)
+        if stored:
+            try:
+                payload = json.loads(stored)
+                api_key = str(payload.get("api_key", "")).strip()
+                api_code = str(payload.get("api_code", "")).strip()
+            except (TypeError, ValueError, AttributeError) as exc:
+                raise CredentialStoreError(
+                    "Der gespeicherte StreamingVideoProvider-Zugang ist beschädigt."
+                ) from exc
+            if api_key and api_code:
+                return StreamingVideoProviderCredentials(api_key, api_code, "keyring")
+        raise CredentialNotConfiguredError(
+            "StreamingVideoProvider ist noch nicht eingerichtet. "
+            "Öffne Einstellungen > StreamingVideoProvider und richte den Zugang ein."
+        )
+
+    def status_text(self) -> str:
+        try:
+            credentials = self.resolve()
+        except CredentialNotConfiguredError:
+            return "nicht eingerichtet"
+        except CredentialStoreError:
+            return "sicherer Zugangsspeicher nicht verfügbar"
+        if credentials.source == "environment":
+            return "eingerichtet (Umgebungsvariablen haben Vorrang)"
+        return "eingerichtet (Windows-Zugangsspeicher)"
+
+    def store(self, api_key: str, api_code: str) -> None:
+        cleaned_key = api_key.strip()
+        cleaned_code = api_code.strip()
+        if not cleaned_key or not cleaned_code:
+            raise CredentialNotConfiguredError("Bitte API-Key und API-Code vollständig eingeben.")
+        payload = json.dumps({"api_key": cleaned_key, "api_code": cleaned_code})
+        self.backend.set_password(SVP_KEYRING_SERVICE, SVP_KEYRING_USERNAME, payload)
+
+    def remove_stored(self) -> None:
+        self.backend.delete_password(SVP_KEYRING_SERVICE, SVP_KEYRING_USERNAME)

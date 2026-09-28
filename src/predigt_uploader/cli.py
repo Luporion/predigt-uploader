@@ -2208,6 +2208,90 @@ def _create_vimeo_service(args: argparse.Namespace):
     return service
 
 
+def _create_streaming_video_provider_service():
+    from .credentials import StreamingVideoProviderCredentialManager
+    from .publishing.streaming_video_provider import StreamingVideoProviderService
+
+    credentials = StreamingVideoProviderCredentialManager().resolve()
+    return StreamingVideoProviderService(credentials)
+
+
+def _print_streaming_video_provider_error(exc: Exception) -> None:
+    from .credentials import CredentialError
+    from .publishing.streaming_video_provider import StreamingVideoProviderError
+
+    if isinstance(exc, StreamingVideoProviderError):
+        print(exc.user_message)
+        if exc.admin_hint:
+            print(f"Admin-Hinweis: {exc.admin_hint}")
+        return
+    if isinstance(exc, CredentialError):
+        print(str(exc))
+        return
+    print("Die StreamingVideoProvider-Prüfung konnte nicht abgeschlossen werden.")
+    print(f"Admin-Hinweis: {type(exc).__name__}")
+
+
+def run_streaming_video_provider_check(_args: argparse.Namespace) -> int:
+    """Authenticate and count videos; this command never changes remote data."""
+    try:
+        listing = _create_streaming_video_provider_service().list_videos()
+        print("StreamingVideoProvider-Verbindung: OK")
+        print(f"{listing.count} Videos gefunden.")
+        print("Es wurden keine Videos verändert.")
+        return 0
+    except Exception as exc:
+        _print_streaming_video_provider_error(exc)
+        return 2
+
+
+def run_streaming_video_provider_diagnose(_args: argparse.Namespace) -> int:
+    """Inspect the account through documented read-only services."""
+    try:
+        service = _create_streaming_video_provider_service()
+        listing = service.list_videos()
+        videos = tuple(sorted(listing.videos, key=lambda item: item.date_created, reverse=True))
+        print("StreamingVideoProvider-Diagnose (nur lesend)")
+        print(f"Videos laut svp_list_videos: {listing.count}")
+        print("Neueste Einträge:")
+        for video in videos[:10]:
+            created = datetime.fromtimestamp(video.date_created).isoformat(sep=" ", timespec="minutes") if video.date_created else "unbekannt"
+            print(
+                f"- ref_no={video.ref_no}; clip_key={video.clip_key}; title={video.title}; "
+                f"source={video.video_source}; channel_ref={video.channel_ref}; duration={video.duration}s; "
+                f"date_created={created}; file_size={video.file_size}"
+            )
+        live_videos = tuple(video for video in videos if video.is_live)
+        print(f"Live-Broadcasts erkannt: {len(live_videos)}")
+        recording_refs: set[str] = set()
+        for live in live_videos:
+            recordings = service.list_recordings(live.ref_no)
+            recording_refs.update(video.ref_no for video in recordings.videos)
+            print(f"- {live.title} (ref_no={live.ref_no}): {recordings.count} Aufzeichnungen")
+        normal_refs = {video.ref_no for video in videos}
+        overlap = recording_refs & normal_refs
+        print(
+            "Aufzeichnungen auch in svp_list_videos sichtbar: "
+            + (f"JA ({len(overlap)} übereinstimmende IDs)" if overlap else "in dieser Stichprobe nicht bestätigt")
+        )
+        download_names: set[str] = set()
+        print("Eigenschaften einer kleinen Stichprobe:")
+        for video in videos[:3]:
+            properties = service.get_video_properties(video.ref_no)
+            names = [item.name for item in properties]
+            download_names.update(name for name in names if "download" in name.casefold())
+            print(f"- {video.ref_no}: {', '.join(names) if names else '(keine Eigenschaften)'}")
+        if download_names:
+            print(f"Mögliche Download-Eigenschaften sichtbar: {', '.join(sorted(download_names))}")
+        else:
+            print("Downloadfreigabe über dokumentierte API derzeit noch nicht bestätigt.")
+        print("Es wurden keine Videos verändert.")
+        return 0
+    except Exception as exc:
+        _print_streaming_video_provider_error(exc)
+        return 2
+
+
 def _create_vimeo_runtime(args: argparse.Namespace):
     from .publishing.vimeo import RequestsVimeoTransport, VimeoPublishingService, load_vimeo_token
 
@@ -2455,6 +2539,8 @@ def build_parser() -> argparse.ArgumentParser:
             "vimeo-upload",
             "vimeo-embed",
             "vimeo-smoke-test",
+            "svp-check",
+            "svp-diagnose",
         ],
     )
     parser.add_argument("--config", help="Pfad zu config.toml")
@@ -2495,6 +2581,10 @@ def main(argv: list[str] | None = None) -> int:
             return run_vimeo_embed(args)
         if args.command == "vimeo-smoke-test":
             return run_vimeo_smoke_test_command(args)
+        if args.command == "svp-check":
+            return run_streaming_video_provider_check(args)
+        if args.command == "svp-diagnose":
+            return run_streaming_video_provider_diagnose(args)
         parser.print_help()
         return 1
     except (KeyboardInterrupt, UserAbortError):

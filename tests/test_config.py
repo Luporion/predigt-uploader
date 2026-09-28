@@ -73,6 +73,26 @@ def test_default_recordings_base_uses_current_user_desktop(monkeypatch, tmp_path
     assert config.vimeo.target_folder_name == DEFAULT_VIMEO_TARGET_FOLDER_NAME
 
 
+def test_missing_raw_archive_setting_defaults_to_move_without_rewriting_config(tmp_path: Path):
+    config_path = tmp_path / "config.toml"
+    original = '[paths]\nrecordings_base = "D:\\\\Aufnahmen"\n'
+    config_path.write_text(original, encoding="utf-8")
+
+    config = load_config(config_path)
+
+    assert config.raw_archive_mode == "move"
+    assert config_path.read_text(encoding="utf-8") == original
+
+
+def test_explicit_raw_archive_setting_is_preserved(tmp_path: Path):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('[workflow]\nraw_archive_mode = "keep"\n', encoding="utf-8")
+
+    config = load_config(config_path)
+
+    assert config.raw_archive_mode == "keep"
+
+
 def test_existing_config_without_vimeo_section_uses_safe_non_secret_defaults_without_rewrite(tmp_path: Path):
     config_path = tmp_path / "config.toml"
     original = '[paths]\nrecordings_base = "D:\\\\Aufnahmen"\n'

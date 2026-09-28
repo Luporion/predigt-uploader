@@ -64,6 +64,7 @@
 - [x] LosslessCut-Ausgaben vom Wizard-Terminal trennen
 - [x] nach LosslessCut-Export per Enter oder Prozessende weiterlaufen
 - [x] Rohaufnahme-Archivierung fuer normale Rohaufnahmen standardmaessig auf Verschieben setzen
+- [x] Textual-Schnittworkflow so korrigieren, dass `raw_archive_mode` bis zum finalen Verarbeitungsplan erhalten bleibt
 - [x] einfaches Hauptmenue fuer normale Nutzer ergaenzen
 - [x] Einstellungen im Menue in APPDATA-config.toml speichern
 - [x] Jahresordner-Format im Menue zwischen Jahr und Jahr Video+Audio waehlen
@@ -180,6 +181,19 @@
 - [ ] optionalen Download ausgewählter, von Vimeo ausdrücklich gelieferter Download-Dateien mit Zielauswahl implementieren
 - [ ] unvollständige produktive Vimeo-States ohne vorherige MP4-Auswahl automatisch im Startmenü auflisten
 - [x] produktiven Textual-Vimeo-Schritt mit einer großen bewussten Aufnahme manuell prüfen
+
+## StreamingVideoProvider (read-only)
+
+- [x] API-Key/API-Code sicher über die bestehende Keyring-Abstraktion speichern
+- [x] XML-Client für Auth, Videoliste, Recordings, Properties und offiziellen Player-Link ergänzen
+- [x] temporären Token cachen und bei Authfehler einmal automatisch erneuern
+- [x] lesende CLI-Kommandos `svp-check` und `svp-diagnose` bereitstellen
+- [x] Textual-Hauptmenü und read-only Bibliothek mit Suche, Sortierung und Details ergänzen
+- [x] Zuschauer-Link über `svp_get_player_code` öffnen und kopieren
+- [x] Zugang in Textual maskiert einrichten, prüfen und entfernen
+- [ ] echten Account mit `svp-diagnose` untersuchen und Recording-Zuordnung dokumentieren
+- [ ] Downloadfreigabe nur nach Bestätigung eines dokumentierten Parameters erwägen
+- [ ] Ablaufdatum und Passwortschutz in separatem späteren Auftrag entwerfen
 
 ## Phase 5: WordPress optional
 

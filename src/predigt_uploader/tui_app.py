@@ -20,6 +20,7 @@ from .config import (
 )
 from .credentials import (
     CredentialError,
+    StreamingVideoProviderCredentialManager,
     VimeoCredentialManager,
 )
 from .filename import build_filename_preview, build_media_filename, sanitize_filename_part, service_type_config_for
@@ -52,6 +53,13 @@ from .publishing.vimeo import (
     VimeoPublishingService,
     VimeoUploadStoppedError,
     build_vimeo_title,
+)
+from .publishing.streaming_video_provider import (
+    StreamingVideo,
+    StreamingVideoList,
+    StreamingVideoProviderError,
+    StreamingVideoProviderAuthenticationError,
+    StreamingVideoProviderService,
 )
 from .speaker_history import SpeakerHistory
 from .workflow_state import (
@@ -227,6 +235,16 @@ def create_tui_vimeo_service(
 
     token = load_vimeo_token(credential_manager=credential_manager)
     return VimeoPublishingService(config.vimeo, token, RequestsVimeoTransport(token))
+
+
+def create_tui_streaming_video_provider_service(
+    credential_manager: StreamingVideoProviderCredentialManager,
+) -> StreamingVideoProviderService:
+    try:
+        resolved = credential_manager.resolve()
+    except CredentialError as exc:
+        raise StreamingVideoProviderAuthenticationError(str(exc)) from exc
+    return StreamingVideoProviderService(resolved)
 
 
 def validate_direct_vimeo_mp4(path: Path) -> Path:
@@ -1515,6 +1533,50 @@ def sort_tui_vimeo_library_videos(
     return tuple(sorted(videos, key=lambda video: video.created_time or "", reverse=True))
 
 
+def filter_stream_recordings(
+    videos: tuple[StreamingVideo, ...], search_text: str
+) -> tuple[StreamingVideo, ...]:
+    needle = search_text.strip().casefold()
+    if not needle:
+        return videos
+    return tuple(video for video in videos if needle in video.title.casefold())
+
+
+def sort_stream_recordings(
+    videos: tuple[StreamingVideo, ...], order: str
+) -> tuple[StreamingVideo, ...]:
+    if order == "oldest":
+        return tuple(sorted(videos, key=lambda video: video.date_created))
+    if order == "title_az":
+        return tuple(sorted(videos, key=lambda video: video.title.casefold()))
+    return tuple(sorted(videos, key=lambda video: video.date_created, reverse=True))
+
+
+def build_stream_recording_details(video: StreamingVideo) -> str:
+    created = _format_stream_recording_date(video.date_created)
+    parent = video.channel_ref or "nicht gemeldet"
+    return "\n".join(
+        (
+            f"Titel: {video.title}",
+            f"Datum: {created}",
+            f"Dauer: {_format_vimeo_duration(video.duration)}",
+            f"Größe: {_format_vimeo_bytes(video.file_size) if video.file_size else 'unbekannt'}",
+            f"Quelle: {video.video_source or 'unbekannt'}",
+            f"Video-ID: {video.ref_no}",
+            f"Zugehöriger Kanal / Live-Broadcast: {parent}",
+        )
+    )
+
+
+def _format_stream_recording_date(timestamp: int) -> str:
+    if not timestamp:
+        return "unbekannt"
+    try:
+        return datetime.fromtimestamp(timestamp).strftime("%d.%m.%Y %H:%M")
+    except (OSError, OverflowError, ValueError):
+        return "unbekannt"
+
+
 def build_tui_vimeo_breadcrumbs(
     team_name: str,
     catalog: VimeoFolderCatalog | None,
@@ -1630,7 +1692,12 @@ def build_tui_vimeo_success_text(plan: PreparedRecordingPlan, state: VimeoState)
     )
 
 
-def build_tui_vimeo_completion_banner(state: VimeoState, *, direct_mode: bool) -> str:
+def build_tui_vimeo_completion_banner(
+    state: VimeoState,
+    *,
+    direct_mode: bool,
+    plan: PreparedRecordingPlan | None = None,
+) -> str:
     lines = []
     if not direct_mode:
         lines.extend(
@@ -1642,6 +1709,8 @@ def build_tui_vimeo_completion_banner(state: VimeoState, *, direct_mode: bool) -
                 "✓ Dateien im Zielordner gespeichert",
             )
         )
+        if plan is not None:
+            lines.append(build_tui_raw_completion_status(plan))
     lines.extend(
         (
             "✓ Video vollständig zu Vimeo übertragen",
@@ -1659,6 +1728,16 @@ def build_tui_vimeo_completion_banner(state: VimeoState, *, direct_mode: bool) -
     return "\n".join(lines)
 
 
+def build_tui_raw_completion_status(plan: PreparedRecordingPlan) -> str:
+    if plan.raw_recording is None:
+        return "Rohaufnahme-Aktion: keine Rohaufnahme"
+    if plan.raw_action == "move":
+        return "✓ Rohaufnahme in Zielordner verschoben"
+    if plan.raw_action == "copy":
+        return "✓ Rohaufnahme in Zielordner kopiert"
+    return "○ Rohaufnahme am ursprünglichen Ort belassen"
+
+
 def build_tui_vimeo_completion_details(
     plan: PreparedRecordingPlan,
     state: VimeoState,
@@ -1673,6 +1752,8 @@ def build_tui_vimeo_completion_details(
             f"Finale MP4: {plan.target_mp4}",
             f"Finale MP3: {plan.target_mp3}",
             f"Zusammenfassung: {plan.summary_path}",
+            build_tui_raw_completion_status(plan),
+            f"Ursprüngliche Rohaufnahme: {plan.raw_recording}" if plan.raw_recording else "",
         ]
     )
     lines.extend(
@@ -1782,7 +1863,7 @@ def build_tui_processing_success_status(
             f"Finale MP3: {plan.target_mp3}",
             f"Zusammenfassung: {plan.summary_path}",
             f"Workflow-Status: {recording_workflow_state_path(plan.target_mp4)}",
-            f"Rohaufnahme-Aktion: {raw_action_label(plan.raw_action, plan.raw_recording)}",
+            build_tui_raw_completion_status(plan),
             "",
             *vimeo_lines,
             "",
@@ -1865,6 +1946,28 @@ def build_tui_processing_error_status(messages: tuple[str, ...], error: str, *, 
         lines.append(f"Zielordner: {target_folder}")
     lines.append("Logdateien liegen, falls vorhanden, im Ordner logs.")
     return "\n".join(lines)
+
+
+def build_tui_raw_archive_failure_text(
+    plan: PreparedRecordingPlan,
+    messages: tuple[str, ...],
+) -> str:
+    if not (
+        plan.raw_action == "move"
+        and plan.raw_recording is not None
+        and plan.raw_recording.exists()
+        and "Rohaufnahme wird verschoben." in messages
+        and plan.target_mp4.exists()
+        and plan.target_mp3.exists()
+        and plan.summary_path.exists()
+    ):
+        return ""
+    return (
+        "⚠ Rohaufnahme konnte nicht verschoben werden."
+        "\nDie fertigen Dateien sind vorhanden."
+        "\nDie Rohaufnahme befindet sich weiterhin am ursprünglichen Ort."
+        f"\nRohaufnahme: {plan.raw_recording}"
+    )
 
 
 def build_tui_processing_review_action_text(plan: PreparedRecordingPlan) -> str:
@@ -2017,6 +2120,8 @@ def build_tui_app(
     *,
     vimeo_service_factory: Callable[[AppConfig], VimeoPublishingService] | None = None,
     credential_manager: VimeoCredentialManager | None = None,
+    streaming_video_provider_service_factory: Callable[[], StreamingVideoProviderService] | None = None,
+    streaming_video_provider_credential_manager: StreamingVideoProviderCredentialManager | None = None,
     speaker_store: SpeakerHistory | None = None,
 ):
     try:
@@ -2030,9 +2135,15 @@ def build_tui_app(
 
     config = load_tui_config(config_path)
     credentials = credential_manager or VimeoCredentialManager()
+    svp_credentials = (
+        streaming_video_provider_credential_manager or StreamingVideoProviderCredentialManager()
+    )
     speakers = speaker_store or SpeakerHistory.for_current_user()
     make_vimeo_service = vimeo_service_factory or (
         lambda app_config: create_tui_vimeo_service(app_config, credentials)
+    )
+    make_svp_service = streaming_video_provider_service_factory or (
+        lambda: create_tui_streaming_video_provider_service(svp_credentials)
     )
 
     class MetadataFormScroll(VerticalScroll):
@@ -2055,14 +2166,20 @@ def build_tui_app(
             with Horizontal():
                 with Vertical(id="start_actions"):
                     yield Button("Neue Aufnahme vorbereiten", id="new", variant="primary")
-                    yield Button("Vimeo-Bibliothek", id="vimeo_library")
                     yield Button("Direkt zu Vimeo hochladen (Admin / Sonderfall)", id="direct_vimeo")
                     yield Static(
                         "Nur für bereits fertig geschnittene, korrekt benannte MP4-Dateien am endgültigen Speicherort. "
                         "Normalerweise 'Neue Aufnahme vorbereiten' verwenden.",
                         id="direct_vimeo_note",
                     )
+                    with Vertical(id="stream_recordings_group"):
+                        yield Button("Vollständige Stream-Aufzeichnungen", id="stream_recordings")
+                        yield Static(
+                            "Vollständige Aufzeichnungen von StreamingVideoProvider ansehen und Zuschauer-Links abrufen.",
+                            id="stream_recordings_note",
+                        )
                     yield Button("MP4-Dateien ansehen", id="files")
+                    yield Button("Vimeo-Bibliothek", id="vimeo_library")
                     yield Button("Einstellungen", id="settings")
                     yield Button("Systemcheck-Hinweis", id="systemcheck")
                     yield Button("Beenden", id="quit")
@@ -2075,6 +2192,8 @@ def build_tui_app(
                 self.app.push_screen(StartSafetyScreen(self.app.app_config))
             elif event.button.id == "vimeo_library":
                 self.app.push_screen(VimeoLibraryScreen(self.app.app_config))
+            elif event.button.id == "stream_recordings":
+                self.app.push_screen(StreamRecordingsScreen())
             elif event.button.id == "direct_vimeo":
                 self.app.push_screen(DirectVimeoSelectionScreen(self.app.app_config))
             elif event.button.id == "files":
@@ -3005,7 +3124,11 @@ def build_tui_app(
                         raw_recording=self.raw_recording,
                         already_cut=self.already_cut,
                         info=info,
-                        raw_action="keep" if self.raw_recording is not None else None,
+                        raw_action=(
+                            self.app_config.raw_archive_mode
+                            if self.raw_recording is not None
+                            else None
+                        ),
                         target_folder_override=target_folder,
                     ),
                 )
@@ -3060,7 +3183,7 @@ def build_tui_app(
                                 [
                                     ("Rohaufnahme in Zielordner verschieben", "move"),
                                     ("Rohaufnahme in Zielordner kopieren", "copy"),
-                                    ("Rohaufnahme in vMixStorage liegen lassen (sicherer Standard)", "keep"),
+                                    ("Rohaufnahme in vMixStorage liegen lassen", "keep"),
                                 ],
                                 value=self.plan.raw_action,
                                 id="raw_action",
@@ -3305,7 +3428,15 @@ def build_tui_app(
             self._set_processing_controls_disabled(False)
             self._enable_open_target_if_available()
             error = result.error or "Die Vorbereitung ist nicht vollstaendig abgeschlossen."
-            status_widget.update(build_tui_processing_error_status(result.messages, error, target_folder=self.plan.target_folder))
+            error_status = build_tui_processing_error_status(
+                result.messages,
+                error,
+                target_folder=self.plan.target_folder,
+            )
+            raw_archive_error = build_tui_raw_archive_failure_text(self.plan, result.messages)
+            if raw_archive_error:
+                error_status += f"\n\n{raw_archive_error}"
+            status_widget.update(error_status)
             self.notify(error, severity="error")
 
         def _set_processing_controls_disabled(self, disabled: bool) -> None:
@@ -4182,7 +4313,11 @@ def build_tui_app(
                 skipped_steps = {3} if self.plan.raw_recording is None else set()
                 yield Static(build_tui_progress_text(9, skipped_steps), classes="workflow_progress")
             yield Static(
-                build_tui_vimeo_completion_banner(self.vimeo_state, direct_mode=self.direct_mode),
+                build_tui_vimeo_completion_banner(
+                    self.vimeo_state,
+                    direct_mode=self.direct_mode,
+                    plan=self.plan,
+                ),
                 id="vimeo_completion_banner",
                 classes="status-ok",
             )
@@ -4410,9 +4545,9 @@ def build_tui_app(
             table.add_columns("", "Ordner")
             cached = self.app.vimeo_folder_catalog_cache.get(self.cache_key)
             if cached is not None:
-                self._show_catalog(cached)
+                self.call_after_refresh(self._show_catalog, cached)
             else:
-                self._load_catalog()
+                self.call_after_refresh(self._load_catalog)
 
         def on_unmount(self) -> None:
             self.workers.cancel_node(self)
@@ -4613,9 +4748,9 @@ def build_tui_app(
             table.add_columns("Typ", "Titel", "Erstellt", "Status", "Dauer")
             cached = self.app.vimeo_library_cache.get(self.cache_key)
             if cached is not None:
-                self._show_library(cached)
+                self.call_after_refresh(self._show_library, cached)
                 return
-            self._start_library_load()
+            self.call_after_refresh(self._start_library_load)
 
         def on_unmount(self) -> None:
             self.load_generation += 1
@@ -5209,6 +5344,210 @@ def build_tui_app(
                 direct_mode=True,
             )
 
+    class StreamRecordingsScreen(Screen[None]):
+        def __init__(self) -> None:
+            super().__init__()
+            self.result: StreamingVideoList | None = None
+            self.visible_videos: tuple[StreamingVideo, ...] = ()
+            self.selected_video: StreamingVideo | None = None
+            self.sort_order = "newest"
+            self.player_links: dict[str, str] = {}
+            self.pending_player_action: str | None = None
+            self.service: StreamingVideoProviderService | None = None
+
+        def compose(self) -> ComposeResult:
+            yield Header(show_clock=False)
+            yield Static("Stream-Aufzeichnungen", id="screen_title")
+            yield Static(
+                "Die Aufzeichnungen werden von StreamingVideoProvider geladen. "
+                "In dieser Ansicht werden keine Videos verändert.",
+                id="stream_recordings_readonly",
+                classes="status-info",
+            )
+            with VerticalScroll(id="stream_recordings_scroll"):
+                yield Static("Stream-Aufzeichnungen werden geladen …", id="stream_recordings_status", classes="status-info")
+                with Horizontal(id="stream_recordings_filters"):
+                    yield Input(placeholder="Titel durchsuchen", id="stream_recordings_search")
+                    yield Select(
+                        (("Neueste zuerst", "newest"), ("Älteste zuerst", "oldest"), ("Titel A–Z", "title_az")),
+                        value="newest",
+                        id="stream_recordings_sort",
+                    )
+                yield DataTable(id="stream_recordings_table")
+                yield Static("Noch keine Aufzeichnung ausgewählt.", id="stream_recordings_details", classes="panel-neutral")
+            with Horizontal(id="stream_recordings_actions", classes="navigation_actions"):
+                yield Button("Zurück", id="stream_recordings_back")
+                yield Button("Neu laden", id="stream_recordings_reload")
+                yield Button("Video öffnen", id="stream_recordings_open", disabled=True)
+                yield Button("Zuschauer-Link kopieren", id="stream_recordings_copy", disabled=True)
+            yield Footer()
+
+        def on_mount(self) -> None:
+            table = self.query_one("#stream_recordings_table", DataTable)
+            table.cursor_type = "row"
+            table.add_columns("Titel", "Datum", "Dauer", "Größe", "Quelle")
+            self.call_after_refresh(self._load)
+
+        def on_unmount(self) -> None:
+            self.workers.cancel_node(self)
+
+        def _load(self) -> None:
+            self.query_one("#stream_recordings_reload", Button).disabled = True
+            status = self.query_one("#stream_recordings_status", Static)
+            status.update("Stream-Aufzeichnungen werden geladen …")
+            status.set_classes("status-info")
+
+            def work() -> None:
+                try:
+                    service = self.service or make_svp_service()
+                    result = service.list_stream_recordings()
+                    self.service = service
+                    self.app.call_from_thread(self._finish_load, result, None)
+                except Exception as exc:
+                    self.app.call_from_thread(self._finish_load, None, exc)
+
+            self.run_worker(work, thread=True, exclusive=True, group="stream-recordings-load", exit_on_error=False)
+
+        def _finish_load(self, result: StreamingVideoList | None, error: Exception | None) -> None:
+            if not self.is_mounted:
+                return
+            self.query_one("#stream_recordings_reload", Button).disabled = False
+            status = self.query_one("#stream_recordings_status", Static)
+            if error is not None:
+                if isinstance(error, StreamingVideoProviderError):
+                    message = error.user_message
+                    if error.admin_hint:
+                        message += f"\nAdmin-Hinweis: {error.admin_hint}"
+                else:
+                    message = "Die Stream-Aufzeichnungen konnten nicht geladen werden."
+                status.update(message)
+                status.set_classes("status-danger")
+                return
+            assert result is not None
+            self.result = result
+            status.update(
+                f"{result.count} Aufzeichnungen/Videos gefunden."
+                if result.videos
+                else "Keine Stream-Aufzeichnungen vorhanden."
+            )
+            status.set_classes("status-ok" if result.videos else "status-info")
+            self._refresh_table()
+
+        def _refresh_table(self) -> None:
+            if self.result is None:
+                return
+            search = self.query_one("#stream_recordings_search", Input).value
+            self.visible_videos = sort_stream_recordings(
+                filter_stream_recordings(self.result.videos, search), self.sort_order
+            )
+            table = self.query_one("#stream_recordings_table", DataTable)
+            table.clear()
+            for video in self.visible_videos:
+                created = _format_stream_recording_date(video.date_created)
+                table.add_row(
+                    video.title,
+                    created,
+                    _format_vimeo_duration(video.duration),
+                    _format_vimeo_bytes(video.file_size) if video.file_size else "–",
+                    video.video_source or "–",
+                    key=video.ref_no,
+                )
+            self.selected_video = None
+            self._update_selection()
+
+        def on_input_changed(self, event: Input.Changed) -> None:
+            if event.input.id == "stream_recordings_search":
+                self._refresh_table()
+
+        def on_select_changed(self, event: Select.Changed) -> None:
+            if event.select.id == "stream_recordings_sort" and event.value is not Select.BLANK:
+                self.sort_order = str(event.value)
+                self._refresh_table()
+
+        def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+            if event.data_table.id != "stream_recordings_table":
+                return
+            row = event.cursor_row
+            self.selected_video = self.visible_videos[row] if row < len(self.visible_videos) else None
+            self._update_selection()
+
+        def _update_selection(self) -> None:
+            details = self.query_one("#stream_recordings_details", Static)
+            if self.selected_video is None:
+                details.update("Noch keine Aufzeichnung ausgewählt.")
+            else:
+                details.update(build_stream_recording_details(self.selected_video))
+            enabled = self.selected_video is not None
+            self.query_one("#stream_recordings_open", Button).disabled = not enabled
+            self.query_one("#stream_recordings_copy", Button).disabled = not enabled
+
+        def _player_action(self, action: str) -> None:
+            video = self.selected_video
+            if video is None:
+                return
+            cached = self.player_links.get(video.ref_no)
+            if cached:
+                self._use_player_link(cached, action)
+                return
+            self.pending_player_action = action
+            self.query_one("#stream_recordings_open", Button).disabled = True
+            self.query_one("#stream_recordings_copy", Button).disabled = True
+            self.query_one("#stream_recordings_details", Static).update(
+                build_stream_recording_details(video) + "\n\nZuschauer-Link wird erzeugt …"
+            )
+
+            def work() -> None:
+                try:
+                    service = self.service or make_svp_service()
+                    link = service.get_player_link(video.ref_no)
+                    self.service = service
+                    self.app.call_from_thread(self._finish_player_link, video.ref_no, link, None)
+                except Exception as exc:
+                    self.app.call_from_thread(self._finish_player_link, video.ref_no, None, exc)
+
+            self.run_worker(work, thread=True, exclusive=True, group="stream-player-link", exit_on_error=False)
+
+        def _finish_player_link(self, video_ref: str, link: str | None, error: Exception | None) -> None:
+            if not self.is_mounted:
+                return
+            self._update_selection()
+            if error is not None or not link:
+                self.pending_player_action = None
+                message = error.user_message if isinstance(error, StreamingVideoProviderError) else "Der Zuschauer-Link konnte nicht erzeugt werden."
+                self.notify(message, severity="error")
+                return
+            self.player_links[video_ref] = link
+            action = self.pending_player_action
+            self.pending_player_action = None
+            if action:
+                self._use_player_link(link, action)
+
+        def _use_player_link(self, link: str, action: str) -> None:
+            if action == "open":
+                try:
+                    opened = webbrowser.open(link)
+                except Exception:
+                    opened = False
+                if not opened:
+                    self.notify("Der Zuschauer-Link konnte nicht im Browser geöffnet werden.", severity="warning")
+            else:
+                try:
+                    self.app.copy_to_clipboard(link)
+                except Exception:
+                    self.notify("Der Zuschauer-Link konnte nicht kopiert werden.", severity="warning")
+                    return
+                self.notify("Der Zuschauer-Link wurde kopiert.")
+
+        def on_button_pressed(self, event: Button.Pressed) -> None:
+            if event.button.id == "stream_recordings_back":
+                self.app.pop_screen()
+            elif event.button.id == "stream_recordings_reload":
+                self._load()
+            elif event.button.id == "stream_recordings_open":
+                self._player_action("open")
+            elif event.button.id == "stream_recordings_copy":
+                self._player_action("copy")
+
     class SettingsScreen(Screen[None]):
         def __init__(self, app_config: AppConfig) -> None:
             super().__init__()
@@ -5230,9 +5569,19 @@ def build_tui_app(
                 yield Label("Verarbeitung / Dateien", classes="settings_heading")
                 yield Label("LosslessCut-Pfad")
                 yield Input(value=self.app_config.losslesscut_path, id="settings_losslesscut")
-                yield Label("Verhalten der Rohaufnahme")
+                yield Label("Rohaufnahme nach Verarbeitung", classes="settings_heading")
+                yield Static(
+                    "Legt fest, was nach erfolgreicher Verarbeitung mit der ursprünglichen Rohaufnahme passiert.\n"
+                    "Standard: Die Rohaufnahme wird in den endgültigen Aufnahmeordner verschoben.",
+                    id="settings_raw_mode_help",
+                    classes="panel-neutral",
+                )
                 yield Select(
-                    (("verschieben", "move"), ("kopieren", "copy"), ("liegen lassen", "keep")),
+                    (
+                        ("Rohaufnahme in Zielordner verschieben", "move"),
+                        ("Rohaufnahme in Zielordner kopieren", "copy"),
+                        ("Rohaufnahme am ursprünglichen Ort liegen lassen", "keep"),
+                    ),
                     value=self.app_config.raw_archive_mode,
                     id="settings_raw_mode",
                 )
@@ -5260,6 +5609,19 @@ def build_tui_app(
                     yield Button("Vimeo-Verbindung prüfen", id="settings_check_vimeo")
                     yield Button("Gespeicherten Token entfernen", id="settings_remove_token")
                 yield Static("Noch keine Verbindungsprüfung ausgeführt.", id="settings_vimeo_result")
+                yield Label("StreamingVideoProvider", classes="settings_heading")
+                yield Static(f"Zugang: {svp_credentials.status_text()}", id="settings_svp_status", classes="panel-info")
+                yield Static(
+                    "API-Key und API-Code werden ausschließlich im sicheren Zugangsspeicher abgelegt und später nicht angezeigt.",
+                    classes="panel-neutral",
+                )
+                yield Input(placeholder="StreamingVideoProvider API-Key", password=True, id="settings_svp_api_key")
+                yield Input(placeholder="StreamingVideoProvider API-Code", password=True, id="settings_svp_api_code")
+                with Horizontal(classes="settings_button_row"):
+                    yield Button("Zugang einrichten / ersetzen", id="settings_save_svp", variant="primary")
+                    yield Button("Verbindung prüfen", id="settings_check_svp")
+                    yield Button("Zugang entfernen", id="settings_remove_svp")
+                yield Static("Noch keine Verbindungsprüfung ausgeführt.", id="settings_svp_result")
                 yield Label("Prediger", classes="settings_heading")
                 yield Static("Gespeicherte Prediger", classes="panel-info")
                 yield DataTable(id="settings_speaker_table")
@@ -5311,6 +5673,9 @@ def build_tui_app(
         def _refresh_token_status(self) -> None:
             self.query_one("#settings_token_status", Static).update(f"Vimeo-Zugang: {credentials.status_text()}")
 
+        def _refresh_svp_status(self) -> None:
+            self.query_one("#settings_svp_status", Static).update(f"Zugang: {svp_credentials.status_text()}")
+
         def on_button_pressed(self, event: Button.Pressed) -> None:
             if event.button.id == "back":
                 self.app.pop_screen()
@@ -5339,6 +5704,32 @@ def build_tui_app(
                 return
             if event.button.id == "settings_check_vimeo":
                 self._check_vimeo()
+                return
+            if event.button.id == "settings_save_svp":
+                try:
+                    svp_credentials.store(
+                        self.query_one("#settings_svp_api_key", Input).value,
+                        self.query_one("#settings_svp_api_code", Input).value,
+                    )
+                except CredentialError as exc:
+                    self.notify(str(exc), severity="error")
+                    return
+                self.query_one("#settings_svp_api_key", Input).value = ""
+                self.query_one("#settings_svp_api_code", Input).value = ""
+                self._refresh_svp_status()
+                self.notify("Der StreamingVideoProvider-Zugang wurde sicher gespeichert.")
+                return
+            if event.button.id == "settings_remove_svp":
+                try:
+                    svp_credentials.remove_stored()
+                except CredentialError as exc:
+                    self.notify(str(exc), severity="error")
+                    return
+                self._refresh_svp_status()
+                self.notify("Der gespeicherte StreamingVideoProvider-Zugang wurde entfernt.")
+                return
+            if event.button.id == "settings_check_svp":
+                self._check_svp()
                 return
             if event.button.id == "settings_admin_diagnose":
                 self._check_vimeo()
@@ -5500,6 +5891,35 @@ def build_tui_app(
                 self.query_one("#settings_vimeo_team", Static).update(f"Team: {team_name}")
             self.query_one("#settings_check_vimeo", Button).disabled = False
 
+        def _check_svp(self) -> None:
+            result = self.query_one("#settings_svp_result", Static)
+            result.update("StreamingVideoProvider-Verbindung wird geprüft …")
+            self.query_one("#settings_check_svp", Button).disabled = True
+
+            def work() -> None:
+                try:
+                    listing = make_svp_service().list_videos()
+                    message = f"StreamingVideoProvider-Verbindung: OK\n{listing.count} Videos gefunden."
+                    self.app.call_from_thread(self._finish_svp_check, message, False)
+                except Exception as exc:
+                    if isinstance(exc, StreamingVideoProviderError):
+                        message = exc.user_message
+                        if exc.admin_hint:
+                            message += f"\nAdmin-Hinweis: {exc.admin_hint}"
+                    else:
+                        message = "Die StreamingVideoProvider-Verbindung konnte nicht geprüft werden."
+                    self.app.call_from_thread(self._finish_svp_check, message, True)
+
+            self.run_worker(work, thread=True, exclusive=True, group="settings-svp-check", exit_on_error=False)
+
+        def _finish_svp_check(self, message: str, failed: bool) -> None:
+            if not self.is_mounted:
+                return
+            result = self.query_one("#settings_svp_result", Static)
+            result.update(message)
+            result.set_classes("status-danger" if failed else "status-ok")
+            self.query_one("#settings_check_svp", Button).disabled = False
+
     class PredigtUploaderTui(App[None]):
         CSS = """
         Screen {
@@ -5519,6 +5939,19 @@ def build_tui_app(
         #start_actions {
             width: 1fr;
             padding-right: 2;
+        }
+        #start_actions Button {
+            margin-bottom: 0;
+        }
+        #stream_recordings_group {
+            height: auto;
+            border-left: solid $primary;
+            padding-left: 1;
+        }
+        #direct_vimeo_note, #stream_recordings_note {
+            height: auto;
+            color: $text-muted;
+            margin-bottom: 0;
         }
         #status_box {
             width: 1fr;
@@ -5606,11 +6039,13 @@ def build_tui_app(
             min-height: 0;
         }
         #settings_scroll, #direct_vimeo_selection_scroll, #vimeo_library_scroll,
+        #stream_recordings_scroll,
         #vimeo_folder_browser_scroll {
             height: 1fr;
             min-height: 0;
         }
         #settings_actions, #direct_vimeo_actions, #vimeo_library_actions,
+        #stream_recordings_actions,
         #vimeo_folder_browser_actions {
             height: auto;
             margin-top: 1;
@@ -5637,6 +6072,23 @@ def build_tui_app(
         #vimeo_available_actions {
             height: auto;
             margin-top: 1;
+        }
+        #stream_recordings_table {
+            height: 14;
+            margin-bottom: 1;
+        }
+        #stream_recordings_filters {
+            height: auto;
+        }
+        #stream_recordings_search {
+            width: 2fr;
+            margin-right: 1;
+        }
+        #stream_recordings_sort {
+            width: 1fr;
+        }
+        #stream_recordings_details {
+            height: auto;
         }
         #vimeo_activity_notice {
             height: auto;

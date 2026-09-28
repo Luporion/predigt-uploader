@@ -94,6 +94,22 @@ Nach erfolgreicher lokaler Verarbeitung liegen neben MP4 und MP3 die Begleitdate
 
 Die Datei enthält ausdrücklich keine Zugangsdaten. WordPress ist noch nicht integriert. Für Vimeo gibt es eine UI-unabhängige Publishing-Schicht mit Team-Owner-/Folder-Prüfung, resumierbarem tus-Upload, Doppelschutz, Folder-Zuordnung mit Verifikation und Embed-Abruf. Textual verwendet genau diese Schicht nach einer ausdrücklichen Nutzeraktion; Netzwerk- und Uploadarbeit läuft außerhalb des UI-Threads. Der normale Wizard bleibt lokal. Details stehen in [docs/publishing-architecture.md](docs/publishing-architecture.md) und [docs/vimeo-development.md](docs/vimeo-development.md).
 
+## Stream-Aufzeichnungen (StreamingVideoProvider)
+
+Textual enthält eine read-only Bibliothek für vollständige Stream-Aufzeichnungen. Sie kombiniert dedupliziert normale On-Demand-Einträge aus `svp_list_videos` mit den Ergebnissen aus `svp_list_recordings` aller erkannten Live-Broadcasts. Die XML-API-Daten laden außerhalb des UI-Threads; Titelsuche, Sortierung, Details sowie ein offizieller Zuschauer-Link zum Öffnen oder Kopieren stehen bereit. Die Ansicht verändert keine Videos.
+
+API-Key und API-Code werden unter `Einstellungen > StreamingVideoProvider` maskiert eingegeben und gemeinsam im Windows Credential Manager gespeichert. Alternativ werden für Entwicklung/CI die Prozessvariablen `PREDIGT_UPLOADER_SVP_API_KEY` und `PREDIGT_UPLOADER_SVP_API_CODE` unterstützt. Der temporäre SVP-Token wird automatisch erzeugt und nicht dauerhaft gespeichert.
+
+```powershell
+# Verbindung und Anzahl prüfen (nur lesend):
+python -m predigt_uploader svp-check
+
+# Videos, Live-Broadcasts, Recordings und Properties untersuchen (nur lesend):
+python -m predigt_uploader svp-diagnose
+```
+
+Details und die bewusst offenen Fragen zu Downloadfreigabe, Ablaufdatum und Passwortschutz stehen in [docs/streaming-video-provider.md](docs/streaming-video-provider.md).
+
 ## Vimeo-Entwicklungskommandos
 
 Der Vimeo-Token wird zentral aufgelöst: `PREDIGT_UPLOADER_VIMEO_TOKEN` hat für Entwicklung/CI Vorrang, anschließend wird der Windows Credential Manager über `keyring` verwendet. Der Token steht niemals in `config.toml`, Workflow-State oder Logs. Normale Nutzer richten ihn maskiert unter `Einstellungen > Vimeo` ein. Die nicht geheimen Werte `team_owner_user_id`, `target_folder_id` und optional `target_folder_name` stehen im Abschnitt `[vimeo]` der lokalen Konfiguration. Keine ID wird aus Namen oder URLs geraten.
@@ -153,6 +169,7 @@ Die numerische Version stammt ausschließlich aus `pyproject.toml`. Ohne Tag auf
 - `docs/install-v1-5.md` – Installation und erster Test auf einem Zielrechner
 - `docs/release-v1-5.md` – Inhalt und Erstellung der lokalen Release-ZIP
 - `docs/vimeo-development.md` – Vimeo-App, Teamordner-Diagnose und bewusster Testupload
+- `docs/streaming-video-provider.md` – read-only API, Zugang und Diagnose für Stream-Aufzeichnungen
 - `docs/dev-log/` – kurze Berichte nach KI-Aufgaben
 - `src/predigt_uploader/` – Programmcode
 - `tests/` – automatische Tests

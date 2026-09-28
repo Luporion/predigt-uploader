@@ -9,6 +9,7 @@ from predigt_uploader.processing import (
     MP4_ACTION_OVERWRITE,
     RAW_ACTION_COPY,
     RAW_ACTION_KEEP,
+    RAW_ACTION_MOVE,
     build_prepared_recording_plan,
     build_processing_plan_text,
     execute_processing_plan,
@@ -19,6 +20,7 @@ from predigt_uploader.processing import (
     validate_windows_filename,
     raw_action_label,
 )
+from predigt_uploader.mp3 import Mp3ConversionError
 from predigt_uploader.workflow_state import load_workflow_state
 from predigt_uploader.companion_files import recording_summary_path, recording_workflow_state_path
 from predigt_uploader.report import build_summary_text, write_summary_file
@@ -281,6 +283,109 @@ def test_execute_processing_plan_can_copy_raw_recording(tmp_path):
     assert (plan.target_folder / "raw.mp4").read_bytes() == b"raw"
     assert result.archived_raw_recording == plan.target_folder / "raw.mp4"
     assert "Rohaufnahme wird kopiert." in result.messages
+
+
+def test_execute_processing_plan_moves_raw_recording_by_default_after_local_outputs(tmp_path):
+    source = tmp_path / "schnitt" / "predigt_geschnitten.mp4"
+    raw = tmp_path / "vmix" / "rohaufnahme.mp4"
+    source.parent.mkdir()
+    raw.parent.mkdir()
+    source.write_bytes(b"cut-video")
+    raw.write_bytes(b"raw-video")
+    config = _config(tmp_path)
+    plan = build_prepared_recording_plan(
+        config=config,
+        source_mp4=source,
+        raw_recording=raw,
+        info=SermonInfo(date(2026, 5, 24), "Lehre", "Johannes 3,16", "Max Muster"),
+    )
+
+    result = execute_processing_plan(
+        plan,
+        config,
+        mp3_converter=lambda _source, target, _config: target.write_bytes(b"mp3"),
+        ffmpeg_checker=lambda _config: True,
+    )
+
+    archived_raw = plan.target_folder / raw.name
+    assert plan.raw_action == RAW_ACTION_MOVE
+    assert result.success is True
+    assert plan.target_mp4.exists()
+    assert plan.target_mp3.exists()
+    assert plan.summary_path.exists()
+    assert not raw.exists()
+    assert archived_raw.read_bytes() == b"raw-video"
+    assert result.archived_raw_recording == archived_raw
+    assert result.messages.index("Zusammenfassung wird geschrieben.") < result.messages.index(
+        "Rohaufnahme wird verschoben."
+    )
+
+
+def test_processing_error_before_completion_leaves_raw_recording_at_source(tmp_path):
+    source = tmp_path / "schnitt" / "predigt_geschnitten.mp4"
+    raw = tmp_path / "vmix" / "rohaufnahme.mp4"
+    source.parent.mkdir()
+    raw.parent.mkdir()
+    source.write_bytes(b"cut-video")
+    raw.write_bytes(b"raw-video")
+    config = _config(tmp_path)
+    plan = build_prepared_recording_plan(
+        config=config,
+        source_mp4=source,
+        raw_recording=raw,
+        info=SermonInfo(date(2026, 5, 24), "Lehre", "Johannes 3,16", "Max Muster"),
+    )
+
+    def fail_conversion(_source: Path, _target: Path, _config: AppConfig) -> None:
+        raise Mp3ConversionError("simulierter FFmpeg-Fehler")
+
+    result = execute_processing_plan(
+        plan,
+        config,
+        mp3_converter=fail_conversion,
+        ffmpeg_checker=lambda _config: True,
+    )
+
+    assert result.success is False
+    assert plan.raw_action == RAW_ACTION_MOVE
+    assert raw.read_bytes() == b"raw-video"
+    assert not (plan.target_folder / raw.name).exists()
+    assert "Rohaufnahme wird verschoben." not in result.messages
+
+
+def test_raw_move_failure_keeps_original_after_final_outputs_were_created(tmp_path, monkeypatch):
+    source = tmp_path / "schnitt" / "predigt_geschnitten.mp4"
+    raw = tmp_path / "vmix" / "rohaufnahme.mp4"
+    source.parent.mkdir()
+    raw.parent.mkdir()
+    source.write_bytes(b"cut-video")
+    raw.write_bytes(b"raw-video")
+    config = _config(tmp_path)
+    plan = build_prepared_recording_plan(
+        config=config,
+        source_mp4=source,
+        raw_recording=raw,
+        info=SermonInfo(date(2026, 5, 24), "Lehre", "Johannes 3,16", "Max Muster"),
+    )
+
+    def fail_raw_move(_source: str, _target: str) -> None:
+        raise PermissionError("Rohaufnahme ist noch geöffnet")
+
+    monkeypatch.setattr("predigt_uploader.processing.shutil.move", fail_raw_move)
+    result = execute_processing_plan(
+        plan,
+        config,
+        mp3_converter=lambda _source, target, _config: target.write_bytes(b"mp3"),
+        ffmpeg_checker=lambda _config: True,
+    )
+
+    assert result.success is False
+    assert plan.target_mp4.exists()
+    assert plan.target_mp3.exists()
+    assert plan.summary_path.exists()
+    assert raw.read_bytes() == b"raw-video"
+    assert not (plan.target_folder / raw.name).exists()
+    assert "Rohaufnahme wird verschoben." in result.messages
 
 
 def test_execute_processing_plan_uses_cut_source_for_final_media_and_raw_separately(tmp_path):

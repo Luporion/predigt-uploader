@@ -12,7 +12,7 @@ import pytest
 from predigt_uploader import cli
 from predigt_uploader.companion_files import recording_summary_path
 import predigt_uploader.tui_app as tui_module
-from predigt_uploader.config import ConfigLoadError
+from predigt_uploader.config import ConfigLoadError, load_config
 from predigt_uploader.folders import resolve_folder, suggest_folder
 from predigt_uploader.models import AppConfig, SermonInfo, VimeoConfig
 from predigt_uploader.processing import ProcessingExecutionResult, execute_processing_plan
@@ -30,6 +30,7 @@ from predigt_uploader.publishing.vimeo import (
     VimeoUploadError,
     VimeoUploadStoppedError,
 )
+from predigt_uploader.publishing.streaming_video_provider import StreamingVideo, StreamingVideoList
 from predigt_uploader.tui_app import (
     TUI_FILE_CHOICE_LIMIT,
     TUI_PROCESSING_DONE_LABEL,
@@ -62,10 +63,12 @@ from predigt_uploader.tui_app import (
     build_tui_processing_warning_text,
     build_tui_progress_text,
     build_tui_processing_error_status,
+    build_tui_raw_archive_failure_text,
     build_tui_processing_review_action_text,
     build_tui_processing_started_status,
     build_tui_processing_success_status,
     build_tui_processing_success_banner,
+    build_tui_raw_completion_status,
     build_tui_vimeo_error_text,
     build_tui_vimeo_completion_banner,
     build_tui_vimeo_completion_details,
@@ -141,6 +144,25 @@ from predigt_uploader.tui_app import (
     TuiTargetConflict,
     validate_tui_metadata,
 )
+
+
+class _TuiFakeStreamingVideoProviderService:
+    def __init__(self, videos=(), player_link="https://play.example.test/video") -> None:
+        self.videos = tuple(videos)
+        self.player_link = player_link
+        self.list_calls = 0
+        self.player_calls: list[str] = []
+
+    def list_videos(self):
+        self.list_calls += 1
+        return StreamingVideoList(self.videos, len(self.videos))
+
+    def list_stream_recordings(self):
+        return self.list_videos()
+
+    def get_player_link(self, video_ref: str):
+        self.player_calls.append(video_ref)
+        return self.player_link
 from predigt_uploader.workflow_state import (
     WORKFLOW_ORIGIN_DIRECT_VIMEO,
     WORKFLOW_ORIGIN_NORMAL,
@@ -2274,6 +2296,59 @@ def test_tui_processing_success_banner_is_green_and_clear(tmp_path):
     assert "Die Dateien wurden erstellt und der Zielordner wurde geoeffnet." in banner
 
 
+def test_tui_raw_completion_status_distinguishes_move_keep_and_no_raw(tmp_path):
+    raw = tmp_path / "vmix" / "aufnahme.mp4"
+    cut = tmp_path / "schnitt" / "aufnahme-export.mp4"
+    raw.parent.mkdir()
+    cut.parent.mkdir()
+    raw.write_bytes(b"raw")
+    cut.write_bytes(b"cut")
+    config = AppConfig(tmp_path / "vmix", tmp_path / "Aufnahmen", tmp_path / "Predigten")
+    info = SermonInfo(date(2026, 9, 13), "Test", "Johannes 3,16", "Max Muster")
+    move_plan = build_tui_processing_plan(
+        config=config,
+        source_mp4=cut,
+        raw_recording=raw,
+        already_cut=False,
+        raw_action="move",
+        info=info,
+    )
+    keep_plan = replace(move_plan, raw_action="keep")
+    cut_only_plan = replace(move_plan, raw_recording=None, raw_action="none")
+
+    assert build_tui_raw_completion_status(move_plan) == "✓ Rohaufnahme in Zielordner verschoben"
+    assert build_tui_raw_completion_status(keep_plan) == "○ Rohaufnahme am ursprünglichen Ort belassen"
+    assert build_tui_raw_completion_status(cut_only_plan) == "Rohaufnahme-Aktion: keine Rohaufnahme"
+
+
+def test_tui_raw_move_failure_message_preserves_completed_files_and_source(tmp_path):
+    raw = tmp_path / "vmix" / "aufnahme.mp4"
+    cut = tmp_path / "schnitt" / "aufnahme-export.mp4"
+    raw.parent.mkdir()
+    cut.parent.mkdir()
+    raw.write_bytes(b"raw")
+    cut.write_bytes(b"cut")
+    plan = build_tui_processing_plan(
+        config=AppConfig(tmp_path / "vmix", tmp_path / "Aufnahmen", tmp_path / "Predigten"),
+        source_mp4=cut,
+        raw_recording=raw,
+        already_cut=False,
+        raw_action="move",
+        info=SermonInfo(date(2026, 9, 13), "Test", "Johannes 3,16", "Max Muster"),
+    )
+    plan.target_folder.mkdir(parents=True)
+    plan.target_mp4.write_bytes(b"final")
+    plan.target_mp3.write_bytes(b"audio")
+    plan.summary_path.write_text("Zusammenfassung", encoding="utf-8")
+
+    text = build_tui_raw_archive_failure_text(plan, ("Rohaufnahme wird verschoben.",))
+
+    assert "Rohaufnahme konnte nicht verschoben werden" in text
+    assert "fertigen Dateien sind vorhanden" in text
+    assert "weiterhin am ursprünglichen Ort" in text
+    assert str(raw) in text
+
+
 def test_tui_steps_five_to_seven_keep_scroll_areas_and_completion_screen():
     source = (Path(__file__).resolve().parents[1] / "src" / "predigt_uploader" / "tui_app.py").read_text(
         encoding="utf-8"
@@ -2372,6 +2447,102 @@ def _tui_vimeo_plan_and_state(tmp_path, *, vimeo: VimeoState | None = None):
     return config, plan, state_path
 
 
+@pytest.mark.parametrize(
+    ("raw_archive_mode", "raw_was_moved"),
+    (("move", True), ("keep", False)),
+)
+def test_tui_real_cut_workflow_applies_raw_archive_setting_and_preserves_original_path(
+    tmp_path,
+    monkeypatch,
+    raw_archive_mode,
+    raw_was_moved,
+):
+    raw_folder = tmp_path / "vMixStorage"
+    raw_folder.mkdir()
+    raw = raw_folder / "Gottesdienst 13.09.2026.mp4"
+    raw.write_bytes(b"original-raw-video")
+    config = AppConfig(
+        vmix_storage=raw_folder,
+        recordings_base=tmp_path / "Aufnahmen",
+        mp3_base=tmp_path / "Predigten",
+        raw_archive_mode=raw_archive_mode,
+        vimeo=VimeoConfig("59930802", "1320477", "Predigten"),
+    )
+    monkeypatch.setattr(tui_module, "load_tui_config", lambda _path=None: config)
+    executed_plans = []
+
+    def execute_with_fake_ffmpeg(plan, app_config, progress=None):
+        executed_plans.append(plan)
+        return execute_processing_plan(
+            plan,
+            app_config,
+            progress=progress,
+            folder_opener=lambda _folder: None,
+            mp3_converter=lambda _source, target, _config: target.write_bytes(b"final-audio"),
+            ffmpeg_checker=lambda _config: True,
+        )
+
+    monkeypatch.setattr(tui_module, "execute_processing_plan", execute_with_fake_ffmpeg)
+
+    async def exercise() -> None:
+        from textual.widgets import Button, Input
+
+        app = build_tui_app(speaker_store=SpeakerHistory(tmp_path / "speakers.json"))
+        async with app.run_test(size=(100, 32)) as pilot:
+            for selector in ("#new", "#confirm", "#raw", "#newest"):
+                app.screen.query_one(selector, Button).press()
+                await _settle_tui(pilot)
+
+            assert app.screen.raw_recording == raw
+            exported = raw_folder / "Gottesdienst 13.09.2026 - Export.mp4"
+            exported.write_bytes(b"cut-export-video")
+            app.screen.query_one("#next", Button).press()
+            await _settle_tui(pilot)
+            assert app.screen.raw_recording == raw
+
+            app.screen.query_one("#use", Button).press()
+            await _settle_tui(pilot)
+            assert app.screen.raw_recording == raw
+            assert app.screen.source_mp4 == exported
+            assert app.screen.already_cut is False
+
+            app.screen.query_one("#title_input", Input).value = "Regressionstest"
+            app.screen.query_one("#bible_input", Input).value = "Johannes 3,16"
+            app.screen.query_one("#speaker_input", Input).value = "Max Muster"
+            await _settle_tui(pilot)
+            app.screen.query_one("#next", Button).press()
+            await _settle_tui(pilot)
+            assert app.screen.raw_recording == raw
+            assert app.screen.source_mp4 == exported
+
+            app.screen.query_one("#target_folder_primary", Button).press()
+            await _settle_tui(pilot)
+            assert app.screen.plan.raw_recording == raw
+            assert app.screen.plan.source_mp4 == exported
+            assert app.screen.plan.raw_action == raw_archive_mode
+
+            app.screen.query_one("#execute", Button).press()
+            await _wait_for_tui_condition(pilot, lambda: bool(app.screen.query("#vimeo_upload")))
+
+            assert len(executed_plans) == 1
+            executed = executed_plans[0]
+            archived_raw = executed.target_folder / raw.name
+            state = load_workflow_state(app.screen.state_path)
+            assert state.paths.raw_recording == raw
+            assert state.paths.cut_mp4 == exported
+            assert state.paths.final_mp4 == executed.target_mp4
+            if raw_was_moved:
+                assert not raw.exists()
+                assert archived_raw.read_bytes() == b"original-raw-video"
+                assert state.paths.archived_raw_recording == archived_raw
+            else:
+                assert raw.read_bytes() == b"original-raw-video"
+                assert not archived_raw.exists()
+                assert state.paths.archived_raw_recording is None
+
+    asyncio.run(exercise())
+
+
 def test_tui_local_processing_success_opens_vimeo_screen_without_upload(tmp_path, monkeypatch):
     cut_folder = tmp_path / "Schnitt"
     cut_folder.mkdir()
@@ -2444,6 +2615,8 @@ def test_tui_local_processing_success_opens_vimeo_screen_without_upload(tmp_path
             assert workflow_state.vimeo.step.status == "pending"
             assert workflow_state.workflow_origin == WORKFLOW_ORIGIN_NORMAL
             assert app.screen.direct_mode is False
+            assert app.screen.plan.raw_recording is None
+            assert workflow_state.paths.raw_recording is None
             assert plan_state_path.is_file()
 
             app.screen.query_one("#vimeo_upload", Button).press()
@@ -2657,9 +2830,42 @@ class _TuiFakeVimeoService:
         return result
 
 
+async def _settle_tui(pilot) -> None:
+    """Drain layout, callbacks, and messages queued for the active Textual screen."""
+    previous_screen = None
+    stable_passes = 0
+    for _ in range(8):
+        await pilot.pause()
+        if pilot.app._exception is not None:
+            raise pilot.app._exception
+        await asyncio.sleep(0)
+        current_screen = pilot.app.screen
+        if current_screen is previous_screen and current_screen.is_mounted:
+            stable_passes += 1
+            if stable_passes == 2:
+                if not await pilot._wait_for_screen():
+                    raise AssertionError("Textual-Screen konnte nicht stabilisiert werden")
+                return
+        else:
+            previous_screen = current_screen
+            stable_passes = 0
+    raise AssertionError("Textual-Screenwechsel wurde nicht rechtzeitig stabil")
+
+
+async def _wait_for_tui_workers(pilot) -> None:
+    """Wait until mounted-screen workers and their UI callbacks are complete."""
+    for _ in range(8):
+        await _settle_tui(pilot)
+        workers = tuple(pilot.app.workers)
+        if workers:
+            await pilot.app.workers.wait_for_complete(workers)
+    await _settle_tui(pilot)
+
+
 async def _wait_for_tui_condition(pilot, condition, *, attempts: int = 160) -> None:
     for _ in range(attempts):
         if condition():
+            await _settle_tui(pilot)
             return
         await pilot.pause(0.05)
     raise AssertionError("Textual-Zustand wurde nicht rechtzeitig erreicht")
@@ -2828,6 +3034,139 @@ def test_tui_vimeo_screen_does_not_upload_on_entry_and_skip_shows_pending_comple
     asyncio.run(exercise())
 
 
+def _stream_test_videos():
+    return (
+        StreamingVideo("1", "eins", "Älterer Gottesdienst", "ondemand", "7", 3600, 1700000000, 1700000000, 1024),
+        StreamingVideo("2", "zwei", "Neuester Stream", "ondemand", "7", 5400, 1800000000, 1800000000, 2048),
+    )
+
+
+def test_stream_recording_filter_and_sort_helpers():
+    videos = _stream_test_videos()
+    assert [item.ref_no for item in tui_module.sort_stream_recordings(videos, "newest")] == ["2", "1"]
+    assert [item.ref_no for item in tui_module.sort_stream_recordings(videos, "oldest")] == ["1", "2"]
+    assert tui_module.filter_stream_recordings(videos, "stream")[0].ref_no == "2"
+
+
+def test_tui_main_menu_groups_recording_actions_before_stream_library(tmp_path, monkeypatch):
+    config = AppConfig(
+        vmix_storage=tmp_path / "vmix",
+        recordings_base=tmp_path / "recordings",
+        mp3_base=tmp_path / "mp3",
+        cut_mp4_folder=tmp_path / "cut",
+    )
+    monkeypatch.setattr(tui_module, "load_tui_config", lambda _path=None: config)
+
+    async def exercise() -> None:
+        from textual.widgets import Button, Static
+
+        app = build_tui_app()
+        async with app.run_test(size=(110, 36)) as pilot:
+            await pilot.pause()
+            actions = app.screen.query_one("#start_actions")
+            button_ids = [button.id for button in actions.query(Button)]
+
+            assert button_ids[:4] == ["new", "direct_vimeo", "stream_recordings", "files"]
+            assert button_ids[-3:] == ["settings", "systemcheck", "quit"]
+
+            stream_button = app.screen.query_one("#stream_recordings", Button)
+            assert stream_button.label.plain == "Vollständige Stream-Aufzeichnungen"
+            stream_note = app.screen.query_one("#stream_recordings_note", Static)
+            assert (
+                "Vollständige Aufzeichnungen von StreamingVideoProvider ansehen und Zuschauer-Links abrufen."
+                in str(stream_note.render())
+            )
+            stream_group = app.screen.query_one("#stream_recordings_group")
+            assert stream_button.parent is stream_group
+            assert stream_note.parent is stream_group
+            assert app.screen.query_one("#quit", Button).region.bottom <= app.screen.region.bottom
+
+    asyncio.run(exercise())
+
+
+def test_tui_stream_recordings_load_select_and_open(tmp_path, monkeypatch):
+    config = AppConfig(
+        vmix_storage=tmp_path / "vmix",
+        recordings_base=tmp_path / "recordings",
+        mp3_base=tmp_path / "mp3",
+        cut_mp4_folder=tmp_path / "cut",
+    )
+    monkeypatch.setattr(tui_module, "load_tui_config", lambda _path=None: config)
+    opened: list[str] = []
+    copied: list[str] = []
+    monkeypatch.setattr(tui_module.webbrowser, "open", lambda link: opened.append(link) or True)
+    service = _TuiFakeStreamingVideoProviderService(_stream_test_videos())
+
+    async def exercise() -> None:
+        from textual.widgets import Button, DataTable, Input, Static
+
+        app = build_tui_app(streaming_video_provider_service_factory=lambda: service)
+        monkeypatch.setattr(type(app), "copy_to_clipboard", lambda _self, value: copied.append(value))
+        async with app.run_test(size=(110, 36)) as pilot:
+            await pilot.pause()
+            assert app.screen.query_one("#stream_recordings", Button)
+            app.screen.query_one("#stream_recordings", Button).press()
+            await pilot.pause()
+            await _wait_for_tui_condition(
+                pilot,
+                lambda: "2 Aufzeichnungen" in str(app.screen.query_one("#stream_recordings_status", Static).render()),
+            )
+            table = app.screen.query_one("#stream_recordings_table", DataTable)
+            assert table.row_count == 2
+            assert "Neuester Stream" in str(table.get_row_at(0))
+            app.screen.query_one("#stream_recordings_search", Input).value = "älter"
+            await pilot.pause()
+            assert table.row_count == 1
+            table.focus()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert not app.screen.query_one("#stream_recordings_open", Button).disabled
+            app.screen.query_one("#stream_recordings_open", Button).press()
+            await _wait_for_tui_condition(pilot, lambda: bool(opened))
+            assert opened == ["https://play.example.test/video"]
+            assert service.player_calls == ["1"]
+            app.screen.query_one("#stream_recordings_copy", Button).press()
+            await pilot.pause()
+            assert copied == ["https://play.example.test/video"]
+            assert service.player_calls == ["1"]
+
+    asyncio.run(exercise())
+
+
+def test_tui_stream_recordings_empty_and_settings_controls(tmp_path, monkeypatch):
+    config = AppConfig(
+        vmix_storage=tmp_path / "vmix",
+        recordings_base=tmp_path / "recordings",
+        mp3_base=tmp_path / "mp3",
+        cut_mp4_folder=tmp_path / "cut",
+    )
+    monkeypatch.setattr(tui_module, "load_tui_config", lambda _path=None: config)
+    service = _TuiFakeStreamingVideoProviderService()
+
+    async def exercise() -> None:
+        from textual.widgets import Button, Static
+
+        app = build_tui_app(streaming_video_provider_service_factory=lambda: service)
+        async with app.run_test(size=(110, 36)) as pilot:
+            await _settle_tui(pilot)
+            assert await pilot.click("#stream_recordings")
+            await _wait_for_tui_workers(pilot)
+            await _wait_for_tui_condition(
+                pilot,
+                lambda: "Keine Stream-Aufzeichnungen" in str(app.screen.query_one("#stream_recordings_status", Static).render()),
+            )
+            assert await pilot.click("#stream_recordings_back")
+            await _settle_tui(pilot)
+            assert await pilot.click("#settings")
+            await _settle_tui(pilot)
+            assert app.screen.query_one("#settings_save_svp", Button)
+            assert app.screen.query_one("#settings_check_svp", Button)
+            assert app.screen.query_one("#settings_remove_svp", Button)
+            await _settle_tui(pilot)
+
+    asyncio.run(exercise())
+
+
 def test_tui_vimeo_website_banner_stays_visible_while_vimeo_is_processing(tmp_path, monkeypatch):
     existing = VimeoState(
         step=StepState("complete"),
@@ -2921,17 +3260,36 @@ def test_tui_vimeo_library_loads_filters_selects_and_exposes_real_capabilities(t
     asyncio.run(exercise())
 
 
-def test_tui_vimeo_library_has_clear_empty_and_error_states(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    ("library_case", "expected_text"),
+    (("empty", "ist leer"), ("error", "Keine Internetverbindung")),
+)
+def test_tui_vimeo_library_has_clear_empty_and_error_states(
+    tmp_path, monkeypatch, library_case, expected_text
+):
     config, _plan, _state_path = _tui_vimeo_plan_and_state(tmp_path)
     monkeypatch.setattr(tui_module, "load_tui_config", lambda _path=None: config)
+    empty = VimeoLibraryResult(
+        "Immanuelgemeinde Wolfsburg",
+        VimeoFolder("1320477", "/projects/1320477", "Predigten"),
+        (),
+    )
+    service = (
+        _TuiFakeVimeoService(library_result=empty)
+        if library_case == "empty"
+        else _TuiFakeVimeoService(
+            library_error=VimeoUploadError("Keine Internetverbindung")
+        )
+    )
 
-    async def exercise(service, expected_text: str) -> None:
+    async def exercise() -> None:
         from textual.widgets import Button, Static
 
         app = build_tui_app(vimeo_service_factory=lambda _config: service)
         async with app.run_test(size=(100, 32)) as pilot:
-            app.screen.query_one("#vimeo_library", Button).press()
-            await pilot.pause()
+            await _settle_tui(pilot)
+            assert await pilot.click("#vimeo_library")
+            await _wait_for_tui_workers(pilot)
             await _wait_for_tui_condition(
                 pilot,
                 lambda: expected_text in str(
@@ -2939,19 +3297,9 @@ def test_tui_vimeo_library_has_clear_empty_and_error_states(tmp_path, monkeypatc
                 ),
             )
             assert app.screen.query_one("#vimeo_library_actions").region.bottom <= app.screen.region.bottom
+            await _settle_tui(pilot)
 
-    empty = VimeoLibraryResult(
-        "Immanuelgemeinde Wolfsburg",
-        VimeoFolder("1320477", "/projects/1320477", "Predigten"),
-        (),
-    )
-    asyncio.run(exercise(_TuiFakeVimeoService(library_result=empty), "ist leer"))
-    asyncio.run(
-        exercise(
-            _TuiFakeVimeoService(library_error=VimeoUploadError("Keine Internetverbindung")),
-            "Keine Internetverbindung",
-        )
-    )
+    asyncio.run(exercise())
 
 
 def test_tui_vimeo_library_shows_first_page_then_caches_and_refreshes(tmp_path, monkeypatch):
@@ -3857,15 +4205,18 @@ def test_tui_direct_vimeo_entry_uses_the_shared_progress_screen(tmp_path, monkey
         )
         async with app.run_test(size=(100, 32)) as pilot:
             app.screen.query_one("#direct_vimeo", Button).press()
-            await pilot.pause(0.2)
+            await _settle_tui(pilot)
             assert calls == 0
             assert app.screen.query_one("#direct_vimeo_actions").region.bottom <= app.screen.region.bottom
 
             app.screen.query_one("#direct_vimeo_select", Button).press()
-            await pilot.pause(0.2)
+            await _settle_tui(pilot)
             assert calls == 0
             assert app.screen.query_one("#vimeo_upload", Button)
-            assert load_workflow_state(app.screen.state_path).paths.final_mp4 == mp4
+            direct_state = load_workflow_state(app.screen.state_path)
+            assert direct_state.paths.final_mp4 == mp4
+            assert direct_state.paths.raw_recording is None
+            assert app.screen.plan.raw_recording is None
 
             app.screen.query_one("#vimeo_upload", Button).press()
             await _wait_for_tui_condition(
@@ -3966,7 +4317,7 @@ def test_tui_settings_store_masked_token_speakers_and_general_values(tmp_path, m
     service = _TuiFakeVimeoService()
 
     async def exercise() -> None:
-        from textual.widgets import Button, Input
+        from textual.widgets import Button, Input, Select
 
         app = build_tui_app(
             credential_manager=manager,
@@ -3975,7 +4326,12 @@ def test_tui_settings_store_masked_token_speakers_and_general_values(tmp_path, m
         )
         async with app.run_test(size=(100, 32)) as pilot:
             app.screen.query_one("#settings", Button).press()
-            await pilot.pause(0.2)
+            await _settle_tui(pilot)
+            raw_mode = app.screen.query_one("#settings_raw_mode", Select)
+            assert raw_mode.value == "move"
+            assert "nach erfolgreicher Verarbeitung" in str(
+                app.screen.query_one("#settings_raw_mode_help").render()
+            )
             token = app.screen.query_one("#settings_vimeo_token", Input)
             assert token.password is True
             token.value = "safe-token-value"
@@ -3992,6 +4348,7 @@ def test_tui_settings_store_masked_token_speakers_and_general_values(tmp_path, m
             app.screen.query_one("#settings_speaker_name", Input).value = "  Max   Müller "
             app.screen.query_one("#settings_add_speaker", Button).press()
             app.screen.query_one("#settings_year_template", Input).value = "{year} Video+Audio"
+            raw_mode.value = "keep"
             app.screen.query_one("#settings_save_general", Button).press()
             await pilot.pause(0.2)
 
@@ -3999,6 +4356,8 @@ def test_tui_settings_store_masked_token_speakers_and_general_values(tmp_path, m
             saved = appdata / "PredigtUploader" / "config.toml"
             text = saved.read_text(encoding="utf-8")
             assert 'year_folder_template = "{year} Video+Audio"' in text
+            assert 'raw_archive_mode = "keep"' in text
+            assert load_config(saved).raw_archive_mode == "keep"
             assert "safe-token-value" not in text
             assert app.screen.query_one("#settings_actions").region.bottom <= app.screen.region.bottom
 
@@ -4023,8 +4382,10 @@ def test_tui_settings_selects_named_vimeo_folder_without_exposing_id_input(tmp_p
 
         app = build_tui_app(vimeo_service_factory=lambda _config: service)
         async with app.run_test(size=(88, 28)) as pilot:
-            app.screen.query_one("#settings", Button).press()
-            await pilot.pause()
+            await _settle_tui(pilot)
+            app.screen.query_one("#settings", Button).focus(scroll_visible=False)
+            await pilot.press("enter")
+            await _settle_tui(pilot)
             assert "Predigten" in str(
                 app.screen.query_one("#settings_vimeo_folder_display", Static).render()
             )
@@ -4044,8 +4405,8 @@ def test_tui_settings_selects_named_vimeo_folder_without_exposing_id_input(tmp_p
                 select_button.region,
             )
             assert select_button.region.width > 20
-            select_button.press()
-            await pilot.pause()
+            assert await pilot.click(select_button)
+            await _wait_for_tui_workers(pilot)
             await _wait_for_tui_condition(
                 pilot,
                 lambda: app.screen.query_one("#vimeo_folder_browser_table", DataTable).row_count == 1,
@@ -4054,23 +4415,28 @@ def test_tui_settings_selects_named_vimeo_folder_without_exposing_id_input(tmp_p
             assert "AKTUELL" in str(table.get_row_at(0)[0])
             table.focus()
             await pilot.press("enter")  # Predigten öffnen
+            await _settle_tui(pilot)
             assert not (appdata / "PredigtUploader" / "config.toml").exists()
-            app.screen.query_one("#vimeo_folder_browser_parent", Button).press()
-            await pilot.pause()
+            assert await pilot.click("#vimeo_folder_browser_parent")
+            await _settle_tui(pilot)
             assert app.screen.query_one("#vimeo_folder_browser_parent", Button).disabled
             table.focus()
             await pilot.press("enter")  # Predigten erneut öffnen
+            await _settle_tui(pilot)
             table.focus()
             await pilot.press("enter")  # 2026 öffnen
+            await _settle_tui(pilot)
             assert not (appdata / "PredigtUploader" / "config.toml").exists()
-            app.screen.query_one("#vimeo_folder_browser_select", Button).press()
-            await pilot.pause()
+            app.screen.query_one("#vimeo_folder_browser_select", Button).focus(scroll_visible=False)
+            await pilot.press("enter")
+            await _settle_tui(pilot)
             assert "2026" in str(app.screen.query_one("#settings_vimeo_folder_display", Static).render())
             assert list(app.screen.query("#settings_vimeo_folder_id")) == []
             saved = (appdata / "PredigtUploader" / "config.toml").read_text(encoding="utf-8")
             assert 'target_folder_id = "2000"' in saved
             assert 'target_folder_name = "2026"' in saved
             assert app.screen.query_one("#settings_actions").region.bottom <= app.screen.region.bottom
+            await _settle_tui(pilot)
 
     asyncio.run(exercise())
 
@@ -4283,14 +4649,18 @@ def test_tui_speaker_suggestions_are_keyboard_reachable(tmp_path, monkeypatch):
         async with app.run_test(size=(100, 32)) as pilot:
             for selector in ("#new", "#confirm", "#cut", "#newest"):
                 app.screen.query_one(selector, Button).press()
-                await pilot.pause(0.05)
+                await _settle_tui(pilot)
             field = app.screen.query_one("#speaker_input", Input)
             field.value = "max"
-            await pilot.pause()
+            await _wait_for_tui_condition(
+                pilot,
+                lambda: app.screen.query_one("#speaker_suggestions", OptionList).display,
+            )
             suggestions = app.screen.query_one("#speaker_suggestions", OptionList)
             assert suggestions.display
             field.focus()
             await pilot.press("down", "enter")
+            await _settle_tui(pilot)
             assert field.value == "Max Müller"
 
     asyncio.run(exercise())

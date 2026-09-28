@@ -1,6 +1,9 @@
 from datetime import date, datetime, timedelta
 from pathlib import Path
 import subprocess
+from types import SimpleNamespace
+
+import predigt_uploader.cli as cli
 
 import pytest
 
@@ -1810,3 +1813,43 @@ def test_workflow_log_disables_itself_when_writing_fails(monkeypatch, tmp_path):
     log.event("Das wird nicht geschrieben.")
 
     assert log.enabled is False
+def test_svp_check_is_read_only_and_reports_video_count(monkeypatch, capsys):
+    service = SimpleNamespace(
+        list_videos=lambda: SimpleNamespace(count=842, videos=())
+    )
+    monkeypatch.setattr(cli, "_create_streaming_video_provider_service", lambda: service)
+
+    assert cli.main(["svp-check"]) == 0
+    output = capsys.readouterr().out
+    assert "StreamingVideoProvider-Verbindung: OK" in output
+    assert "842 Videos" in output
+    assert "keine Videos verändert" in output
+
+
+def test_svp_diagnose_reports_recordings_properties_and_download_question(monkeypatch, capsys):
+    from predigt_uploader.publishing.streaming_video_provider import (
+        StreamingVideo,
+        StreamingVideoList,
+        StreamingVideoProperty,
+    )
+
+    live = StreamingVideo("10", "live", "Gemeinde live", "live", "", 0, 20, 20, 0)
+    recording = StreamingVideo("11", "rec", "Gottesdienst", "ondemand", "7", 3600, 30, 30, 100)
+
+    class Service:
+        def list_videos(self):
+            return StreamingVideoList((live, recording), 2)
+
+        def list_recordings(self, video_ref):
+            assert video_ref == "10"
+            return StreamingVideoList((recording,), 1)
+
+        def get_video_properties(self, video_ref):
+            return (StreamingVideoProperty("1", "Title", "Test"),)
+
+    monkeypatch.setattr(cli, "_create_streaming_video_provider_service", Service)
+    assert cli.main(["svp-diagnose"]) == 0
+    output = capsys.readouterr().out
+    assert "Live-Broadcasts erkannt: 1" in output
+    assert "1 Aufzeichnungen" in output
+    assert "Downloadfreigabe über dokumentierte API derzeit noch nicht bestätigt" in output

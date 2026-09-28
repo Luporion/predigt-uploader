@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import date
 
 import pytest
@@ -9,6 +10,8 @@ from predigt_uploader.models import SermonInfo
 from predigt_uploader.companion_files import recording_summary_path, recording_workflow_state_path
 from predigt_uploader.workflow_state import (
     WORKFLOW_STATE_FILENAME,
+    WORKFLOW_ORIGIN_DIRECT_VIMEO,
+    WORKFLOW_ORIGIN_NORMAL,
     StepState,
     VimeoState,
     WorkflowState,
@@ -49,6 +52,7 @@ def test_workflow_state_round_trip_preserves_metadata_paths_and_pending_publishi
     assert loaded.sermon == state.sermon
     assert loaded.paths == state.paths
     assert loaded.local_preparation.status == "complete"
+    assert loaded.workflow_origin == WORKFLOW_ORIGIN_NORMAL
     assert loaded.vimeo.step.status == "pending"
     assert loaded.vimeo.video_id is None
     assert loaded.vimeo.video_url is None
@@ -96,6 +100,7 @@ def test_workflow_state_loads_minimal_older_state_with_safe_defaults(tmp_path):
     loaded = load_workflow_state(path)
 
     assert loaded.schema_version == 1
+    assert loaded.workflow_origin == WORKFLOW_ORIGIN_NORMAL
     assert loaded.sermon.sermon_type == "Predigt"
     assert loaded.sermon.bible_reference == ""
     assert loaded.paths.final_mp4 is None
@@ -107,7 +112,15 @@ def test_workflow_state_loads_minimal_older_state_with_safe_defaults(tmp_path):
     assert loaded.wordpress_post.step.status == "pending"
 
     migrated_path = save_workflow_state(loaded, path)
-    assert load_workflow_state(migrated_path).schema_version == 5
+    assert load_workflow_state(migrated_path).schema_version == 7
+
+
+def test_workflow_state_round_trip_preserves_direct_vimeo_origin(tmp_path):
+    state = replace(_completed_state(tmp_path), workflow_origin=WORKFLOW_ORIGIN_DIRECT_VIMEO)
+
+    loaded = load_workflow_state(save_workflow_state(state))
+
+    assert loaded.workflow_origin == WORKFLOW_ORIGIN_DIRECT_VIMEO
 
 
 def test_workflow_state_migrates_legacy_vimeo_folder_names(tmp_path):

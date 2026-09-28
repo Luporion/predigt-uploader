@@ -12,6 +12,7 @@ from predigt_uploader.models import AppConfig, SermonInfo, VimeoConfig
 from predigt_uploader.publishing.vimeo import (
     RequestsVimeoTransport,
     VimeoApiError,
+    VimeoCleanupError,
     VimeoConfigurationError,
     VimeoCredentialError,
     VimeoEmbedError,
@@ -385,7 +386,8 @@ def test_preflight_does_not_treat_connection_options_as_hard_capabilities():
 
     result = _service(no_upload).preflight()
 
-    assert result.permission_note == "Die eigentliche Upload-Berechtigung wird beim Upload geprüft."
+    assert "Lesender Zugriff ist bestätigt" in result.permission_note
+    assert "Ordnerzuordnung (interact)" in result.permission_note
 
 
 def test_preflight_rejects_wrong_owner_or_control_name():
@@ -680,7 +682,7 @@ def test_user_stop_keeps_confirmed_tus_offset_and_retry_resumes_without_duplicat
     transport = ResumableTransport()
     service = _service(transport, chunk_size=4, read_size=2)
 
-    with pytest.raises(VimeoUploadStoppedError, match="auf Wunsch gestoppt") as stopped:
+    with pytest.raises(VimeoUploadStoppedError, match="pausiert") as stopped:
         service.publish(path, should_cancel=lambda: transport.offset >= 4)
 
     state = load_workflow_state(path).vimeo
@@ -713,6 +715,96 @@ def test_user_stop_before_remote_creation_does_not_invent_remote_state(tmp_path)
     assert state.video_uri is None
     assert state.upload_uri is None
     assert not any(method == "POST_JSON" for method, _ in transport.calls)
+
+
+def test_final_abort_deletes_owned_remote_and_clears_only_vimeo_state(tmp_path):
+    path = _state_path(tmp_path)
+    transport = FakeTransport()
+    service = _service(transport, chunk_size=4, read_size=2)
+
+    with pytest.raises(VimeoUploadStoppedError):
+        service.publish(path, should_cancel=lambda: transport.offset >= 4)
+
+    before = load_workflow_state(path)
+    local_bytes = before.paths.final_mp4.read_bytes()
+    assert before.vimeo.remote_created_by_app is True
+
+    result = service.abort_upload(path)
+    after = load_workflow_state(path)
+
+    assert result.video_id == VIDEO_ID
+    assert result.remote_deleted is True
+    assert transport.deleted_paths == [f"/videos/{VIDEO_ID}"]
+    assert after.vimeo.video_id is None
+    assert after.vimeo.upload_uri is None
+    assert after.vimeo.step.status == "pending"
+    assert after.paths == before.paths
+    assert after.sermon == before.sermon
+    assert after.paths.final_mp4.read_bytes() == local_bytes
+
+    repeated = service.abort_upload(path)
+    assert repeated.video_id is None
+    assert transport.deleted_paths == [f"/videos/{VIDEO_ID}"]
+
+
+def test_final_abort_treats_remote_404_as_successful_cleanup(tmp_path):
+    state = VimeoState(
+        step=StepState("stopped"),
+        video_id=VIDEO_ID,
+        video_uri=f"/videos/{VIDEO_ID}",
+        upload_uri=UPLOAD_URL,
+        remote_created_by_app=True,
+    )
+    path = _state_path(tmp_path, vimeo=state)
+
+    class MissingDeleteTransport(FakeTransport):
+        def delete(self, request_path):
+            raise VimeoApiError("Nicht gefunden", "HTTP 404", status_code=404)
+
+    result = _service(MissingDeleteTransport()).abort_upload(path)
+
+    assert result.already_missing is True
+    assert load_workflow_state(path).vimeo.video_id is None
+
+
+@pytest.mark.parametrize("status_code", [None, 401, 403, 429, 503])
+def test_final_abort_delete_failure_preserves_remote_state(tmp_path, status_code):
+    original = VimeoState(
+        step=StepState("stopped"),
+        video_id=VIDEO_ID,
+        video_uri=f"/videos/{VIDEO_ID}",
+        video_url="https://vimeo.com/known",
+        upload_uri=UPLOAD_URL,
+        upload_offset=4,
+        upload_size=10,
+        remote_created_by_app=True,
+    )
+    path = _state_path(tmp_path, vimeo=original)
+
+    class FailedDeleteTransport(FakeTransport):
+        def delete(self, request_path):
+            raise VimeoApiError("Löschen fehlgeschlagen", "temporär", status_code=status_code)
+
+    with pytest.raises(VimeoCleanupError, match="konnte nicht automatisch gelöscht"):
+        _service(FailedDeleteTransport()).abort_upload(path)
+
+    assert load_workflow_state(path).vimeo == original
+
+
+def test_final_abort_refuses_remote_without_app_ownership(tmp_path):
+    original = VimeoState(
+        step=StepState("stopped"),
+        video_id=VIDEO_ID,
+        video_uri=f"/videos/{VIDEO_ID}",
+    )
+    path = _state_path(tmp_path, vimeo=original)
+    transport = FakeTransport()
+
+    with pytest.raises(VimeoCleanupError, match="Herkunft nicht sicher"):
+        _service(transport).abort_upload(path)
+
+    assert transport.deleted_paths == []
+    assert load_workflow_state(path).vimeo == original
 
 
 def test_successful_publish_streams_with_progress_assigns_and_verifies_folder(tmp_path):
@@ -924,6 +1016,39 @@ def test_folder_assignment_failure_is_not_reported_complete_and_keeps_video_id(t
     assert state.vimeo.upload_status == "complete"
     assert state.vimeo.uploaded_at is not None
     assert state.vimeo.upload_uri is None
+
+    patch_calls = len([call for call in transport.calls if call[0] == "PATCH"])
+    create_calls = len([call for call in transport.calls if call == ("POST_JSON", "/me/videos")])
+    transport.assign_fails = False
+
+    result = _service(transport).publish(path)
+
+    assert result.video_id == VIDEO_ID
+    assert len([call for call in transport.calls if call[0] == "PATCH"]) == patch_calls
+    assert len([call for call in transport.calls if call == ("POST_JSON", "/me/videos")]) == create_calls
+
+
+def test_missing_interact_scope_is_explained_after_completed_upload(tmp_path):
+    path = _state_path(tmp_path)
+
+    class MissingInteractTransport(FakeTransport):
+        def post_empty(self, endpoint, payload):
+            self.calls.append(("POST_EMPTY", endpoint))
+            raise VimeoApiError(
+                "Zugriff verweigert.",
+                'HTTP 403: Your access token does not have the "interact" scope.',
+                status_code=403,
+            )
+
+    with pytest.raises(VimeoFolderError) as error:
+        _service(MissingInteractTransport()).publish(path)
+
+    assert "Upload erfolgreich" in error.value.user_message
+    assert "Berechtigung ‚interact‘" in error.value.user_message
+    assert "Einstellungen → Vimeo" in error.value.user_message
+    state = load_workflow_state(path).vimeo
+    assert state.upload_status == "complete"
+    assert state.video_id == VIDEO_ID
 
 
 def test_video_uri_without_separate_id_is_remote_checked_and_never_duplicated(tmp_path):

@@ -47,11 +47,15 @@ class VimeoUploadError(VimeoError):
 class VimeoUploadStoppedError(VimeoError):
     def __init__(self, confirmed_bytes: int, total_bytes: int) -> None:
         super().__init__(
-            "Der Vimeo-Upload wurde auf Wunsch gestoppt. Ein erneuter Versuch kann den bestätigten Stand fortsetzen.",
+            "Der Vimeo-Upload wurde pausiert. Ein erneuter Versuch kann den bestätigten Stand fortsetzen.",
             f"Von Vimeo bestätigter tus-Offset: {confirmed_bytes} von {total_bytes} Bytes.",
         )
         self.confirmed_bytes = confirmed_bytes
         self.total_bytes = total_bytes
+
+
+class VimeoCleanupError(VimeoError):
+    pass
 
 
 class VimeoFolderError(VimeoError):
@@ -176,6 +180,14 @@ class VimeoPublishResult:
     embed_html: str
     folder_uri: str
     transcode_status: str | None = None
+
+
+@dataclass(frozen=True)
+class VimeoAbortResult:
+    video_id: str | None
+    video_url: str | None
+    remote_deleted: bool
+    already_missing: bool = False
 
 
 @dataclass(frozen=True)
@@ -585,7 +597,11 @@ class VimeoPublishingService:
             authenticated_user_name=str(me.get("name") or "(ohne Namen)"),
             team_owner_name=str(owner.get("name") or "(ohne Namen)"),
             folder=folder,
-            permission_note="Die eigentliche Upload-Berechtigung wird beim Upload geprüft.",
+            permission_note=(
+                "Lesender Zugriff ist bestätigt. Die Vimeo-Schreibrechte für Upload, Bearbeiten, "
+                "Ordnerzuordnung (interact) und Löschen lassen sich ohne eine verändernde API-Aktion "
+                "nicht vollständig prüfen und werden beim jeweiligen Vorgang geprüft."
+            ),
         )
 
     def preview_upload(self, state_path: Path) -> VimeoUploadPreview:
@@ -906,9 +922,54 @@ class VimeoPublishingService:
         video_id = video_id.strip()
         if not video_id.isdigit():
             raise VimeoStateConflictError(
-                "Das Vimeo-Testvideo kann ohne eindeutige numerische Video-ID nicht sicher gelöscht werden."
+                "Das Vimeo-Video kann ohne eindeutige numerische Video-ID nicht sicher gelöscht werden."
             )
         self.transport.delete(f"/videos/{video_id}")
+
+    def abort_upload(self, state_path: Path) -> VimeoAbortResult:
+        """Delete one app-created remote attempt and clear only its Vimeo state."""
+        state = load_workflow_state(state_path)
+        video_id = _known_video_id(state.vimeo)
+        video_url = state.vimeo.video_url
+        owned_attempt = state.vimeo.remote_created_by_app or bool(
+            state.vimeo.upload_uri
+            and state.vimeo.step.status in {"in_progress", "stopped", "failed"}
+        )
+        if video_id and not owned_attempt:
+            raise VimeoCleanupError(
+                "Der Vimeo-Eintrag wurde nicht automatisch gelöscht, weil seine Herkunft nicht sicher bestätigt werden konnte.",
+                f"Video-ID {video_id} bleibt im Workflow-State erhalten.",
+            )
+
+        already_missing = False
+        if video_id:
+            try:
+                self.delete_video(video_id)
+            except VimeoApiError as exc:
+                if exc.status_code == 404:
+                    already_missing = True
+                else:
+                    raise VimeoCleanupError(
+                        "Der Upload wurde lokal beendet, aber der Vimeo-Eintrag konnte nicht automatisch gelöscht werden.",
+                        f"Video-ID {video_id}. {exc.admin_hint or exc.user_message}",
+                    ) from exc
+
+        reset = replace(
+            state,
+            vimeo=VimeoState(
+                step=StepState(
+                    "pending",
+                    "Der vorherige Vimeo-Upload wurde endgültig abgebrochen. Ein neuer Upload ist möglich.",
+                )
+            ),
+        )
+        save_workflow_state(reset, state_path)
+        return VimeoAbortResult(
+            video_id=video_id,
+            video_url=video_url,
+            remote_deleted=bool(video_id) and not already_missing,
+            already_missing=already_missing,
+        )
 
     def get_video_embed(
         self,
@@ -1061,6 +1122,7 @@ class VimeoPublishingService:
                 upload_uri=upload_uri,
                 upload_offset=0,
                 upload_size=video_path.stat().st_size,
+                remote_created_by_app=True,
             ),
         )
         save_workflow_state(updated, state_path)
@@ -1328,8 +1390,15 @@ class VimeoPublishingService:
                 {"items": [{"uri": video_uri}]},
             )
         except VimeoApiError as exc:
+            missing_interact = "interact" in exc.admin_hint.casefold() and "scope" in exc.admin_hint.casefold()
             raise VimeoFolderError(
-                "Das Video wurde hochgeladen, konnte aber nicht dem Vimeo-Zielordner zugeordnet werden.",
+                (
+                    "Vimeo-Upload erfolgreich, aber der Zielordner konnte nicht zugeordnet werden.\n"
+                    "Dem Vimeo-Token fehlt wahrscheinlich die Berechtigung ‚interact‘.\n"
+                    "Bitte unter Einstellungen → Vimeo einen passenden Token hinterlegen."
+                    if missing_interact
+                    else "Das Video wurde hochgeladen, konnte aber nicht dem Vimeo-Zielordner zugeordnet werden."
+                ),
                 exc.admin_hint,
             ) from exc
 

@@ -11,8 +11,11 @@ from .models import SermonInfo
 
 
 WORKFLOW_STATE_FILENAME = "predigt-workflow.json"
-WORKFLOW_STATE_SCHEMA_VERSION = 5
+WORKFLOW_STATE_SCHEMA_VERSION = 7
 STEP_STATUSES = frozenset({"pending", "in_progress", "complete", "failed", "stopped"})
+WORKFLOW_ORIGIN_NORMAL = "normal"
+WORKFLOW_ORIGIN_DIRECT_VIMEO = "direct_vimeo"
+WORKFLOW_ORIGINS = frozenset({WORKFLOW_ORIGIN_NORMAL, WORKFLOW_ORIGIN_DIRECT_VIMEO})
 
 
 @dataclass(frozen=True)
@@ -45,6 +48,7 @@ class VimeoState:
     upload_uri: str | None = None
     upload_offset: int | None = None
     upload_size: int | None = None
+    remote_created_by_app: bool = False
 
 
 @dataclass(frozen=True)
@@ -76,6 +80,7 @@ class WorkflowPaths:
 class WorkflowState:
     sermon: SermonInfo
     paths: WorkflowPaths
+    workflow_origin: str = WORKFLOW_ORIGIN_NORMAL
     local_preparation: StepState = field(default_factory=StepState)
     vimeo: VimeoState = field(default_factory=VimeoState)
     wordpress_audio: WordPressAudioState = field(default_factory=WordPressAudioState)
@@ -99,6 +104,7 @@ class WorkflowState:
         return cls(
             schema_version=int(data.get("schema_version", WORKFLOW_STATE_SCHEMA_VERSION)),
             updated_at=str(data.get("updated_at") or datetime.now(timezone.utc).isoformat()),
+            workflow_origin=_workflow_origin_from(data.get("workflow_origin")),
             sermon=SermonInfo(
                 sermon_date=date.fromisoformat(str(sermon_data["sermon_date"])),
                 title=str(sermon_data.get("title", "")),
@@ -204,6 +210,11 @@ def _optional_path(value: object) -> Path | None:
     return Path(str(value)) if value not in (None, "") else None
 
 
+def _workflow_origin_from(value: object) -> str:
+    origin = str(value or WORKFLOW_ORIGIN_NORMAL)
+    return origin if origin in WORKFLOW_ORIGINS else WORKFLOW_ORIGIN_NORMAL
+
+
 def _required_target_folder(paths: WorkflowPaths) -> Path:
     if paths.target_folder is None:
         raise ValueError("Zum Speichern fehlt der Zielordner im Workflow-Status.")
@@ -262,6 +273,7 @@ def _vimeo_from(value: object) -> VimeoState:
         upload_uri=_optional_text(data.get("upload_uri")),
         upload_offset=_optional_int(data.get("upload_offset")),
         upload_size=_optional_int(data.get("upload_size")),
+        remote_created_by_app=bool(data.get("remote_created_by_app", False)),
     )
 
 

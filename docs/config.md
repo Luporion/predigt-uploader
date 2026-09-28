@@ -212,14 +212,14 @@ Standard-Dienstarten koennen in Version 1 nicht geloescht werden.
 
 `open_target_folder = true` bedeutet: Nach erfolgreicher Verarbeitung oeffnet der Wizard den Zielordner im Explorer. Wenn das auf einem Rechner stoert, kann der Wert auf `false` gesetzt werden.
 
-`raw_archive_mode` steuert die Vorauswahl beim Aufraeumen der Rohaufnahme nach erfolgreichem Lauf:
+`raw_archive_mode` steuert, was nach erfolgreicher lokaler Verarbeitung mit der urspruenglichen Rohaufnahme geschieht:
 
 ```toml
 [workflow]
 raw_archive_mode = "move" # verschieben
 ```
 
-Moegliche Werte sind `move`, `none` und `copy`. Fuer normale Rohaufnahmen ist `move` sinnvoll, damit `vMixStorage` frei bleibt. Wenn die Datei bereits geschnitten wirkt, bleibt der Wizard aus Sicherheitsgruenden trotzdem bei der sicheren Vorauswahl „liegen lassen“.
+Moegliche Werte sind `move`, `keep` und `copy`. Fehlt der Wert, gilt `move`. Die Rohaufnahme wird erst verschoben, nachdem finale MP4, MP3 und Zusammenfassung erfolgreich erzeugt wurden. Eine bereits fertig geschnittene MP4 und der Direct-Vimeo-Sonderweg besitzen keine Rohaufnahme-Aktion. Eine vorhandene ausdrueckliche Benutzerwahl wird beim Laden und Speichern beibehalten.
 
 ## Einstellungen im Startmenue
 
